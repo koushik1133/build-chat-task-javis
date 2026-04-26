@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Attio-inspired light palette: warm cream background, near-black text,
+   subtle hairline borders, soft purple accent. */
+@layer base {
+  :root {
+    --background: 36 24% 97%;     /* warm cream */
+    --foreground: 240 8% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 8% 10%;
+    --primary: 252 64% 58%;       /* refined indigo-purple */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 36 18% 94%;
+    --secondary-foreground: 240 8% 10%;
+    --muted: 36 18% 95%;
+    --muted-foreground: 240 5% 42%;
+    --accent: 252 64% 96%;
+    --accent-foreground: 252 64% 38%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 36 12% 88%;
+    --input: 36 12% 92%;
+    --ring: 252 64% 58%;
+    --radius: 0.55rem;
+  }
+
+  html, body { height: 100%; }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv11" 1;
+    letter-spacing: -0.005em;
+  }
+
+  h1, h2, h3, h4 { letter-spacing: -0.02em; }
+}
+
+@layer utilities {
+  .gradient-text {
+    background: linear-gradient(95deg, #6e56cf 0%, #4f46e5 50%, #0ea5e9 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .card-glow {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    box-shadow:
+      0 1px 0 0 hsl(36 12% 92% / 0.6),
+      0 1px 2px 0 hsl(36 12% 70% / 0.06);
+  }
+  .hairline { border-color: hsl(var(--border)); }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(36 10% 80%); border-radius: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: hsl(36 10% 70%); }
+}
+
+/* highlight.js — atom-one-light, trimmed */
+.hljs { color: #383a42; background: #f5f5f0; padding: 0.85rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.85em; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-strong, .hljs-name { color: #a626a4; }
+.hljs-string, .hljs-attr { color: #50a14f; }
+.hljs-number, .hljs-built_in, .hljs-class .hljs-title { color: #986801; }
+.hljs-title, .hljs-section, .hljs-function .hljs-title { color: #4078f2; }
+.hljs-comment, .hljs-quote { color: #a0a1a7; font-style: italic; }
+.hljs-variable, .hljs-template-variable { color: #e45649; }
