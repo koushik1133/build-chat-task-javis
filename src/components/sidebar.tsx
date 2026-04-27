@@ -11,6 +11,7 @@ import {
   LogOut,
   Plus,
   Sparkles,
+  Wand2,
 } from "lucide-react";
 import { cn, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import { Button } from "@/components/ui/button";
 type Chat = { id: string; title: string; updated_at: string };
 
 const NAV = [
+  { href: "/build", label: "Build", icon: Wand2 },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/files", label: "Files", icon: FileText },
   { href: "/github", label: "GitHub", icon: Github },
