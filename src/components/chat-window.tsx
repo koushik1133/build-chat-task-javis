@@ -114,7 +114,7 @@ export function ChatWindow({
                 send();
               }
             }}
-            placeholder="Ask about your code, files, or paste a stack trace…"
+            placeholder="Ask anything — code, study, life, planning, or just chat…"
             rows={2}
             className="resize-none"
           />
@@ -123,7 +123,7 @@ export function ChatWindow({
           </Button>
         </div>
         <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-muted-foreground">
-          Grounded in your uploaded files via Pinecone RAG. Shift+Enter for newline.
+          General-purpose AI, grounded in your uploaded files. Shift+Enter for newline.
         </p>
       </div>
     </div>
@@ -165,10 +165,14 @@ function Bubble({
 }
 
 const SUGGESTIONS = [
-  "Review the file I just uploaded and flag anything sketchy.",
-  "Summarize my notes into a 5-bullet study plan.",
+  "Plan a 7-day high-protein meal plan for a college student.",
+  "Summarize my uploaded notes into a 5-bullet study guide.",
+  "Help me draft a polite email asking my professor for an extension.",
+  "Give me 3 weekend trip ideas under $300 from Iowa.",
   "Write a Postgres schema for a habit tracker app.",
-  "Explain async/await in TypeScript using my code style.",
+  "Explain how transformers work like I'm a CS senior.",
+  "Suggest a 30-minute beginner workout I can do at home.",
+  "Brainstorm side-project ideas that look great on a SWE resume.",
 ];
 
 function EmptyState({ onPick }: { onPick: (p: string) => void }) {
@@ -178,10 +182,11 @@ function EmptyState({ onPick }: { onPick: (p: string) => void }) {
         <Sparkles className="h-6 w-6 text-primary" />
       </div>
       <h1 className="text-2xl font-semibold tracking-tight">
-        <span className="gradient-text">Javis</span> — your dev co-pilot
+        <span className="gradient-text">Javis</span> — your everyday AI assistant
       </h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Ask anything. Your uploaded files and chat history give Javis context.
+        Ask anything — coding, study help, life advice, planning, or just chat.
+        Your uploaded files give Javis extra context.
       </p>
       <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
         {SUGGESTIONS.map((s) => (
