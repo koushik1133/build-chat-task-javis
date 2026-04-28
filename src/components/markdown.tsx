@@ -16,8 +16,11 @@ export function Markdown({ children }: { children: string }) {
   return (
     <div
       ref={ref}
-      className="prose prose-invert max-w-none text-sm leading-relaxed
+      className="prose max-w-none text-sm leading-relaxed
                  [&>*]:my-2 [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2
+                 [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground
+                 [&_p]:text-foreground [&_li]:text-foreground [&_strong]:text-foreground
+                 [&_blockquote]:text-muted-foreground [&_blockquote]:border-border
                  [&_pre]:my-3 [&_pre]:!bg-transparent [&_pre]:!p-0
                  [&_code]:rounded [&_:not(pre)>code]:bg-secondary
                  [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5

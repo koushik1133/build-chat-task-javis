@@ -119,3 +119,38 @@ create policy "user uploads own files" on storage.objects
 drop policy if exists "user deletes own files" on storage.objects;
 create policy "user deletes own files" on storage.objects
   for delete using (bucket_id = 'files' and auth.uid()::text = (storage.foldername(name))[1]);
+
+-- ===== site_leads =====
+create table if not exists public.site_leads (
+  id uuid primary key default gen_random_uuid(),
+  site_id uuid not null references public.sites(id) on delete cascade,
+  data jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists site_leads_site_idx on public.site_leads(site_id, created_at desc);
+
+alter table public.site_leads enable row level security;
+
+drop policy if exists "owner reads leads" on public.site_leads;
+create policy "owner reads leads" on public.site_leads
+  for select using (
+    exists (select 1 from public.sites where id = site_leads.site_id and user_id = auth.uid())
+  );
+
+-- ===== site_analytics =====
+create table if not exists public.site_analytics (
+  id uuid primary key default gen_random_uuid(),
+  site_id uuid not null references public.sites(id) on delete cascade,
+  path text not null,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+create index if not exists site_analytics_site_idx on public.site_analytics(site_id, created_at desc);
+
+alter table public.site_analytics enable row level security;
+
+drop policy if exists "owner reads analytics" on public.site_analytics;
+create policy "owner reads analytics" on public.site_analytics
+  for select using (
+    exists (select 1 from public.sites where id = site_analytics.site_id and user_id = auth.uid())
+  );

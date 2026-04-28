@@ -9,11 +9,12 @@ Return ONE complete, self-contained HTML5 document.
 OUTPUT REQUIREMENTS:
 - inline <style> only — no external CSS frameworks, no Tailwind CDN, no React
 - Google Fonts <link> for typography (pick fonts that match the theme brief)
-- inline <script> only if essential and minimal
+- inline <script> only if essential and minimal (e.g. for SPA routing or dark mode toggle)
 - semantic HTML: <header>, <main>, <section>, <footer>
-- Sections must be category-appropriate (use the SECTION GUIDE below). NEVER ship a generic 5-section page when the brief calls for something different.
+- MULTI-PAGE SPA STRUCTURE: Build the site as a Single Page Application (SPA). Create distinct 'pages' using <section id="home">, <section id="about">, etc. Write inline JavaScript to listen for hash changes and ensure ONLY the active section is visible at a time. The header navigation MUST use hash links (\`href="#about"\`) that trigger this visibility swap, creating a true multi-page website feel. Do NOT just stack all sections visibly on top of each other.
+- Sections must be category-appropriate (use the SECTION GUIDE below).
 - realistic copy matching the user's described business — NEVER lorem ipsum, NEVER "Your Name Here"
-- inline SVG illustrations or CSS gradients/patterns for visuals — NO external images, NO <img src="https://...">
+- inline SVG illustrations or CSS gradients/patterns for visuals — NO external images, NO <img src="https://...">, NO <video> tags, and NO random video backgrounds. Use CSS animations instead.
 
 NON-NEGOTIABLE LAYOUT RULES:
 - Body has zero padding. Background can extend full-width (e.g. for dark hero or accent bands).
@@ -21,8 +22,10 @@ NON-NEGOTIABLE LAYOUT RULES:
 - Header AND footer use the same .container width as main content. Header is sticky (position: sticky; top: 0) with backdrop-filter: blur(12px) + a translucent background.
 - Mobile breakpoint at ~768px: container padding shrinks to 16px, multi-column sections stack, hero font-size scales down.
 
-DESIGN SYSTEM (must be CONSISTENT throughout the page):
+DESIGN SYSTEM (must be STRICTLY CONSISTENT throughout the page):
 - Define CSS variables at the top of <style>: --primary, --primary-hover, --bg, --surface, --text, --text-muted, --border, --radius, --shadow-sm, --shadow-md.
+- MUST INCLUDE DARK MODE: Generate CSS variables for both \`.light\` and \`.dark\` classes. Add a Dark Mode toggle button (e.g. a sun/moon icon) in the header. Write a tiny inline \`<script>\` to toggle the \`.dark\` class on the \`<body>\` element when clicked, and respect the user's system preference on initial load.
+- STRICT COLOR CONSISTENCY: You MUST use the exact same hex codes and CSS variables for primary colors, buttons, active states, and typography across EVERY section. NEVER hallucinate new colors or variants. Colors MUST be consistent from top to bottom.
 - ONE border-radius scale. Pick a single value for --radius and apply it to ALL buttons, inputs, cards, images, badges. NEVER mix sharp corners with rounded ones.
 - ONE shadow scale: --shadow-sm (subtle, on cards) and --shadow-md (on hover or hero CTAs). Don't invent more.
 - Color palette: 3–4 colors max, derived from the theme brief.
@@ -59,6 +62,7 @@ CONTACT / LEAD FORM (THIS MUST LOOK GOOD):
 - Field spacing: 20px gap between fields.
 - Submit button: full width on mobile, auto on desktop, height 48px, background var(--primary), color white, font-weight 600, border-radius var(--radius), hover: background var(--primary-hover) + slight lift.
 - Below the form, a small disclaimer line in --text-muted: "We'll never share your info."
+- CONTACT FORM SUBMISSION (MANDATORY): If you include a contact form or lead capture form, you MUST attach an \`onsubmit\` handler to it. The handler must prevent default submission, gather all form inputs into a JSON object, and \`fetch(window.JAVIS_API_URL + '/api/leads/' + window.JAVIS_SITE_ID, { method: 'POST', body: JSON.stringify(data) })\`. Show a success message (e.g., "Thanks! We'll be in touch.") upon a 200 OK response. DO NOT hardcode a domain; ALWAYS use the \`window.JAVIS_*\` variables injected in the \`<head>\`.
 
 FOOTER:
 - Multi-column on desktop (brand + tagline left; contact, links right). Border-top: 1px solid var(--border), padding 48px 0 32px, margin-top 80px.
@@ -69,6 +73,16 @@ ACCESSIBILITY:
 - Color contrast must be at least 4.5:1 for body text.
 - Form inputs all have <label for=...>.
 - Buttons have aria-labels when their content is just an icon.
+
+CONTRAST & READABILITY (THIS IS THE #1 PRIORITY — if you get this wrong the site is unusable):
+- NEVER use white or near-white text on a white or light background. If --bg is light, --text MUST be dark (near-black). If --bg is dark, --text MUST be light (near-white).
+- Every text element must have an explicit \`color\` set — never rely on inheritance alone. At minimum: body, h1–h4, p, li, a, label, input, button, footer, .card headings.
+- Hero sections with gradient or image backgrounds MUST have a solid fallback color AND sufficient overlay to guarantee text readability. Add text-shadow for extra safety: text-shadow: 0 1px 3px rgba(0,0,0,0.3).
+- Form placeholder text: use a muted gray (e.g. #999), never the same as the background.
+- All body text must achieve at least 4.5:1 contrast ratio against its direct background.
+- Test your palette mentally: if --bg is #ffffff or any light color, --text must be #1a1a1a or similar. If --bg is #0f0f0f or dark, --text must be #f5f5f5 or similar.
+- Buttons: text color must contrast with the button background color. Primary buttons = white text on colored bg. Outline buttons = colored text on white bg + visible border.
+- Cards: if card background is white, card text must be dark. If card background is dark, card text must be light. Repeat for every surface.
 
 Return ONLY the raw HTML starting with <!doctype html>. No prose. No code fences. No commentary.`;
 
@@ -84,6 +98,9 @@ CRITICAL RULES (do not break these even if the user's instruction is vague):
 - Keep contact form using <label> above inputs, 44px input height, primary submit button.
 - Mobile-first responsive must continue to work.
 - Do NOT add external images, CDNs, or framework imports.
+- SPA INTEGRITY: Preserve the Single Page Application (SPA) structure and JavaScript routing. If you add a new section, ensure it participates in the hash-based visibility logic.
+- DARK MODE INTEGRITY: Preserve the .light/.dark CSS variables and the dark mode toggle JavaScript.
+- CONTRAST SAFETY: After applying the edit, verify that EVERY section still has readable text. If the edit changes background colors, update ALL text colors on that surface to maintain at least 4.5:1 contrast. Never leave white text on a light background or dark text on a dark background.
 
 Return ONLY the full updated HTML starting with <!doctype html>. No prose. No code fences.`;
 

@@ -19,7 +19,7 @@ export type Theme = {
   brief: string; // injected into the generation prompt
   swatch: string; // tailwind gradient classes (legacy; not relied on)
   /** Explicit hex palette: [primary, secondary, background]. Rendered as the card preview + dot row. */
-  colors: [string, string, string];
+  colors?: [string, string, string];
   fonts?: string; // optional font hint
 };
 
@@ -106,6 +106,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Warm, professional tone. Earth tones (deep blue or forest green primary, cream background). Real photo-style hero with strong USP. Trust badges row, big phone CTA in header.",
         swatch: "from-emerald-600 to-teal-700",
+        colors: ["#059669", "#0f766e", "#ffffff"],
       },
       {
         id: "bold-confident",
@@ -113,6 +114,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Strong primary color (red, orange, or navy), big bold headline (clamp(3rem,6vw,5rem)), oversized CTA button. Industrial / no-nonsense feel.",
         swatch: "from-orange-500 to-red-600",
+        colors: ["#f97316", "#dc2626", "#ffffff"],
       },
       {
         id: "family-warm",
@@ -120,6 +122,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Cream background, hand-drawn-feel SVG accents, amber or burgundy primary. Story-led hero ('Three generations of...'), testimonial-heavy, soft serif headings.",
         swatch: "from-amber-400 to-rose-500",
+        colors: ["#fbbf24", "#f43f5e", "#ffffff"],
       },
       {
         id: "modern-minimal",
@@ -127,6 +130,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Clean white/near-white. Single accent color. Grid-based layout. Sans-serif everything. Subtle micro-animations on scroll.",
         swatch: "from-slate-600 to-slate-900",
+        colors: ["#475569", "#0f172a", "#ffffff"],
       },
     ],
     topFeatures: [
@@ -206,6 +210,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Saturated brand color, oversized product imagery, big SHOP NOW CTAs, dense featured-product grid. Drop-shipping / fashion energy.",
         swatch: "from-fuchsia-500 to-pink-600",
+        colors: ["#d946ef", "#db2777", "#ffffff"],
       },
       {
         id: "editorial-boutique",
@@ -213,6 +218,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Magazine-feel. Large serif display headings, tons of whitespace, ultra-clean cream/off-white background. Premium boutique aesthetic.",
         swatch: "from-stone-300 to-stone-700",
+        colors: ["#d6d3d1", "#44403c", "#ffffff"],
         fonts: "serif display (Playfair / Cormorant) + clean sans body",
       },
       {
@@ -221,6 +227,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Bright accent (yellow/red), countdown timer in hero, badge-heavy ('NEW', 'BESTSELLER'), urgency copy, full-bleed sale strip across the top.",
         swatch: "from-yellow-400 to-orange-500",
+        colors: ["#facc15", "#f97316", "#ffffff"],
       },
       {
         id: "calm-premium",
@@ -228,6 +235,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Muted earth palette (clay, sage, bone). Generous whitespace, slow scroll-reveals, large product photography that breathes. Apple/Aesop feel.",
         swatch: "from-stone-500 to-emerald-700",
+        colors: ["#78716c", "#047857", "#ffffff"],
       },
     ],
     topFeatures: [
@@ -308,6 +316,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Pure dark background (#08090a), thin neutral borders, indigo/violet accent gradient on CTA, monospaced labels, blurred glow behind hero, ultra-tight letter-spacing on headlines.",
         swatch: "from-indigo-500 to-violet-700",
+        colors: ["#6366f1", "#6d28d9", "#ffffff"],
       },
       {
         id: "stripe-gradient",
@@ -315,6 +324,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Iridescent multi-stop gradient hero (purple→blue→teal), white card-grid sections below, small badge labels above each section, generous spacing.",
         swatch: "from-blue-500 via-violet-500 to-pink-500",
+        colors: ["#3b82f6", "#8b5cf6", "#ec4899"],
       },
       {
         id: "notion-soft",
@@ -322,6 +332,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Off-white background, friendly emoji-led sections, hand-drawn-feel SVG illustrations, soft grays and a single accent color, chunky rounded buttons.",
         swatch: "from-stone-300 to-zinc-500",
+        colors: ["#d6d3d1", "#71717a", "#ffffff"],
       },
       {
         id: "apple-hero",
@@ -329,6 +340,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Massive headline (clamp(3rem,7vw,6rem)), white background, tiny subhead, single product image / SVG centered. Section transitions are full-bleed color blocks.",
         swatch: "from-zinc-100 to-zinc-700",
+        colors: ["#f4f4f5", "#3f3f46", "#ffffff"],
       },
     ],
     topFeatures: [
@@ -417,6 +429,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Massive editorial display type as the hero (single name across the screen). Cursor-led interactions, monochrome with one accent color, project grid with hover-reveals.",
         swatch: "from-zinc-900 to-zinc-700",
+        colors: ["#18181b", "#3f3f46", "#ffffff"],
         fonts: "tight display sans (e.g. Inter Tight, Sohne) at 12rem+",
       },
       {
@@ -425,6 +438,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Serif headlines, two-column body copy, drop-caps on bio, large numbered project list, cream paper background. Long-form-friendly.",
         swatch: "from-amber-200 to-stone-600",
+        colors: ["#fde68a", "#57534e", "#ffffff"],
         fonts: "serif (Playfair, Tiempos) headings + serif body",
       },
       {
@@ -433,14 +447,16 @@ export const CATEGORIES: Category[] = [
         brief:
           "Pure white, thin grid lines, monospaced project labels, 3-column project grid, no animations, ultimate restraint. Designer-favorite.",
         swatch: "from-white to-zinc-300",
+        colors: ["#ffffff", "#d4d4d8", "#ffffff"],
         fonts: "geometric sans + monospaced labels",
       },
       {
         id: "cinematic-dark",
         label: "Cinematic Dark",
         brief:
-          "Black background, fullscreen project covers, autoplaying muted video hero, very thin sans-serif type, white-on-black throughout. Filmmaker / photographer favorite.",
+          "Black background, fullscreen project covers, smooth CSS-based animations, dynamic interactive gradients, very thin sans-serif type, white-on-black throughout. Filmmaker / photographer favorite.",
         swatch: "from-black to-zinc-700",
+        colors: ["#000000", "#3f3f46", "#ffffff"],
       },
       {
         id: "playful-color",
@@ -448,6 +464,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Bright unexpected color combos (acid green + magenta), wobbly-rotated SVG shapes in the background, oversized rounded buttons, friendly imperfect feel.",
         swatch: "from-lime-400 to-pink-500",
+        colors: ["#a3e635", "#ec4899", "#ffffff"],
       },
     ],
     topFeatures: [
@@ -536,6 +553,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Tight grid, oversized date hero, speaker portrait grid, schedule timeline, bright-on-black sponsor logos. Clarity > decoration.",
         swatch: "from-blue-600 to-indigo-700",
+        colors: ["#2563eb", "#4338ca", "#ffffff"],
       },
       {
         id: "wedding-elegant",
@@ -543,6 +561,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Soft cream + blush palette, romantic serif display, hand-drawn floral SVG accents, generous whitespace, RSVP form as the closer.",
         swatch: "from-rose-200 to-rose-500",
+        colors: ["#fecdd3", "#f43f5e", "#ffffff"],
         fonts: "elegant serif (Cormorant, Playfair)",
       },
       {
@@ -551,6 +570,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "High-saturation gradient hero, big lineup-poster-style typography, sticker-style badges, animated marquee strip with dates/cities.",
         swatch: "from-violet-500 via-orange-400 to-yellow-300",
+        colors: ["#8b5cf6", "#fb923c", "#fde047"],
       },
       {
         id: "meetup-friendly",
@@ -558,6 +578,7 @@ export const CATEGORIES: Category[] = [
         brief:
           "Approachable casual tone, soft pastel background, big 'Join the next one' CTA, recent-events recap section, friendly emoji headers.",
         swatch: "from-teal-300 to-sky-500",
+        colors: ["#5eead4", "#0ea5e9", "#ffffff"],
       },
     ],
     topFeatures: [
@@ -611,24 +632,28 @@ export const CATEGORIES: Category[] = [
         label: "Modern",
         brief: "Clean, modern sans-serif, neutral palette, single accent color, generous whitespace.",
         swatch: "from-slate-700 to-slate-900",
+        colors: ["#334155", "#0f172a", "#ffffff"],
       },
       {
         id: "warm",
         label: "Warm",
         brief: "Warm amber/orange palette, friendly serif, soft backgrounds.",
         swatch: "from-amber-400 to-orange-500",
+        colors: ["#fbbf24", "#f97316", "#ffffff"],
       },
       {
         id: "playful",
         label: "Playful",
         brief: "Bright color combos, rounded shapes, casual tone, soft animations.",
         swatch: "from-pink-400 to-purple-500",
+        colors: ["#f472b6", "#a855f7", "#ffffff"],
       },
       {
         id: "professional",
         label: "Professional",
         brief: "Deep blue/navy, conservative type, structured grid layout.",
         swatch: "from-blue-700 to-indigo-700",
+        colors: ["#1d4ed8", "#4338ca", "#ffffff"],
       },
     ],
     topFeatures: [
