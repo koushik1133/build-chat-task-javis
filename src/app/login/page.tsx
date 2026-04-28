@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -14,8 +16,17 @@ export default function LoginPage() {
 
   useEffect(() => {
     const e = new URLSearchParams(window.location.search).get("error");
-    if (e) setError(decodeURIComponent(e));
-  }, []);
+    if (e && e !== "missing_code") setError(decodeURIComponent(e));
+
+    const supabase = createClient();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        router.push("/chat");
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router]);
 
   async function sendMagicLink(e: React.FormEvent) {
     e.preventDefault();
