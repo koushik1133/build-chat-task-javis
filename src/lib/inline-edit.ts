@@ -77,13 +77,28 @@ export const INLINE_EDIT_SCRIPT = `
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
       var clone = document.documentElement.cloneNode(true);
-      var s = clone.querySelector("#jarvis-edit-script"); if (s) s.remove();
-      var st = clone.querySelector("#jarvis-edit-style"); if (st) st.remove();
-      var ts = clone.querySelector("#jarvis-edit-toast"); if (ts) ts.remove();
+      
+      // Remove all Jarvis scripts and elements
+      ['#jarvis-builder-engine', '#jarvis-edit-script', '#jarvis-edit-style', '#jarvis-edit-toast'].forEach(function(selector) {
+        var el = clone.querySelector(selector);
+        if (el) el.remove();
+      });
+
       clone.querySelectorAll("[data-jarvis-editable]").forEach(function (el) {
         el.removeAttribute("data-jarvis-editable");
         el.removeAttribute("contenteditable");
       });
+
+      clone.querySelectorAll('[data-jarvis-dnd]').forEach(function(el) {
+        el.removeAttribute('data-jarvis-dnd');
+        el.removeAttribute('draggable');
+        el.style.cursor = '';
+        el.style.opacity = '';
+        el.style.borderTop = '';
+        el.style.borderBottom = '';
+        if (el.getAttribute('style') === '') el.removeAttribute('style');
+      });
+
       var html = "<!doctype html>\\n" + clone.outerHTML;
       window.parent.postMessage({ type: "jarvis:save", html: html }, "*");
       showToast("Saved");
