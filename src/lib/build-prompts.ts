@@ -53,7 +53,7 @@ HERO RULES:
 CARDS / GRID SECTIONS:
 - Grid of 3 (desktop) / 1 (mobile)
 - Each card: padding 24–32px, border: 1px solid var(--border), border-radius: var(--radius), background: var(--surface), shadow-sm. On hover: shadow-md + slight translateY(-2px) + transition 200ms.
-- REORDERING: Add the attribute `data-jarvis-item="true"` to every top-level card or box element within a grid. This allows the user to reorder items within the section using drag-and-drop.
+- REORDERING: Add the attribute \`data-jarvis-item="true"\` to every top-level card or box element within a grid. This allows the user to reorder items within the section using drag-and-drop.
 
 CONTACT / LEAD FORM (THIS MUST LOOK GOOD):
 - Wrap form in a card with the same surface/border/radius as other cards. Padding 32px on desktop.
