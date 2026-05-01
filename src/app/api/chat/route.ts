@@ -67,9 +67,17 @@ export async function POST(req: Request) {
     ...past,
   ];
 
-  const stream = await streamChat(messages);
+  // 4. Call Groq — return a clean JSON error instead of a raw 500 if it fails.
+  let stream: Awaited<ReturnType<typeof streamChat>>;
+  try {
+    stream = await streamChat(messages);
+  } catch (e) {
+    const msg = (e as Error).message ?? "LLM call failed";
+    console.error("[chat] streamChat error:", msg);
+    return NextResponse.json({ error: msg }, { status: 502 });
+  }
 
-  // 4. Stream raw text chunks. Persist the full assistant turn at end-of-stream.
+  // 5. Stream raw text chunks. Persist the full assistant turn at end-of-stream.
   const encoder = new TextEncoder();
   const finalChatId = chatId as string;
   const readable = new ReadableStream({

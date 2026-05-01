@@ -1,10 +1,14 @@
 import { Pinecone } from "@pinecone-database/pinecone";
 
-// Single shared client. Pinecone handles embeddings inline via "integrated
-// inference" — we never send vectors ourselves, just text + metadata.
+// Single shared client. Pinecone handles embeddings via "integrated inference".
+// If PINECONE_API_KEY is missing all functions throw — callers must .catch(() => []).
 let _pc: Pinecone | null = null;
-function pc() {
-  if (!_pc) _pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! });
+function pc(): Pinecone {
+  if (!_pc) {
+    const key = process.env.PINECONE_API_KEY;
+    if (!key) throw new Error("PINECONE_API_KEY not set");
+    _pc = new Pinecone({ apiKey: key });
+  }
   return _pc;
 }
 
