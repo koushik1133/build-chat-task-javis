@@ -44,15 +44,23 @@ export async function POST(req: Request) {
   // Old-style plan (no category schema) — fall back to the generic suggester.
   if (!category) {
     const brief = `Persona: ${site.persona ?? "unknown"}\nTitle: ${site.title}\nPlan: ${JSON.stringify(plan)}`;
-    const result = await completeJson<{
-      features: { title: string; why: string }[];
-    }>(
-      [
-        { role: "system", content: FEATURE_SUGGESTIONS_SYS },
-        { role: "user", content: brief },
-      ],
-      `{"features":[{"title":string,"why":string}]}`
-    );
+    let result: { features: { title: string; why: string }[] } | null = null;
+    try {
+      result = await completeJson<{
+        features: { title: string; why: string }[];
+      }>(
+        [
+          { role: "system", content: FEATURE_SUGGESTIONS_SYS },
+          { role: "user", content: brief },
+        ],
+        `{"features":[{"title":string,"why":string}]}`
+      );
+    } catch {
+      return NextResponse.json({
+        headline: "Suggested features",
+        features: [],
+      });
+    }
     return NextResponse.json({
       headline: "Suggested features for your site",
       features: result?.features ?? [],
@@ -77,16 +85,24 @@ export async function POST(req: Request) {
     ...category.topFeatures.map((f, i) => `${i + 1}. ${f.title} — ${f.why}`),
   ].join("\n");
 
-  const result = await completeJson<{
-    headline: string;
-    features: { title: string; why: string }[];
-  }>(
-    [
-      { role: "system", content: NICHE_FEATURES_SYS },
-      { role: "user", content: briefForLLM },
-    ],
-    `{"headline":string,"features":[{"title":string,"why":string}]}`
-  );
+  let result: { headline: string; features: { title: string; why: string }[] } | null = null;
+  try {
+    result = await completeJson<{
+      headline: string;
+      features: { title: string; why: string }[];
+    }>(
+      [
+        { role: "system", content: NICHE_FEATURES_SYS },
+        { role: "user", content: briefForLLM },
+      ],
+      `{"headline":string,"features":[{"title":string,"why":string}]}`
+    );
+  } catch {
+    return NextResponse.json({
+      headline: `Used by top ${category.label.toLowerCase()} websites today`,
+      features: category.topFeatures,
+    });
+  }
 
   if (!result) {
     return NextResponse.json({

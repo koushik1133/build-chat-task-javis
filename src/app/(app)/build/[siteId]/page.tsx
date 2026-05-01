@@ -33,6 +33,19 @@ import { cn } from "@/lib/utils";
 import { injectEditScript } from "@/lib/inline-edit";
 import { BUILDER_ENGINE_SCRIPT } from "@/lib/builder-engine";
 
+async function safeJson(r: Response) {
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      r.ok
+        ? `Unexpected response (${r.status})`
+        : `Server error (${r.status}): ${text.slice(0, 120)}`
+    );
+  }
+}
+
 type Site = {
   id: string;
   title: string;
@@ -79,13 +92,13 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/build/sites/${siteId}`);
-    const data = await r.json();
+    const data = await safeJson(r);
     if (r.ok) setSite(data.site);
   }, [siteId]);
 
   const loadHistory = useCallback(async (selectLatest = true) => {
     const r = await fetch(`/api/build/sites/${siteId}/history`);
-    const data = await r.json();
+    const data = await safeJson(r);
     if (r.ok) {
       const revs: Revision[] = data.revisions ?? [];
       setRevisions(revs);
@@ -107,7 +120,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ siteId }),
       })
-        .then((r) => r.json())
+        .then((r) => safeJson(r))
         .then((d) => {
           setFeatures(d.features ?? []);
           setFeaturesHeadline(d.headline ?? "");
@@ -134,7 +147,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ siteId, html: data.html }),
         })
-          .then((r) => r.json())
+          .then((r) => safeJson(r))
           .then(() => {
             setSite((s) => (s ? { ...s, html: data.html } : s));
             setSavedFlash(true);
@@ -150,7 +163,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ siteId, instruction, source: "feature" }),
         })
-          .then((r) => r.json())
+          .then((r) => safeJson(r))
           .then((d) => {
             if (d.error) throw new Error(d.error);
             load();
@@ -177,7 +190,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ siteId, instruction, source }),
       });
-      const data = await r.json();
+      const data = await safeJson(r);
       if (!r.ok) throw new Error(data.error ?? "Refine failed");
       await load();
       await loadHistory(true);
@@ -204,7 +217,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ siteId }),
       });
-      const d = await r.json();
+      const d = await safeJson(r);
       setIssues(d.issues ?? []);
     } finally {
       setBusy(null);
@@ -220,7 +233,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ revisionId }),
       });
-      const data = await r.json();
+      const data = await safeJson(r);
       if (!r.ok) throw new Error(data.error ?? "Revert failed");
       setSite((s) => (s ? { ...s, html: data.html } : s));
       setCurrentRevisionId(revisionId);
@@ -769,7 +782,7 @@ function PublishModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repoName: name, enablePages }),
       });
-      const data = await r.json();
+      const data = await safeJson(r);
       if (!r.ok) throw new Error(data.error ?? "Publish failed");
       setResult({ repoUrl: data.repoUrl, pagesUrl: data.pagesUrl });
     } catch (e) {
@@ -928,7 +941,7 @@ function LeadsPanel({ siteId }: { siteId: string }) {
   const loadLeads = useCallback(async () => {
     try {
       const r = await fetch(`/api/build/sites/${siteId}/leads`);
-      const data = await r.json();
+      const data = await safeJson(r);
       if (!r.ok) throw new Error(data.error ?? "Failed to load leads");
       setLeads(data.leads ?? []);
     } catch (e) {
@@ -1019,7 +1032,7 @@ function AnalyticsPanel({ siteId }: { siteId: string }) {
   const load = useCallback(async () => {
     try {
       const r = await fetch(`/api/build/sites/${siteId}/analytics`);
-      const d = await r.json();
+      const d = await safeJson(r);
       if (!r.ok) throw new Error(d.error ?? "Failed to load");
       setData(d.analytics ?? []);
     } catch(e) {

@@ -35,13 +35,21 @@ export async function POST(req: Request) {
   if (gErr || !site)
     return NextResponse.json({ error: "site not found" }, { status: 404 });
 
-  const updated = await complete([
-    { role: "system", content: SITE_REFINE_SYS },
-    {
-      role: "user",
-      content: `User instruction:\n${instruction}\n\nCurrent HTML:\n${site.html}`,
-    },
-  ]);
+  let updated: string;
+  try {
+    updated = await complete([
+      { role: "system", content: SITE_REFINE_SYS },
+      {
+        role: "user",
+        content: `User instruction:\n${instruction}\n\nCurrent HTML:\n${site.html}`,
+      },
+    ]);
+  } catch (e) {
+    return NextResponse.json(
+      { error: "AI call failed: " + (e as Error).message },
+      { status: 502 }
+    );
+  }
 
   const cleaned = stripFences(updated);
   if (!cleaned.toLowerCase().includes("<!doctype")) {

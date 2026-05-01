@@ -35,12 +35,17 @@ export async function POST(req: Request) {
   if (!site)
     return NextResponse.json({ error: "site not found" }, { status: 404 });
 
-  const result = await completeJson<{ issues: Issue[] }>(
-    [
-      { role: "system", content: SECURITY_REVIEW_SYS },
-      { role: "user", content: site.html },
-    ],
-    `{"issues":[{"severity":"low|medium|high","title":string,"explain":string,"fix":string}]}`
-  );
+  let result: { issues: Issue[] } | null = null;
+  try {
+    result = await completeJson<{ issues: Issue[] }>(
+      [
+        { role: "system", content: SECURITY_REVIEW_SYS },
+        { role: "user", content: site.html },
+      ],
+      `{"issues":[{"severity":"low|medium|high","title":string,"explain":string,"fix":string}]}`
+    );
+  } catch {
+    return NextResponse.json({ issues: [] });
+  }
   return NextResponse.json({ issues: result?.issues ?? [] });
 }
