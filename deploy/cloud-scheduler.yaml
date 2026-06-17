@@ -1,0 +1,18 @@
+# Cloud Scheduler job — fires the automation cron every minute
+# Deploy with:
+#   gcloud scheduler jobs create http javis-automations \
+#     --schedule="* * * * *" \
+#     --uri="https://YOUR_CLOUD_RUN_URL/api/cron/automations" \
+#     --http-method=GET \
+#     --headers="Authorization=Bearer YOUR_CRON_SECRET" \
+#     --oidc-service-account-email=javis-scheduler@YOUR_PROJECT.iam.gserviceaccount.com \
+#     --location=us-central1
+name: javis-automations
+schedule: "* * * * *"
+timeZone: UTC
+target:
+  httpTarget:
+    uri: "https://YOUR_CLOUD_RUN_URL/api/cron/automations"
+    httpMethod: GET
+    headers:
+      Authorization: "Bearer YOUR_CRON_SECRET"

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
 import { completeJson } from "@/lib/llm";
 import { SECURITY_REVIEW_SYS } from "@/lib/build-prompts";
+import { queryOne } from "@/lib/dsql";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -17,9 +18,9 @@ type Issue = {
 };
 
 export async function POST(req: Request) {
-  let supabase;
+  let user;
   try {
-    ({ supabase } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -27,11 +28,10 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: "bad request" }, { status: 400 });
 
-  const { data: site } = await supabase
-    .from("sites")
-    .select("html")
-    .eq("id", parsed.data.siteId)
-    .single();
+  const site = await queryOne<{ html: string }>(
+    "SELECT html FROM sites WHERE id = $1 AND user_id = $2",
+    [parsed.data.siteId, user.id]
+  );
   if (!site)
     return NextResponse.json({ error: "site not found" }, { status: 404 });
 
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     result = await completeJson<{ issues: Issue[] }>(
       [
         { role: "system", content: SECURITY_REVIEW_SYS },
-        { role: "user", content: site.html },
+        { role: "user", content: site.html as string },
       ],
       `{"issues":[{"severity":"low|medium|high","title":string,"explain":string,"fix":string}]}`
     );

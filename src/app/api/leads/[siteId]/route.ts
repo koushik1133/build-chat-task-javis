@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { query, queryOne } from "@/lib/dsql";
 
 export const runtime = "nodejs";
 
@@ -14,83 +14,37 @@ export async function OPTIONS() {
   return NextResponse.json({}, { status: 200, headers: corsHeaders });
 }
 
+/**
+ * Public lead-capture endpoint — called by contact forms inside generated sites.
+ * Stores form data as JSON text in Aurora DSQL site_leads table.
+ */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ siteId: string }> }
 ) {
   try {
     const { siteId } = await params;
-    
-    // Validate siteId is a valid UUID
+
     if (!z.string().uuid().safeParse(siteId).success) {
-      return NextResponse.json({ error: "Invalid site ID format" }, { status: 400, headers: corsHeaders });
+      return NextResponse.json(
+        { error: "Invalid site ID format" },
+        { status: 400, headers: corsHeaders }
+      );
     }
 
     const data = await req.json();
 
-    // Use the Service Role Key to bypass RLS, because this is an unauthenticated submission
-    // and we didn't open anonymous inserts to the public table (to prevent spam directly to DB).
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json(
-        { error: "Server configuration error" },
-        { status: 500, headers: corsHeaders }
-      );
-    }
-
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Verify site exists first
-    const { data: site, error: siteErr } = await supabaseAdmin
-      .from("sites")
-      .select("id, user_id, title")
-      .eq("id", siteId)
-      .single();
-
-    if (siteErr || !site) {
+    // Application-layer integrity check — verify site exists
+    const site = await queryOne("SELECT id FROM sites WHERE id = $1", [siteId]);
+    if (!site) {
       return NextResponse.json({ error: "Site not found" }, { status: 404, headers: corsHeaders });
     }
 
-    // Insert lead
-    const { error: insertErr } = await supabaseAdmin
-      .from("site_leads")
-      .insert({
-        site_id: siteId,
-        data,
-      });
-
-    if (insertErr) {
-      return NextResponse.json({ error: "Failed to save lead" }, { status: 500, headers: corsHeaders });
-    }
-
-    // Try sending email notification via Resend
-    const resendKey = process.env.RESEND_API_KEY;
-    const resendFrom = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
-    if (resendKey) {
-      try {
-        const { data: userData } = await supabaseAdmin.auth.admin.getUserById(site.user_id);
-        const email = userData?.user?.email;
-        if (email) {
-          await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${resendKey}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              from: resendFrom,
-              to: [email],
-              subject: `New Lead for your site: ${site.title || siteId}`,
-              html: `<p>You have received a new lead!</p><pre>${JSON.stringify(data, null, 2)}</pre>`
-            })
-          });
-        }
-      } catch (e) {
-        console.error("Failed to send email notification", e);
-      }
-    }
+    // data is stored as TEXT in DSQL (JSON.stringify)
+    await query(
+      "INSERT INTO site_leads (site_id, data) VALUES ($1, $2)",
+      [siteId, JSON.stringify(data)]
+    );
 
     return NextResponse.json({ success: true }, { status: 200, headers: corsHeaders });
   } catch {

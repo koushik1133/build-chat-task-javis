@@ -1,21 +1,26 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
+import { query, queryOne } from "@/lib/dsql";
 
 export async function GET() {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const { data } = await supabase
-    .from("tasks")
-    .select("id,title,done,created_at,chat_id")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(100);
-  return NextResponse.json({ tasks: data ?? [] });
+
+  const tasks = await query(
+    `SELECT id, title, done, created_at, chat_id
+     FROM tasks
+     WHERE user_id = $1
+     ORDER BY created_at DESC
+     LIMIT 100`,
+    [user.id]
+  );
+
+  return NextResponse.json({ tasks });
 }
 
 const Patch = z.object({
@@ -25,46 +30,64 @@ const Patch = z.object({
 });
 
 export async function PATCH(req: Request) {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
   const parsed = Patch.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
-  const { id, ...patch } = parsed.data;
-  await supabase.from("tasks").update(patch).eq("id", id).eq("user_id", user.id);
+  const { id, done, title } = parsed.data;
+
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (done !== undefined) { sets.push(`done = $${i++}`); vals.push(done); }
+  if (title !== undefined) { sets.push(`title = $${i++}`); vals.push(title); }
+  if (sets.length === 0) return NextResponse.json({ ok: true });
+
+  vals.push(id, user.id);
+  await query(
+    `UPDATE tasks SET ${sets.join(", ")} WHERE id = $${i++} AND user_id = $${i}`,
+    vals
+  );
+
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(req: Request) {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await req.json();
-  await supabase.from("tasks").delete().eq("id", id).eq("user_id", user.id);
+  await query("DELETE FROM tasks WHERE id = $1 AND user_id = $2", [id, user.id]);
   return NextResponse.json({ ok: true });
 }
 
 const Create = z.object({ title: z.string().min(1).max(200) });
 
 export async function POST(req: Request) {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
   const parsed = Create.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
-  const { data } = await supabase
-    .from("tasks")
-    .insert({ user_id: user.id, title: parsed.data.title })
-    .select("id,title,done,created_at")
-    .single();
-  return NextResponse.json({ task: data });
+
+  const task = await queryOne(
+    `INSERT INTO tasks (user_id, title)
+     VALUES ($1, $2)
+     RETURNING id, title, done, created_at`,
+    [user.id, parsed.data.title]
+  );
+
+  return NextResponse.json({ task });
 }

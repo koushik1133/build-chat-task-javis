@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { query, queryOne } from "@/lib/dsql";
 import { extractText, chunkText } from "@/lib/chunk";
 import { upsertChunks, deleteFile as deleteFromVector } from "@/lib/pinecone";
 
@@ -9,18 +10,22 @@ export const maxDuration = 120;
 const MAX_BYTES = 15 * 1024 * 1024;
 
 export async function GET() {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const { data } = await supabase
-    .from("files")
-    .select("id,name,mime,size_bytes,chunk_count,created_at")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-  return NextResponse.json({ files: data ?? [] });
+
+  const files = await query(
+    `SELECT id, name, mime, size_bytes, chunk_count, created_at
+     FROM files
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [user.id]
+  );
+
+  return NextResponse.json({ files });
 }
 
 export async function POST(req: Request) {
@@ -55,7 +60,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "file appears empty" }, { status: 400 });
   }
 
-  // 2. Upload raw file to Storage (user-scoped folder for RLS).
+  // 2. Upload raw file to Supabase Storage (blob storage, not a database).
   const storagePath = `${user.id}/${Date.now()}-${file.name}`;
   const buf = Buffer.from(await file.arrayBuffer());
   const { error: upErr } = await supabase.storage
@@ -63,22 +68,16 @@ export async function POST(req: Request) {
     .upload(storagePath, buf, { contentType: file.type, upsert: false });
   if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
 
-  // 3. Row in `files` first so we have an id to reference in vector records.
-  const { data: row, error: insErr } = await supabase
-    .from("files")
-    .insert({
-      user_id: user.id,
-      name: file.name,
-      mime: file.type || null,
-      size_bytes: file.size,
-      storage_path: storagePath,
-      chunk_count: chunks.length,
-    })
-    .select("id")
-    .single();
-  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+  // 3. Write file metadata to Aurora DSQL.
+  const row = await queryOne<{ id: string }>(
+    `INSERT INTO files (user_id, name, mime, size_bytes, storage_path, chunk_count)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [user.id, file.name, file.type || null, file.size, storagePath, chunks.length]
+  );
+  if (!row) return NextResponse.json({ error: "insert failed" }, { status: 500 });
 
-  // 4. Upsert vectors. Pinecone embeds via integrated inference.
+  // 4. Upsert vectors into Pinecone.
   await upsertChunks(
     user.id,
     chunks.map((chunk_text, i) => ({
@@ -100,20 +99,19 @@ export async function DELETE(req: Request) {
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
   const { id } = await req.json();
-  const { data: file } = await supabase
-    .from("files")
-    .select("id,storage_path")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .single();
+  const file = await queryOne<{ id: string; storage_path: string | null }>(
+    "SELECT id, storage_path FROM files WHERE id = $1 AND user_id = $2",
+    [id, user.id]
+  );
   if (!file) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   await deleteFromVector(user.id, file.id).catch(() => {});
   if (file.storage_path) {
     await supabase.storage.from("files").remove([file.storage_path]).catch(() => {});
   }
-  await supabase.from("files").delete().eq("id", id).eq("user_id", user.id);
+  await query("DELETE FROM files WHERE id = $1 AND user_id = $2", [id, user.id]);
 
   return NextResponse.json({ ok: true });
 }

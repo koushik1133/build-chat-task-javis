@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { queryOne, query } from "@/lib/dsql";
 
 export const runtime = "nodejs";
 
@@ -7,35 +8,42 @@ export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
-  let supabase;
+  let user;
   try {
-    ({ supabase } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { id } = await ctx.params;
-  const { data, error } = await supabase
-    .from("sites")
-    .select("id,title,persona,plan,html,updated_at")
-    .eq("id", id)
-    .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
-  return NextResponse.json({ site: data });
+  const site = await queryOne(
+    `SELECT id, title, persona, plan, html, updated_at
+     FROM sites
+     WHERE id = $1 AND user_id = $2`,
+    [id, user.id]
+  );
+  if (!site) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // plan is stored as TEXT in DSQL — parse it back to JSON
+  return NextResponse.json({
+    site: {
+      ...site,
+      plan: site.plan ? JSON.parse(site.plan as string) : null,
+    },
+  });
 }
 
 export async function DELETE(
   _req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
-  let supabase;
+  let user;
   try {
-    ({ supabase } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const { error } = await supabase.from("sites").delete().eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await query("DELETE FROM sites WHERE id = $1 AND user_id = $2", [id, user.id]);
   return NextResponse.json({ ok: true });
 }

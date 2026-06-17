@@ -58,11 +58,28 @@ export async function completeJson<T>(
   }
 }
 
-export async function complete(messages: ChatMessage[]) {
-  const res = await client().chat.completions.create({
-    model: MODEL,
-    messages,
-    temperature: 0.4,
-  });
-  return res.choices[0]?.message?.content ?? "";
+export async function complete(
+  messages: ChatMessage[],
+  { retries = 3, maxTokens = 1024 }: { retries?: number; maxTokens?: number } = {}
+): Promise<string> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await client().chat.completions.create({
+        model: MODEL,
+        messages,
+        temperature: 0.4,
+        max_tokens: maxTokens,
+      });
+      return res.choices[0]?.message?.content ?? "";
+    } catch (err: unknown) {
+      const status = (err as { status?: number }).status;
+      if (status === 429 && attempt < retries) {
+        // Back off: 15s, 30s, 60s
+        await new Promise((r) => setTimeout(r, 15_000 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  return "";
 }

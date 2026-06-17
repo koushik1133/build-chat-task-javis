@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
 import { complete } from "@/lib/llm";
 import { SITE_REFINE_SYS } from "@/lib/build-prompts";
+import { queryOne, query } from "@/lib/dsql";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -14,9 +15,9 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -27,23 +28,21 @@ export async function POST(req: Request) {
   }
   const { siteId, instruction, source } = parsed.data;
 
-  const { data: site, error: gErr } = await supabase
-    .from("sites")
-    .select("id,html")
-    .eq("id", siteId)
-    .single();
-  if (gErr || !site)
-    return NextResponse.json({ error: "site not found" }, { status: 404 });
+  const site = await queryOne<{ id: string; html: string }>(
+    "SELECT id, html FROM sites WHERE id = $1 AND user_id = $2",
+    [siteId, user.id]
+  );
+  if (!site) return NextResponse.json({ error: "site not found" }, { status: 404 });
 
   let updated: string;
   try {
-    updated = await complete([
-      { role: "system", content: SITE_REFINE_SYS },
-      {
-        role: "user",
-        content: `User instruction:\n${instruction}\n\nCurrent HTML:\n${site.html}`,
-      },
-    ]);
+    updated = await complete(
+      [
+        { role: "system", content: SITE_REFINE_SYS },
+        { role: "user", content: `User instruction:\n${instruction}\n\nCurrent HTML:\n${site.html.slice(0, 8000)}` },
+      ],
+      { maxTokens: 8000 }
+    );
   } catch (e) {
     return NextResponse.json(
       { error: "AI call failed: " + (e as Error).message },
@@ -53,19 +52,14 @@ export async function POST(req: Request) {
 
   const cleaned = stripFences(updated);
   if (!cleaned.toLowerCase().includes("<!doctype")) {
-    return NextResponse.json(
-      { error: "model returned invalid HTML" },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: "model returned invalid HTML" }, { status: 502 });
   }
 
   let finalHtml = cleaned;
-  if (!finalHtml.includes('window.JAVIS_SITE_ID')) {
+  if (!finalHtml.includes("window.JAVIS_SITE_ID")) {
     const scriptTag = `\n<script>
   window.JAVIS_SITE_ID = "${siteId}";
   window.JAVIS_API_URL = "${process.env.NEXT_PUBLIC_APP_URL || ''}";
-  
-  // Analytics Tracker
   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
     fetch(window.JAVIS_API_URL + '/api/analytics/' + window.JAVIS_SITE_ID, {
       method: 'POST',
@@ -74,33 +68,25 @@ export async function POST(req: Request) {
     }).catch(() => {});
   }
 </script>\n`;
-    if (finalHtml.includes('</head>')) {
-      finalHtml = finalHtml.replace('</head>', `${scriptTag}</head>`);
-    } else {
-      finalHtml += scriptTag;
-    }
+    finalHtml = finalHtml.includes("</head>")
+      ? finalHtml.replace("</head>", `${scriptTag}</head>`)
+      : finalHtml + scriptTag;
   }
 
-  const { error: uErr } = await supabase
-    .from("sites")
-    .update({ html: finalHtml, updated_at: new Date().toISOString() })
-    .eq("id", siteId);
-  if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
+  await query(
+    "UPDATE sites SET html = $1, updated_at = NOW() WHERE id = $2",
+    [finalHtml, siteId]
+  );
 
-  await supabase.from("site_revisions").insert({
-    site_id: siteId,
-    user_id: user.id,
-    source,
-    prompt: instruction,
-    html: finalHtml,
-  });
+  await query(
+    `INSERT INTO site_revisions (site_id, user_id, source, prompt, html)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [siteId, user.id, source, instruction, finalHtml]
+  );
 
   return NextResponse.json({ ok: true });
 }
 
 function stripFences(s: string) {
-  return s
-    .replace(/^```(?:html)?\s*/i, "")
-    .replace(/```\s*$/i, "")
-    .trim();
+  return s.replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim();
 }

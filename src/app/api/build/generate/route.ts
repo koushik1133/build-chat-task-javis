@@ -9,6 +9,7 @@ import {
   type SitePlan,
 } from "@/lib/build-prompts";
 import { getCategory, getTheme } from "@/lib/build-categories";
+import { query, queryOne } from "@/lib/dsql";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -19,12 +20,13 @@ const Body = z.object({
   answers: z.record(z.string()),
   freeText: z.string().max(2000).optional(),
   resumeProfile: z.record(z.unknown()).optional(),
+  businessProfile: z.record(z.unknown()).optional(),
 });
 
 export async function POST(req: Request) {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -36,7 +38,7 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  const { category: categoryId, themeId, answers, freeText, resumeProfile } = parsed.data;
+  const { category: categoryId, themeId, answers, freeText, resumeProfile, businessProfile } = parsed.data;
 
   const category = getCategory(categoryId);
   const theme = getTheme(categoryId, themeId);
@@ -44,23 +46,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "unknown category or theme" }, { status: 400 });
   }
 
+  // Also fetch business profile from DB as fallback context
+  let resolvedProfile = businessProfile;
+  if (!resolvedProfile) {
+    const dbProfile = await queryOne(
+      "SELECT * FROM business_profile WHERE user_id = $1",
+      [user.id]
+    ).catch(() => null);
+    if (dbProfile) resolvedProfile = dbProfile as Record<string, unknown>;
+  }
+
   const niche = deriveNiche(answers, freeText);
-  const plan: SitePlan = {
-    category: categoryId,
-    themeId,
-    niche,
-    answers,
-    freeText,
-    resumeProfile,
-  };
+  const plan: SitePlan = { category: categoryId, themeId, niche, answers, freeText, resumeProfile, businessProfile: resolvedProfile };
   const brief = buildBriefFromPlan(plan, category, theme);
 
   let html: string;
   try {
-    html = await complete([
-      { role: "system", content: SITE_GENERATION_SYS },
-      { role: "user", content: brief },
-    ]);
+    html = await complete(
+      [
+        { role: "system", content: SITE_GENERATION_SYS },
+        { role: "user", content: brief },
+      ],
+      { maxTokens: 8000 }
+    );
   } catch (e) {
     console.error("[generate] LLM call failed:", e);
     return NextResponse.json(
@@ -78,13 +86,11 @@ export async function POST(req: Request) {
   }
 
   const title = deriveTitle(answers.businessName || answers.goal || category.label);
-
   const siteId = crypto.randomUUID();
+
   const scriptTag = `\n<script>
   window.JAVIS_SITE_ID = "${siteId}";
   window.JAVIS_API_URL = "${process.env.NEXT_PUBLIC_APP_URL || ''}";
-  
-  // Analytics Tracker
   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
     fetch(window.JAVIS_API_URL + '/api/analytics/' + window.JAVIS_SITE_ID, {
       method: 'POST',
@@ -94,43 +100,30 @@ export async function POST(req: Request) {
   }
 </script>\n`;
   let finalHtml = cleaned;
-  if (finalHtml.includes('</head>')) {
-    finalHtml = finalHtml.replace('</head>', `${scriptTag}</head>`);
-  } else {
-    finalHtml += scriptTag;
-  }
+  finalHtml = finalHtml.includes("</head>")
+    ? finalHtml.replace("</head>", `${scriptTag}</head>`)
+    : finalHtml + scriptTag;
 
-  const { data: site, error } = await supabase
-    .from("sites")
-    .insert({
-      id: siteId,
-      user_id: user.id,
-      title,
-      persona: categoryId,
-      plan,
-      html: finalHtml,
-    })
-    .select("id")
-    .single();
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  // Insert into Aurora DSQL — plan stored as JSON string (DSQL stores JSON as TEXT)
+  const site = await queryOne<{ id: string }>(
+    `INSERT INTO sites (id, user_id, title, persona, plan, html)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [siteId, user.id, title, categoryId, JSON.stringify(plan), finalHtml]
+  );
+  if (!site) return NextResponse.json({ error: "insert failed" }, { status: 500 });
 
-  await supabase.from("site_revisions").insert({
-    site_id: site.id,
-    user_id: user.id,
-    source: "initial",
-    prompt: brief,
-    html: finalHtml,
-  });
+  await query(
+    `INSERT INTO site_revisions (site_id, user_id, source, prompt, html)
+     VALUES ($1, $2, 'initial', $3, $4)`,
+    [siteId, user.id, brief, finalHtml]
+  );
 
   return NextResponse.json({ siteId: site.id });
 }
 
 function stripFences(s: string) {
-  return s
-    .replace(/^```(?:html)?\s*/i, "")
-    .replace(/```\s*$/i, "")
-    .trim();
+  return s.replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim();
 }
 
 function deriveTitle(input: string) {

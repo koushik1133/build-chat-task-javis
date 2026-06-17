@@ -1,31 +1,40 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { query, queryOne } from "@/lib/dsql";
 
 export const runtime = "nodejs";
 
 export async function GET(
-  req: Request,
+  _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let supabase;
+  let user;
   try {
-    ({ supabase } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
 
-  // RLS policy ensures user can only see leads for their own site.
-  const { data: leads, error } = await supabase
-    .from("site_leads")
-    .select("id, data, created_at")
-    .eq("site_id", id)
-    .order("created_at", { ascending: false });
+  // Application-layer ownership check
+  const site = await queryOne("SELECT id FROM sites WHERE id = $1 AND user_id = $2", [id, user.id]);
+  if (!site) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  const rows = await query(
+    `SELECT id, data, created_at
+     FROM site_leads
+     WHERE site_id = $1
+     ORDER BY created_at DESC`,
+    [id]
+  );
+
+  // data is stored as JSON text — parse it back
+  const leads = rows.map((r) => ({
+    id: r.id,
+    created_at: r.created_at,
+    data: r.data ? JSON.parse(r.data as string) : {},
+  }));
 
   return NextResponse.json({ leads });
 }

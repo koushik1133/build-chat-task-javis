@@ -1,0 +1,95 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: javis
+  # Replace with your GCP project and preferred region
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Scale to 0 when idle to keep costs low
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/cpu-throttling: "true"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+        - image: gcr.io/YOUR_PROJECT_ID/javis:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            # ── Public (safe to embed in image) ──────────────────────────────
+            - name: NEXT_PUBLIC_APP_URL
+              value: "https://YOUR_CLOUD_RUN_URL"
+            - name: NEXT_PUBLIC_SUPABASE_URL
+              value: "https://YOUR_PROJECT.supabase.co"
+            - name: NEXT_PUBLIC_SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-anon-key
+                  key: latest
+            # ── Private — use Secret Manager ────────────────────────────────
+            - name: SUPABASE_SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-service-role-key
+                  key: latest
+            - name: DSQL_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: dsql-endpoint
+                  key: latest
+            - name: AWS_REGION
+              value: "us-east-2"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-access-key-id
+                  key: latest
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret-access-key
+                  key: latest
+            - name: DYNAMODB_MESSAGES_TABLE
+              value: "javis-messages"
+            - name: DYNAMODB_ANALYTICS_TABLE
+              value: "javis-analytics"
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: groq-api-key
+                  key: latest
+            - name: GROQ_MODEL
+              value: "llama-3.3-70b-versatile"
+            - name: PINECONE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pinecone-api-key
+                  key: latest
+            - name: PINECONE_INDEX
+              value: "javis-aws"
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-token
+                  key: latest
+            - name: CRON_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cron-secret
+                  key: latest
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: resend-api-key
+                  key: latest
+            - name: RESEND_FROM
+              value: "Javis <ai@yourdomain.com>"

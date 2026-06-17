@@ -11,6 +11,7 @@ import {
   Upload,
   FileText,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { JarvisMascot } from "@/components/jarvis-mascot";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,55 @@ import {
   type IntakeField,
   type Theme,
 } from "@/lib/build-categories";
+
+type BusinessProfile = {
+  company_name?: string;
+  industry?: string;
+  stage?: string;
+  team_size?: string;
+  geography?: string;
+  product_desc?: string;
+  target_market?: string;
+  challenge?: string;
+  revenue_range?: string;
+};
+
+/** Maps business profile fields to intake field IDs used across categories */
+function profileToAnswers(profile: BusinessProfile): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (profile.company_name) {
+    map.businessName = profile.company_name;
+    map.name = profile.company_name;
+    map.orgName = profile.company_name;
+    map.restaurantName = profile.company_name;
+    map.brandName = profile.company_name;
+  }
+  if (profile.product_desc) {
+    map.goal = profile.product_desc;
+    map.about = profile.product_desc;
+    map.mission = profile.product_desc;
+    map.offer = profile.product_desc;
+    map.musicDesc = profile.product_desc;
+    map.podcastDesc = profile.product_desc;
+  }
+  if (profile.target_market) {
+    map.audience = profile.target_market;
+    map.targetAudience = profile.target_market;
+    map.clientTypes = profile.target_market;
+    map.who = profile.target_market;
+  }
+  if (profile.geography) {
+    map.location = profile.geography;
+    map.city = profile.geography;
+    map.serviceArea = profile.geography;
+  }
+  if (profile.industry) {
+    map.industry = profile.industry;
+    map.niche = profile.industry;
+    map.sector = profile.industry;
+  }
+  return map;
+}
 
 type Site = { id: string; title: string; persona: string | null; updated_at: string };
 
@@ -42,8 +92,10 @@ export default function BuildPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [categoryId, setCategoryId] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [prefilled, setPrefilled] = useState<Record<string, string>>({}); // fields auto-filled from profile
   const [themeId, setThemeId] = useState("");
   const [freeText, setFreeText] = useState("");
+  const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
   const [resumeProfile, setResumeProfile] = useState<ResumeProfile | null>(null);
   const [resumeBusy, setResumeBusy] = useState(false);
   const [resumeError, setResumeError] = useState("");
@@ -60,6 +112,12 @@ export default function BuildPage() {
       .then((r) => r.json())
       .then((d) => setSites(d.sites ?? []))
       .catch(() => {});
+
+    // Load business profile to pre-fill intake fields
+    fetch("/api/onboarding")
+      .then((r) => r.json())
+      .then((d) => { if (d.profile) setBusinessProfile(d.profile); })
+      .catch(() => {});
   }, []);
 
   function setAnswer(id: string, v: string) {
@@ -68,9 +126,18 @@ export default function BuildPage() {
 
   function pickCategory(id: string) {
     setCategoryId(id);
-    setAnswers({});
     setThemeId("");
     setResumeProfile(null);
+
+    // Pre-fill answers from business profile
+    if (businessProfile) {
+      const mapped = profileToAnswers(businessProfile);
+      setAnswers(mapped);
+      setPrefilled(mapped);
+    } else {
+      setAnswers({});
+      setPrefilled({});
+    }
     setStep(1);
   }
 
@@ -98,6 +165,7 @@ export default function BuildPage() {
           answers,
           freeText: freeText || undefined,
           resumeProfile: resumeProfile ?? undefined,
+          businessProfile: businessProfile ?? undefined,
         }),
       });
       const text = await r.text();
@@ -198,18 +266,34 @@ export default function BuildPage() {
 
         {step === 1 && category && (
           <StepShell
-            mascot={`Tell me about your ${category.label.toLowerCase()}. The more specific, the better — I'll use it to find features your top competitors actually use.`}
+            mascot={
+              Object.keys(prefilled).length > 0
+                ? `I pre-filled ${Object.keys(prefilled).filter(k => category.intake.some(f => f.id === k)).length} field(s) from your Business DNA. Review them and fill in anything else.`
+                : `Tell me about your ${category.label.toLowerCase()}. The more specific, the better — I'll use it to find features your top competitors actually use.`
+            }
             back={() => setStep(0)}
             next={() => setStep(2)}
             canNext={intakeFilled()}
           >
+            {/* Business DNA banner */}
+            {Object.keys(prefilled).filter(k => category.intake.some(f => f.id === k)).length > 0 && (
+              <div className="mb-4 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs">
+                <Zap className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-medium text-foreground">Pre-filled from Business DNA</span>
+                  <span className="text-muted-foreground ml-1">— fields marked with ✦ were filled automatically. Edit any to override.</span>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-5">
               {category.intake.map((field) => (
                 <IntakeFieldView
                   key={field.id}
                   field={field}
                   value={answers[field.id] ?? ""}
-                  onChange={(v) => setAnswer(field.id, v)}
+                  isPrefilled={!!prefilled[field.id]}
+                  onChange={(v) => { setAnswer(field.id, v); setPrefilled(p => { const n = { ...p }; if (v !== prefilled[field.id]) delete n[field.id]; return n; }); }}
                   onResumeParsed={(profile) => {
                     setResumeProfile(profile);
                     if (profile.name && !answers.businessName) setAnswer("businessName", profile.name);
@@ -333,6 +417,7 @@ export default function BuildPage() {
 function IntakeFieldView({
   field,
   value,
+  isPrefilled,
   onChange,
   onResumeParsed,
   resumeBusy,
@@ -342,6 +427,7 @@ function IntakeFieldView({
 }: {
   field: IntakeField;
   value: string;
+  isPrefilled?: boolean;
   onChange: (v: string) => void;
   onResumeParsed: (p: ResumeProfile) => void;
   resumeBusy: boolean;
@@ -370,9 +456,12 @@ function IntakeFieldView({
 
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium">
+      <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
         {field.label}
-        {field.optional && <span className="ml-1 text-xs text-muted-foreground">(optional)</span>}
+        {isPrefilled && (
+          <span className="text-[10px] font-semibold text-primary bg-primary/10 rounded-full px-1.5 py-0.5 tracking-wide">✦ DNA</span>
+        )}
+        {field.optional && !isPrefilled && <span className="text-xs text-muted-foreground font-normal">(optional)</span>}
       </label>
       {field.hint && (
         <p className="mb-2 text-xs text-muted-foreground">{field.hint}</p>

@@ -64,11 +64,12 @@ export async function POST(req: Request) {
     .map((t) => t.path)
     .join("\n");
 
-  const readme = await complete([
-    { role: "system", content: README_SYS },
-    {
-      role: "user",
-      content: `Repo: ${owner}/${repo}
+  const readme = await complete(
+    [
+      { role: "system", content: README_SYS },
+      {
+        role: "user",
+        content: `Repo: ${owner}/${repo}
 Description: ${meta.description ?? "(none)"}
 Primary language: ${meta.language ?? "(unknown)"}
 
@@ -77,8 +78,10 @@ ${treePreview}
 
 ## Key files
 ${entries.join("\n\n")}`,
-    },
-  ]);
+      },
+    ],
+    { maxTokens: 2000 }
+  );
 
   return NextResponse.json({ repo: `${owner}/${repo}`, readme });
 }

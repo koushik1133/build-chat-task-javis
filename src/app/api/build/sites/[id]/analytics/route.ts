@@ -1,31 +1,39 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { getPageViews } from "@/lib/dynamodb";
 
 export const runtime = "nodejs";
 
 export async function GET(
-  req: Request,
+  _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let supabase;
+  let supabase, user;
   try {
-    ({ supabase } = await requireUser());
+    ({ supabase, user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
 
-  // RLS policy "owner reads analytics" guarantees we only see our own site's analytics
-  const { data: analytics, error } = await supabase
-    .from("site_analytics")
-    .select("id, path, user_agent, created_at")
-    .eq("site_id", id)
-    .order("created_at", { ascending: false });
+  // Verify the user owns this site via Supabase (RLS metadata check)
+  const { data: site } = await supabase
+    .from("sites")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+  if (!site) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  // Page-view events live in DynamoDB (high-throughput time-series store)
+  const views = await getPageViews(id, 200).catch(() => []);
+  const analytics = views.map((v) => ({
+    id: v.evtId,
+    path: v.path,
+    user_agent: v.userAgent,
+    created_at: v.createdAt,
+  }));
 
   return NextResponse.json({ analytics });
 }

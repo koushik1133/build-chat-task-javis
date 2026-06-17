@@ -12,7 +12,7 @@ function pc(): Pinecone {
   return _pc;
 }
 
-const INDEX = process.env.PINECONE_INDEX ?? "javis-rag";
+const INDEX = (process.env.PINECONE_INDEX ?? "javis-rag").toLowerCase();
 const EMBED_MODEL = "multilingual-e5-large"; // 1024-dim, hosted by Pinecone
 
 // Idempotent index bootstrap. Called lazily so cold starts don't pay this cost.

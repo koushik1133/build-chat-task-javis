@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/supabase/server";
 import { searchChunks } from "@/lib/pinecone";
 import { streamChat, completeJson, type ChatMessage } from "@/lib/llm";
 import { SYSTEM_BASE, buildContextBlock, TASK_EXTRACTOR_SYS } from "@/lib/prompts";
+import { putMessage, getMessages } from "@/lib/dynamodb";
+import { queryOne, query } from "@/lib/dsql";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,9 +16,9 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -28,43 +30,43 @@ export async function POST(req: Request) {
   const { message } = parsed.data;
   let chatId = parsed.data.chatId ?? null;
 
-  // 1. Ensure a chat row, derive a title from the first user message.
+  // 1. Ensure a chat metadata row in Aurora DSQL.
   if (!chatId) {
     const title = message.slice(0, 60).replace(/\s+/g, " ").trim() || "New chat";
-    const { data, error } = await supabase
-      .from("chats")
-      .insert({ user_id: user.id, title })
-      .select("id")
-      .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    chatId = data.id;
+    const row = await queryOne<{ id: string }>(
+      "INSERT INTO chats (user_id, title) VALUES ($1, $2) RETURNING id",
+      [user.id, title]
+    );
+    if (!row) return NextResponse.json({ error: "failed to create chat" }, { status: 500 });
+    chatId = row.id;
   }
 
-  // 2. Persist the user turn before the model call so it survives a stream abort.
-  await supabase.from("messages").insert({
-    chat_id: chatId,
-    user_id: user.id,
+  const now = new Date().toISOString();
+  const userMsgId = crypto.randomUUID();
+  const resolvedChatId = chatId as string;
+
+  // 2. Persist the user turn in DynamoDB (high-throughput message store).
+  //    Supabase retains the chat metadata row; DynamoDB owns the message bodies.
+  await putMessage({
+    msgId: userMsgId,
+    chatId: resolvedChatId,
+    userId: user.id,
     role: "user",
     content: message,
+    createdAt: now,
   });
 
-  // 3. Pull last 10 turns + RAG hits in parallel.
-  const [{ data: history }, chunks] = await Promise.all([
-    supabase
-      .from("messages")
-      .select("role,content")
-      .eq("chat_id", chatId)
-      .order("created_at", { ascending: false })
-      .limit(10),
+  // 3. Pull last 10 turns from DynamoDB + RAG hits from Pinecone in parallel.
+  const [history, chunks] = await Promise.all([
+    getMessages(resolvedChatId, 10).catch(() => []),
     searchChunks(user.id, message, 5).catch(() => []),
   ]);
 
-  const past = (history ?? []).reverse() as { role: "user" | "assistant"; content: string }[];
   const context = buildContextBlock(chunks);
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_BASE + (context ? `\n\n${context}` : "") },
-    ...past,
+    ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
   ];
 
   // 4. Call Groq — return a clean JSON error instead of a raw 500 if it fails.
@@ -79,7 +81,7 @@ export async function POST(req: Request) {
 
   // 5. Stream raw text chunks. Persist the full assistant turn at end-of-stream.
   const encoder = new TextEncoder();
-  const finalChatId = chatId as string;
+  const finalChatId = resolvedChatId;
   const readable = new ReadableStream({
     async start(controller) {
       let full = "";
@@ -95,20 +97,23 @@ export async function POST(req: Request) {
         controller.enqueue(encoder.encode(`\n\n[stream error: ${(e as Error).message}]`));
       } finally {
         if (full) {
-          await supabase.from("messages").insert({
-            chat_id: finalChatId,
-            user_id: user.id,
+          const assistantMsgId = crypto.randomUUID();
+          const assistantAt = new Date().toISOString();
+          // Persist assistant reply to DynamoDB
+          await putMessage({
+            msgId: assistantMsgId,
+            chatId: finalChatId,
+            userId: user.id,
             role: "assistant",
             content: full,
+            createdAt: assistantAt,
           });
-          await supabase
-            .from("chats")
-            .update({ updated_at: new Date().toISOString() })
-            .eq("id", finalChatId);
+          // Update chat updated_at in Aurora DSQL
+          await query("UPDATE chats SET updated_at = $1 WHERE id = $2", [assistantAt, finalChatId]);
         }
         controller.close();
 
-        // Fire-and-forget task extraction. Errors here must never fail the chat.
+        // Fire-and-forget task extraction from the user's message.
         completeJson<{ tasks: string[] }>(
           [
             { role: "system", content: TASK_EXTRACTOR_SYS },
@@ -119,9 +124,13 @@ export async function POST(req: Request) {
           .then(async (parsed) => {
             const tasks = (parsed?.tasks ?? []).filter((t) => t && t.length < 120);
             if (tasks.length === 0) return;
-            await supabase.from("tasks").insert(
-              tasks.map((title) => ({ user_id: user.id, chat_id: finalChatId, title }))
-            );
+            // Insert extracted tasks into Aurora DSQL
+            for (const title of tasks) {
+              await query(
+                "INSERT INTO tasks (user_id, chat_id, title) VALUES ($1, $2, $3)",
+                [user.id, finalChatId, title]
+              );
+            }
           })
           .catch(() => {});
       }

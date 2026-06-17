@@ -39,11 +39,13 @@ export async function POST(req: Request) {
     );
   }
   const tree = await getFileTree(owner, repo, meta.defaultBranch);
-  const targets = pickSourceFiles(tree, 5);
+  // Limit to 3 files max; truncate each to ~1 500 chars to stay within TPM limits.
+  const targets = pickSourceFiles(tree, 3);
 
   const reviews: { path: string; review: string }[] = [];
   for (const t of targets) {
-    const content = await getFile(owner, repo, t.path, meta.defaultBranch);
+    const raw = await getFile(owner, repo, t.path, meta.defaultBranch);
+    const content = raw.slice(0, 1500);
     const review = await complete([
       { role: "system", content: REVIEW_SYS },
       { role: "user", content: `File: ${t.path}\n\n${content}` },

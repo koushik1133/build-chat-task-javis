@@ -1,18 +1,23 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { query } from "@/lib/dsql";
 
 export async function GET() {
-  let supabase, user;
+  let user;
   try {
-    ({ supabase, user } = await requireUser());
+    ({ user } = await requireUser());
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const { data } = await supabase
-    .from("chats")
-    .select("id,title,updated_at")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false })
-    .limit(50);
-  return NextResponse.json({ chats: data ?? [] });
+
+  const chats = await query(
+    `SELECT id, title, updated_at
+     FROM chats
+     WHERE user_id = $1
+     ORDER BY updated_at DESC
+     LIMIT 50`,
+    [user.id]
+  );
+
+  return NextResponse.json({ chats });
 }

@@ -1,84 +1,205 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Sparkles, Loader2, Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Sparkles, Loader2, Mail, Eye, EyeOff, UserPlus, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
-type Mode = "magic" | "password";
+type Tab = "magic" | "signin" | "signup";
 
-export default function LoginPage() {
+const PASSWORD_MIN_LENGTH = 8;
+
+function passwordRules(password: string) {
+  return [
+    {
+      label: `At least ${PASSWORD_MIN_LENGTH} characters`,
+      ok: password.length >= PASSWORD_MIN_LENGTH,
+    },
+    { label: "One uppercase letter", ok: /[A-Z]/.test(password) },
+    { label: "One lowercase letter", ok: /[a-z]/.test(password) },
+    { label: "One number", ok: /\d/.test(password) },
+  ];
+}
+
+function safeNext(raw: string | null): string {
+  if (!raw) return "/chat";
+  try {
+    const decoded = decodeURIComponent(raw);
+    if (decoded.startsWith("/") && !decoded.startsWith("//") && !decoded.startsWith("/login")) {
+      return decoded;
+    }
+  } catch {
+    // Ignore malformed values and use the default app landing page.
+  }
+  return "/chat";
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = safeNext(searchParams.get("next"));
+
+  const [tab, setTab] = useState<Tab>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [mode, setMode] = useState<Mode>("magic");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(true);
+  const rules = passwordRules(password);
+  const passwordValid = rules.every((rule) => rule.ok);
+
+  async function serverHasSession(retries = 0): Promise<boolean> {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const authenticated = await fetch("/api/auth/session", { cache: "no-store" })
+        .then((res) => res.ok ? res.json() : { authenticated: false })
+        .then((data) => !!data.authenticated)
+        .catch(() => false);
+
+      if (authenticated) return true;
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+    }
+    return false;
+  }
 
   useEffect(() => {
-    const e = new URLSearchParams(window.location.search).get("error");
-    if (e && e !== "missing_code") setError(decodeURIComponent(e));
+    let active = true;
+    const urlError = searchParams.get("error");
+    if (urlError && urlError !== "missing_code") setError(decodeURIComponent(urlError));
 
     const supabase = createClient();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      if (session) router.push("/chat");
+
+    // Only auto-enter the app if the server can see the session cookie.
+    // This avoids stale browser auth state bouncing /login <-> /chat.
+    serverHasSession().then(async (authenticated) => {
+      if (!active) return;
+      if (authenticated) {
+        router.replace(next);
+      } else {
+        await supabase.auth.signOut().catch(() => {});
+        setChecking(false);
+      }
     });
-    return () => subscription.unsubscribe();
-  }, [router]);
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session) {
+        const authenticated = await serverHasSession(5);
+        if (!active) return;
+        if (authenticated) {
+          router.replace(next);
+        } else {
+          setBusy(false);
+          setChecking(false);
+          setError("Session could not be confirmed. Please try signing in again.");
+        }
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function resetForm() {
+    setError(null);
+    setSent(false);
+    setPassword("");
+  }
 
   async function sendMagicLink(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     const supabase = createClient();
-    const origin = window.location.origin;
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${origin}/auth/callback` },
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
     });
     setBusy(false);
     if (error) setError(error.message);
     else setSent(true);
   }
 
-  async function signInWithPassword(e: React.FormEvent) {
+  async function signIn(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      // If no account yet, try to sign up instead
-      if (error.message.toLowerCase().includes("invalid login") ||
-          error.message.toLowerCase().includes("user not found")) {
-        const { error: upErr } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-        });
-        setBusy(false);
-        if (upErr) setError(upErr.message);
-        else setSent(true); // confirm email sent (Supabase sends confirmation)
-      } else {
-        setBusy(false);
-        setError(error.message);
-      }
+      setBusy(false);
+      setError(
+        error.message.toLowerCase().includes("invalid login credentials")
+          ? "Wrong email or password. New here? Switch to Create account."
+          : error.message
+      );
     }
-    // success → auth state listener pushes to /chat
+    // success → onAuthStateChange SIGNED_IN fires → router.replace(next)
   }
 
-  async function google() {
+  async function signUp(e: React.FormEvent) {
+    e.preventDefault();
+    if (!passwordValid) {
+      setError("Please meet all password requirements before creating an account.");
+      return;
+    }
     setBusy(true);
+    setError(null);
     const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
     });
+    setBusy(false);
+    if (error) {
+      setError(
+        error.message.toLowerCase().includes("already registered")
+          ? "Account already exists — switch to Sign in."
+          : error.message
+      );
+    } else {
+      setSent(true);
+    }
+  }
+
+  async function googleSignIn() {
+    setBusy(true);
+    setError(null);
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
+    });
+    if (error) { setBusy(false); setError(error.message); }
+  }
+
+  const tabs: { id: Tab; icon: React.ReactNode; label: string }[] = [
+    { id: "signin",  icon: <LogIn className="h-3.5 w-3.5" />,    label: "Sign in" },
+    { id: "signup",  icon: <UserPlus className="h-3.5 w-3.5" />, label: "Create account" },
+    { id: "magic",   icon: <Mail className="h-3.5 w-3.5" />,     label: "Magic link" },
+  ];
+
+  if (checking) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </main>
+    );
   }
 
   return (
@@ -94,94 +215,105 @@ export default function LoginPage() {
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-7 shadow-sm">
-          <h2 className="text-lg font-semibold">Sign in</h2>
+          <h2 className="text-lg font-semibold mb-4">Welcome</h2>
 
-          {/* Mode toggle */}
-          <div className="mt-4 flex rounded-lg border border-border bg-secondary/40 p-0.5">
-            <button
-              onClick={() => { setMode("magic"); setError(null); setSent(false); }}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium transition-all",
-                mode === "magic"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Mail className="h-3.5 w-3.5" /> Magic link
-            </button>
-            <button
-              onClick={() => { setMode("password"); setError(null); setSent(false); }}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium transition-all",
-                mode === "password"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Lock className="h-3.5 w-3.5" /> Password
-            </button>
+          {/* Tab row */}
+          <div className="flex rounded-lg border border-border bg-secondary/40 p-0.5 mb-5">
+            {tabs.map(t => (
+              <button
+                key={t.id}
+                onClick={() => { setTab(t.id); resetForm(); }}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium transition-all",
+                  tab === t.id
+                    ? "bg-background shadow-sm text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {t.icon} {t.label}
+              </button>
+            ))}
           </div>
 
           {sent ? (
-            <div className="mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 text-sm text-emerald-700">
-              {mode === "magic"
-                ? <>Check <span className="font-semibold">{email}</span> for a sign-in link.</>
-                : <>Check <span className="font-semibold">{email}</span> to confirm your account.</>}
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-400">
+              {tab === "magic"
+                ? <><strong>{email}</strong> — check your inbox for a sign-in link.</>
+                : <><strong>{email}</strong> — check your inbox to confirm your account, then sign in.</>}
             </div>
-          ) : mode === "magic" ? (
-            <form onSubmit={sendMagicLink} className="mt-5 space-y-3">
-              <Input
-                type="email"
-                required
-                placeholder="you@domain.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <Button type="submit" className="w-full" disabled={busy || !email}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send magic link"}
-              </Button>
-              <p className="text-center text-[11px] text-muted-foreground">
-                Hit rate limit? Switch to{" "}
-                <button
-                  type="button"
-                  onClick={() => setMode("password")}
-                  className="underline underline-offset-2 hover:text-foreground"
-                >
-                  password login
-                </button>
-              </p>
-            </form>
-          ) : (
-            <form onSubmit={signInWithPassword} className="mt-5 space-y-3">
-              <Input
-                type="email"
-                required
-                placeholder="you@domain.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+
+          ) : tab === "signin" ? (
+            <form onSubmit={signIn} className="space-y-3">
+              <Input id="signin-email" name="email" type="email" required autoFocus
+                autoComplete="email" placeholder="you@domain.com"
+                value={email} onChange={e => setEmail(e.target.value)} />
               <div className="relative">
-                <Input
-                  type={showPw ? "text" : "password"}
-                  required
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
+                <Input id="signin-password" name="password"
+                  type={showPw ? "text" : "password"} required
+                  autoComplete="current-password" placeholder="Password"
+                  value={password} onChange={e => setPassword(e.target.value)} className="pr-10" />
+                <button type="button" onClick={() => setShowPw(!showPw)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                   {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
               <Button type="submit" className="w-full" disabled={busy || !email || !password}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in / Sign up"}
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
               </Button>
               <p className="text-center text-[11px] text-muted-foreground">
-                New here? Enter any email + password to create an account.
+                No account?{" "}
+                <button type="button" onClick={() => { setTab("signup"); resetForm(); }}
+                  className="underline underline-offset-2 hover:text-foreground">Create one</button>
+              </p>
+            </form>
+
+          ) : tab === "signup" ? (
+            <form onSubmit={signUp} className="space-y-3">
+              <Input id="signup-email" name="email" type="email" required autoFocus
+                autoComplete="email" placeholder="you@domain.com"
+                value={email} onChange={e => setEmail(e.target.value)} />
+              <div className="relative">
+                <Input id="signup-password" name="password"
+                  type={showPw ? "text" : "password"} required
+                  minLength={PASSWORD_MIN_LENGTH}
+                  autoComplete="new-password" placeholder="Create a strong password"
+                  value={password} onChange={e => setPassword(e.target.value)} className="pr-10" />
+                <button type="button" onClick={() => setShowPw(!showPw)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <div className="rounded-lg border border-border bg-secondary/30 p-3 text-[11px] text-muted-foreground">
+                <p className="mb-1 font-medium text-foreground">Password requirements</p>
+                <div className="grid gap-1">
+                  {rules.map((rule) => (
+                    <div key={rule.label} className={cn("flex items-center gap-1.5", rule.ok && "text-emerald-600")}>
+                      <span aria-hidden>{rule.ok ? "✓" : "•"}</span>
+                      {rule.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <Button type="submit" className="w-full" disabled={busy || !email || !passwordValid}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account"}
+              </Button>
+              <p className="text-center text-[11px] text-muted-foreground">
+                Have an account?{" "}
+                <button type="button" onClick={() => { setTab("signin"); resetForm(); }}
+                  className="underline underline-offset-2 hover:text-foreground">Sign in</button>
+              </p>
+            </form>
+
+          ) : (
+            <form onSubmit={sendMagicLink} className="space-y-3">
+              <Input id="magic-email" name="email" type="email" required autoFocus
+                autoComplete="email" placeholder="you@domain.com"
+                value={email} onChange={e => setEmail(e.target.value)} />
+              <Button type="submit" className="w-full" disabled={busy || !email}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send magic link"}
+              </Button>
+              <p className="text-center text-[11px] text-muted-foreground">
+                We email a one-click sign-in link — no password needed.
               </p>
             </form>
           )}
@@ -190,8 +322,8 @@ export default function LoginPage() {
             <div className="h-px flex-1 bg-border" /> OR <div className="h-px flex-1 bg-border" />
           </div>
 
-          <Button onClick={google} variant="outline" className="w-full" disabled={busy}>
-            <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
+          <Button onClick={googleSignIn} variant="outline" className="w-full" disabled={busy}>
+            <svg className="mr-2 h-4 w-4 shrink-0" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
@@ -208,5 +340,17 @@ export default function LoginPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <main className="grid min-h-screen place-items-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </main>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }
