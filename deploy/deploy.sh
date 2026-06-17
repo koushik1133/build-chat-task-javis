@@ -64,9 +64,8 @@ gcloud run deploy "${SERVICE_NAME}" \
   --min-instances=0 \
   --max-instances=3 \
   --timeout=300 \
-  --set-env-vars="NEXT_PUBLIC_APP_URL=${APP_URL},NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}" \
+  --set-env-vars="NEXT_PUBLIC_APP_URL=${APP_URL},NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL},NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON}" \
   --set-secrets="\
-NEXT_PUBLIC_SUPABASE_ANON_KEY=supabase-anon-key:latest,\
 SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,\
 DSQL_ENDPOINT=dsql-endpoint:latest,\
 AWS_ACCESS_KEY_ID=aws-access-key-id:latest,\
