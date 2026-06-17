@@ -295,7 +295,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
         <div className="flex min-w-0 items-center gap-3">
           <Link href="/build" className="rounded-md p-1 hover:bg-secondary/60">
             <ArrowLeft className="h-4 w-4" />

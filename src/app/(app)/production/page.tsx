@@ -525,32 +525,33 @@ export default function ProductionPage() {
       </div>
 
       {/* ── Top bar ────────────────────────────────────────────────────── */}
-      <div className="border-b border-border px-6 py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-card shrink-0">
-        <div className="flex min-w-0 items-center gap-3">
-          {editingName ? (
-            <input
-              value={boardName}
-              onChange={e => handleBoardNameChange(e.target.value)}
-              onBlur={() => setEditingName(false)}
-              onKeyDown={e => e.key === "Enter" && setEditingName(false)}
-              autoFocus
-              className="text-lg font-semibold bg-transparent border-b border-primary outline-none w-48"
-            />
-          ) : (
-            <button
-              className="text-lg font-semibold hover:text-primary transition-colors flex items-center gap-1.5 group"
-              onClick={() => setEditingName(true)}
-            >
-              {boardName || "My Board"}
-              <Pencil className="h-3.5 w-3.5 opacity-0 group-hover:opacity-50 transition-opacity" />
-            </button>
-          )}
-          <span className="text-xs text-muted-foreground hidden md:block">
-            {cols.length} columns · {tasks.length} cards
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="hidden lg:flex items-center gap-4 text-xs pr-1 border-r border-border mr-1">
+      <div className="border-b border-border bg-card px-4 py-3 sm:px-6 shrink-0">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            {editingName ? (
+              <input
+                value={boardName}
+                onChange={e => handleBoardNameChange(e.target.value)}
+                onBlur={() => setEditingName(false)}
+                onKeyDown={e => e.key === "Enter" && setEditingName(false)}
+                autoFocus
+                className="w-full max-w-[12rem] border-b border-primary bg-transparent text-base font-semibold outline-none sm:max-w-xs sm:text-lg"
+              />
+            ) : (
+              <button
+                className="group flex min-w-0 items-center gap-1.5 text-base font-semibold transition-colors hover:text-primary sm:text-lg"
+                onClick={() => setEditingName(true)}
+              >
+                <span className="truncate">{boardName || "My Board"}</span>
+                <Pencil className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-50" />
+              </button>
+            )}
+            <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+              {cols.length} columns · {tasks.length} cards
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="hidden items-center gap-3 border-r border-border pr-2 text-xs xl:flex xl:gap-4">
             <span className="text-muted-foreground">Pipeline <strong className="text-foreground">{inPipeline}</strong></span>
             <span className="text-muted-foreground">Done <strong className="text-foreground">{done}</strong></span>
             <span className={cn("font-semibold", efficiency >= 70 ? "text-green-600" : efficiency >= 40 ? "text-yellow-600" : "text-muted-foreground")}>
@@ -574,12 +575,14 @@ export default function ProductionPage() {
           <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
             <Settings2 className="h-3.5 w-3.5" /> Configure
           </Button>
-          <NotificationBell />
+            <NotificationBell />
+          </div>
         </div>
       </div>
 
       {/* ── Search + filters ───────────────────────────────────────────── */}
-      <div className="border-b border-border px-6 py-2 flex items-center gap-2 bg-card/50 shrink-0 flex-wrap">
+      <div className="border-b border-border bg-card/50 px-4 py-2 sm:px-6 shrink-0">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <div className="relative flex-1 min-w-[160px] max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
@@ -589,8 +592,8 @@ export default function ProductionPage() {
             className="w-full rounded-lg border border-border bg-background pl-8 pr-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
           />
         </div>
-        <div className="flex items-center gap-1">
-          <Filter className="h-3.5 w-3.5 text-muted-foreground mr-1" />
+        <div className="flex flex-wrap items-center gap-1 overflow-x-auto pb-0.5 sm:pb-0">
+          <Filter className="mr-1 hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:block" />
           {([
             { id: "all" as FilterMode, label: "All" },
             { id: "hitl" as FilterMode, label: "Needs Approval", count: hitlPending },
@@ -601,7 +604,7 @@ export default function ProductionPage() {
               key={f.id}
               onClick={() => setFilter(f.id)}
               className={cn(
-                "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                "shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
                 filter === f.id ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"
               )}
             >
@@ -609,10 +612,11 @@ export default function ProductionPage() {
             </button>
           ))}
         </div>
+        </div>
       </div>
 
       {/* ── Quick-add bar ──────────────────────────────────────────────── */}
-      <div className="border-b border-border px-6 py-2 flex items-center gap-2 bg-card/50 shrink-0">
+      <div className="border-b border-border bg-card/50 px-4 py-2 sm:px-6 shrink-0 flex items-center gap-2">
         <input
           ref={inputRef}
           value={input}
@@ -628,7 +632,7 @@ export default function ProductionPage() {
 
       {/* ── Orphan warning ─────────────────────────────────────────────── */}
       {orphans.length > 0 && (
-        <div className="border-b border-amber-200 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 px-6 py-2 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400 shrink-0">
+        <div className="border-b border-amber-200 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 px-4 py-2 sm:px-6 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400 shrink-0 flex-wrap">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           {orphans.length} card(s) belong to deleted columns. Move them to an active column or delete.
           <div className="flex gap-1 ml-2">
@@ -643,7 +647,7 @@ export default function ProductionPage() {
       )}
 
       {/* ── Kanban board ───────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 sm:p-4">
         <div className="flex gap-3 h-full" style={{ minWidth: `${cols.length * 284}px` }}>
 
           {cols.map((col) => {
@@ -1127,7 +1131,7 @@ export default function ProductionPage() {
       {showSettings && (
         <div className="fixed inset-0 z-50 flex" onClick={() => setShowSettings(false)}>
           <div className="flex-1 bg-black/30 backdrop-blur-sm" />
-          <div className="w-[400px] bg-card border-l border-border h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="h-full w-full max-w-[400px] overflow-y-auto border-l border-border bg-card shadow-2xl sm:w-[min(400px,92vw)]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-border sticky top-0 bg-card z-10">
               <div>
                 <h2 className="font-semibold">Board Settings</h2>

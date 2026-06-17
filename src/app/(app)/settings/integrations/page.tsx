@@ -173,11 +173,11 @@ export default function ConnectionsPage() {
   ].filter(Boolean).length;
 
   return (
-    <div className="h-full overflow-y-auto px-8 py-8">
-      <div className="max-w-2xl mx-auto space-y-8">
+    <div className="h-full overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
+      <div className="mx-auto w-full max-w-2xl space-y-8">
         <div>
-          <p className="text-xs font-medium text-primary mb-1">Settings</p>
-          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <p className="mb-1 text-xs font-medium text-primary">Settings</p>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Connections</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             One-time setup. Connect Slack and email once — every automation uses these automatically.
           </p>

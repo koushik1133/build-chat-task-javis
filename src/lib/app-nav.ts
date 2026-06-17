@@ -31,7 +31,7 @@ export const APP_NAV_BOTTOM: AppNavItem[] = [
   { href: "/automations", label: "Automations", icon: Zap },
   { href: "/strategy", label: "Strategy Hub", icon: Briefcase },
   { href: "/analytics", label: "Data Analysis", icon: BarChart2 },
-  { href: "/tasks", label: " Tasks", icon: ListTodo },
+  { href: "/tasks", label: "Tasks", icon: ListTodo },
 ];
 
 export const APP_NAV: AppNavItem[] = [...APP_NAV_TOP, ...APP_NAV_BOTTOM];

@@ -202,11 +202,11 @@ export default function BuildPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl px-6 py-10">
+      <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
         {step === 0 && (
           <div className="space-y-8">
             <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-semibold tracking-tight">Build something</h1>
+              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Build something</h1>
               {sites.length > 0 && (
                 <span className="text-xs text-muted-foreground">
                   {sites.length} site{sites.length === 1 ? "" : "s"}

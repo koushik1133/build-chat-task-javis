@@ -229,11 +229,11 @@ export default function AutomationsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-8 py-8">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-start justify-between">
+    <div className="h-full overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
+      <div className="mx-auto w-full max-w-4xl space-y-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">AI Automations</h1>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">AI Automations</h1>
             <p className="mt-1 text-sm text-muted-foreground">Daily schedules, Kanban triggers, Slack, email, and in-app alerts.</p>
           </div>
           <Button size="sm" onClick={() => setShowCreate(true)}>

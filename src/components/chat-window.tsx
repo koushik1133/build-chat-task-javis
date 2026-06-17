@@ -92,7 +92,7 @@ export function ChatWindow({
 
   return (
     <div className="flex h-full flex-col">
-      <div ref={scrollerRef} className="scrollbar-thin flex-1 overflow-y-auto px-6 py-6">
+      <div ref={scrollerRef} className="scrollbar-thin flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
         {messages.length === 0 ? (
           <EmptyState onPick={(p) => setInput(p)} />
         ) : (
@@ -178,7 +178,7 @@ const SUGGESTIONS = [
 
 function EmptyState({ onPick }: { onPick: (p: string) => void }) {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
+    <div className="mx-auto flex max-w-2xl flex-col items-center px-4 pt-8 text-center sm:px-6 sm:pt-12 lg:pt-16">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/30">
         <Sparkles className="h-6 w-6 text-primary" />
       </div>

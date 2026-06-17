@@ -92,6 +92,13 @@
   .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
   .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(36 10% 80%); border-radius: 4px; }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: hsl(36 10% 70%); }
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(240 8% 28%); }
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: hsl(240 8% 36%); }
+
+  .nav-item:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
 }
 
 /* highlight.js — atom-one-light, trimmed */
