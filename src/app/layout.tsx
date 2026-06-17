@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { KERNELHUB_TAGLINE } from "@/lib/brand";
 import "./globals.css";
 
 const inter = Inter({
@@ -9,9 +10,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Javis — AI dev co-pilot",
-  description:
-    "Chat, RAG over your files, and review GitHub repos with an AI engineering assistant.",
+  title: "KernelHub",
+  description: KERNELHUB_TAGLINE,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

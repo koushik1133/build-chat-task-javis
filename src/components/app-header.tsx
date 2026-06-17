@@ -16,7 +16,9 @@ export function AppHeader() {
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/15">
           <Sparkles className="h-4 w-4 text-primary" />
         </div>
-        <span className="hidden text-sm font-semibold tracking-tight sm:inline">Javis</span>
+        <span className="hidden text-sm font-semibold tracking-tight sm:inline">
+          Kernel<span className="text-primary">Hub</span>
+        </span>
       </Link>
 
       <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-thin">

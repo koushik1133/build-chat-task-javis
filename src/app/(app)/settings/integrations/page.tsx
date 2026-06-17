@@ -207,7 +207,7 @@ export default function ConnectionsPage() {
           connectedLabel="Always on"
         >
           <p className="text-xs text-muted-foreground mb-3">
-            Automations with &quot;Send Notification&quot; appear in your Javis bell icon instantly.
+            Automations with &quot;Send Notification&quot; appear in your KernelHub bell icon instantly.
           </p>
           <Button size="sm" variant="outline" onClick={() => test("notification")}>
             <FlaskConical className="h-3.5 w-3.5" /> Send test notification
@@ -227,7 +227,7 @@ export default function ConnectionsPage() {
         >
           {!data?.email_available ? (
             <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 text-xs text-amber-800 dark:text-amber-200">
-              Email sending is configured by your Javis team using your company domain
+              Email sending is configured by your KernelHub team using your company domain
               (e.g. <code className="bg-white/50 dark:bg-black/20 px-1 rounded">ai@yourcompany.com</code>).
               You only need to enter your personal inbox below once it&apos;s enabled.
             </div>

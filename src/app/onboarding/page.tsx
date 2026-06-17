@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles, ChevronRight, ChevronLeft, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { KERNELHUB_TAGLINE } from "@/lib/brand";
 
 const INDUSTRIES = [
   "SaaS / Software", "E-commerce / Retail", "Agency / Consulting",
@@ -125,11 +126,16 @@ export default function OnboardingPage() {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-xl">
         {/* Brand */}
-        <div className="flex items-center gap-2 mb-8 justify-center">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
-            <Sparkles className="h-4 w-4 text-primary" />
+        <div className="mb-8 flex flex-col items-center gap-1.5 text-center">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
+              <Sparkles className="h-4 w-4 text-primary" />
+            </div>
+            <span className="font-semibold tracking-tight">
+              Kernel<span className="text-primary">Hub</span>
+            </span>
           </div>
-          <span className="font-semibold tracking-tight">Javis</span>
+          <p className="max-w-sm text-xs text-muted-foreground">{KERNELHUB_TAGLINE}</p>
         </div>
 
         {/* Progress */}
@@ -222,7 +228,7 @@ export default function OnboardingPage() {
             <div className="space-y-5">
               <div>
                 <h1 className="text-xl font-semibold">What does your business do?</h1>
-                <p className="text-sm text-muted-foreground mt-1">Javis uses this to generate deeply relevant strategies and insights.</p>
+                <p className="text-sm text-muted-foreground mt-1">KernelHub uses this to generate deeply relevant strategies and insights.</p>
               </div>
 
               <div>
@@ -302,7 +308,7 @@ export default function OnboardingPage() {
 
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
                 <p className="text-xs text-muted-foreground">
-                  Based on your profile, Javis will pre-generate a <strong className="text-foreground">{form.industry || "industry"}-specific</strong> strategy framework,
+                  Based on your profile, KernelHub will pre-generate a <strong className="text-foreground">{form.industry || "industry"}-specific</strong> strategy framework,
                   configure your Production board with the right template for a <strong className="text-foreground">{form.stage || "your stage"}</strong> company,
                   and prime your AI context with your product description.
                 </p>
@@ -345,7 +351,7 @@ export default function OnboardingPage() {
                 className="flex items-center gap-1.5 bg-primary text-primary-foreground rounded-lg px-5 py-2.5 text-sm font-semibold disabled:opacity-40 hover:bg-primary/90 transition-colors"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                {saving ? "Setting up your workspace..." : "Launch Javis"}
+                {saving ? "Setting up your workspace..." : "Launch KernelHub"}
               </button>
             )}
           </div>

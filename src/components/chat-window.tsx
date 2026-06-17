@@ -6,6 +6,7 @@ import { Send, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Markdown } from "@/components/markdown";
+import { KERNELHUB_TAGLINE } from "@/lib/brand";
 
 type Msg = { id?: string; role: "user" | "assistant"; content: string };
 
@@ -182,11 +183,11 @@ function EmptyState({ onPick }: { onPick: (p: string) => void }) {
         <Sparkles className="h-6 w-6 text-primary" />
       </div>
       <h1 className="text-2xl font-semibold tracking-tight">
-        <span className="gradient-text">Javis</span> — your everyday AI assistant
+        <span className="gradient-text">KernelHub</span>
       </h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Ask anything — coding, study help, life advice, planning, or just chat.
-        Your uploaded files give Javis extra context.
+      <p className="mt-2 max-w-md text-sm text-muted-foreground">{KERNELHUB_TAGLINE}</p>
+      <p className="mt-3 text-xs text-muted-foreground/80">
+        Ask anything — your uploaded files add extra context to every reply.
       </p>
       <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
         {SUGGESTIONS.map((s) => (
