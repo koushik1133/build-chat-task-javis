@@ -17,7 +17,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar userEmail={email} />
       <section className="relative flex-1 overflow-hidden bg-background">
         <NotificationBell />
-        {children}
+        {/* Reserve space so the fixed bell never covers page header actions */}
+        <div className="h-full overflow-hidden pr-14">
+          {children}
+        </div>
       </section>
       <CommandPalette />
     </div>
