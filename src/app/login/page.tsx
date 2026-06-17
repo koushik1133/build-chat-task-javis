@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { KERNELHUB_TAGLINE } from "@/lib/brand";
 
 type Tab = "magic" | "signin" | "signup";
 
@@ -220,10 +219,8 @@ function LoginForm() {
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-lg shadow-orange-500/25">
             <Sparkles className="h-6 w-6 text-white" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Kernel<span className="text-primary">Hub</span>
-          </h1>
-          <p className="max-w-xs text-sm text-muted-foreground">{KERNELHUB_TAGLINE}</p>
+          <h1 className="text-2xl font-bold tracking-tight">Javis</h1>
+          <p className="text-sm text-muted-foreground">Your everyday AI assistant</p>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-7 shadow-sm">

@@ -16,7 +16,7 @@ export async function GET() {
   return new NextResponse(blob, {
     headers: {
       "Content-Type": "application/json",
-      "Content-Disposition": 'attachment; filename="kernelhub-strategies-export.json"',
+      "Content-Disposition": 'attachment; filename="javis-strategies-export.json"',
     },
   });
 }

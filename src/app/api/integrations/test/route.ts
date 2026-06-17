@@ -49,7 +49,7 @@ export async function POST(req: Request) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        text: "✅ *KernelHub is connected!* You'll receive automation alerts in this channel.",
+        text: "✅ *Javis is connected!* You'll receive automation alerts in this channel.",
       }),
     });
     if (!res.ok) {
@@ -68,7 +68,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         success: false,
         message: "Email is not enabled yet",
-        detail: "Your KernelHub admin needs to configure the platform email (one-time setup).",
+        detail: "Your Javis admin needs to configure the platform email (one-time setup).",
       });
     }
     if (!integrations?.email_verified || !integrations.email_default_to?.trim()) {
@@ -89,10 +89,10 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         from,
         to: [to],
-        subject: "KernelHub — email connection test",
+        subject: "Javis — email connection test",
         html: `<div style="font-family:sans-serif;line-height:1.6">
           <h2>You're all set!</h2>
-          <p>KernelHub will send automation emails to this verified address.</p>
+          <p>Javis will send automation emails to this verified address.</p>
           <p style="color:#888;font-size:12px">Sent from ${from}</p>
         </div>`,
       }),
@@ -112,7 +112,7 @@ export async function POST(req: Request) {
     const row = await queryOne<{ id: string; title: string; body: string | null; read: boolean; created_at: string }>(
       `INSERT INTO notifications (user_id, title, body) VALUES ($1, $2, $3)
        RETURNING id, title, body, read, created_at`,
-      [user.id, "KernelHub connection test", "Website notifications are working — check the bell icon."]
+      [user.id, "Javis connection test", "Website notifications are working — check the bell icon."]
     ).catch(() => null);
     if (!row) {
       return NextResponse.json({ success: false, message: "Failed to create notification" });

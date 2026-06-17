@@ -8,6 +8,7 @@ import {
   Search, Filter, History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { NotificationBell } from "@/components/notification-bell";
 import { timeAgo, cn } from "@/lib/utils";
 import { validateMove, sortByPriority } from "@/lib/production-board";
 
@@ -573,6 +574,7 @@ export default function ProductionPage() {
           <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
             <Settings2 className="h-3.5 w-3.5" /> Configure
           </Button>
+          <NotificationBell />
         </div>
       </div>
 

@@ -23,7 +23,7 @@ export async function POST(req: Request) {
 
   const biz = profile
     ? `Company: ${profile.company_name}, Industry: ${profile.industry}. ${profile.product_desc ?? ""}`
-    : "A small business using KernelHub.";
+    : "A small business using Javis.";
 
   const basePrompt = system_prompt?.trim() || template?.system_prompt || "";
 

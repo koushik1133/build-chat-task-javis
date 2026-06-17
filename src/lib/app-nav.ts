@@ -18,15 +18,20 @@ export type AppNavItem = {
   icon: LucideIcon;
 };
 
-export const APP_NAV: AppNavItem[] = [
+export const APP_NAV_TOP: AppNavItem[] = [
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/files", label: "Files", icon: FileText },
   { href: "/github", label: "GitHub", icon: Github },
   { href: "/build", label: "AI Studio", icon: Wand2 },
+];
+
+export const APP_NAV_BOTTOM: AppNavItem[] = [
   { href: "/production", label: "Production", icon: Kanban },
   { href: "/agents", label: "AI Agents", icon: Bot },
   { href: "/automations", label: "Automations", icon: Zap },
   { href: "/strategy", label: "Strategy Hub", icon: Briefcase },
   { href: "/analytics", label: "Data Analysis", icon: BarChart2 },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
+  { href: "/tasks", label: " Tasks", icon: ListTodo },
 ];
+
+export const APP_NAV: AppNavItem[] = [...APP_NAV_TOP, ...APP_NAV_BOTTOM];

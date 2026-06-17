@@ -12,7 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { KERNELHUB_TAGLINE } from "@/lib/brand";
 
 export default async function Landing() {
   const supabase = await createClient();
@@ -32,9 +31,7 @@ export default async function Landing() {
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/15">
             <Sparkles className="h-4 w-4 text-primary" />
           </div>
-          <span className="text-sm font-semibold tracking-tight">
-            Kernel<span className="text-primary">Hub</span>
-          </span>
+          <span className="text-sm font-semibold">Javis</span>
         </div>
         <div className="flex items-center gap-3">
           <Button asChild size="sm" variant="ghost">
@@ -52,14 +49,15 @@ export default async function Landing() {
       <section className="relative z-10 mx-auto max-w-4xl px-6 pt-20 text-center">
         <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs text-muted-foreground">
           <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-          {KERNELHUB_TAGLINE}
+          Full-stack AI dev co-pilot · AWS DynamoDB + Vercel
         </div>
         <h1 className="text-5xl font-semibold tracking-tight sm:text-6xl">
-          <span className="gradient-text">KernelHub</span>
+          A <span className="gradient-text">Jarvis</span> for developers.
         </h1>
-        <p className="mx-auto mt-5 max-w-2xl text-base text-muted-foreground">
-          Chat, production boards, AI agents, and automations in one place — from strategy
-          to execution, built for teams that run on modern cloud infrastructure.
+        <p className="mx-auto mt-5 max-w-xl text-base text-muted-foreground">
+          Chat with an AI that knows your files, reviews your repos, tracks
+          your tasks, and generates entire production-ready sites — all on a
+          stack that scales from prototype to millions.
         </p>
         <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
           <Button asChild size="lg">

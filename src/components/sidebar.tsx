@@ -10,10 +10,13 @@ import {
   Sun,
   Command,
   Plug,
+  Sparkles,
 } from "lucide-react";
 import { cn, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import { APP_NAV_TOP, APP_NAV_BOTTOM } from "@/lib/app-nav";
+import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 
 type Chat = { id: string; title: string; updated_at: string };
 
@@ -58,9 +61,51 @@ export function Sidebar({ userEmail }: { userEmail: string }) {
     router.refresh();
   }
 
+  function NavLinks({ items }: { items: typeof APP_NAV_TOP }) {
+    return (
+      <nav className="space-y-0.5 px-2">
+        {items.map(({ href, label, icon:Icon }) => {
+          const active = pathname === href || pathname.startsWith(href + "/");
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
+                active
+                  ? "bg-secondary font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+              )}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+    );
+  }
+
   return (
-    <aside className="flex h-full w-52 flex-col border-r border-border bg-card">
-      <div className="px-3 py-3">
+    <aside className="flex h-full w-56 flex-col border-r border-border bg-card">
+      <div className="border-b border-border px-4 py-4">
+        <Link href="/chat" className="flex items-start gap-2.5">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/20">
+            <Sparkles className="h-4 w-4 text-primary" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold leading-tight tracking-tight">{KERNELHUB_NAME}</p>
+            <p className="mt-1 text-[10px] leading-snug text-muted-foreground">{KERNELHUB_TAGLINE}</p>
+          </div>
+        </Link>
+      </div>
+
+      <NavLinks items={APP_NAV_TOP} />
+
+      <div className="mx-3 my-2 border-t border-border" />
+      <NavLinks items={APP_NAV_BOTTOM} />
+
+      <div className="mt-3 px-3">
         <div className="mb-1 flex items-center justify-between text-xs uppercase tracking-wider text-muted-foreground">
           <span>Recent chats</span>
           <Link href="/chat" className="hover:text-foreground">

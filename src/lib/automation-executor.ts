@@ -83,7 +83,7 @@ async function sendSlack(webhookUrl: string, text: string): Promise<ExecuteResul
 async function sendWebhook(url: string, payload: Record<string, unknown>): Promise<ExecuteResult> {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": "KernelHub-Automations/1.0" },
+    headers: { "Content-Type": "application/json", "User-Agent": "Javis-Automations/1.0" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -99,7 +99,7 @@ async function sendEmail(to: string, subject: string, html: string, fromName?: s
     return {
       success: false,
       message: "Email not enabled",
-      detail: "Ask your KernelHub admin to enable platform email (one-time setup).",
+      detail: "Ask your Javis admin to enable platform email (one-time setup).",
     };
   }
   const from = platformFromAddress(fromName);
@@ -187,14 +187,14 @@ async function runAgentWithDelivery(
   if (deliver.includes("email")) {
     const to = config.to?.trim() || (integrations?.email_verified ? integrations.email_default_to?.trim() : undefined);
     if (to) {
-      const subject = interpolate(config.subject ?? "KernelHub: {{workflow}} — {{agent}}", {
+      const subject = interpolate(config.subject ?? "Javis: {{workflow}} — {{agent}}", {
         ...ctx,
         workflow_name: ctx.workflow_name,
       }).replace(/\{\{agent\}\}/g, run.agent.name);
       const html = `<div style="font-family:sans-serif;line-height:1.6">
         <h2>${run.agent.name} — ${run.agent.role}</h2>
         <p style="white-space:pre-wrap">${run.output.replace(/</g, "&lt;")}</p>
-        <p style="color:#888;font-size:12px">Stored in KernelHub → AI Agents → Run history</p>
+        <p style="color:#888;font-size:12px">Stored in Javis → AI Agents → Run history</p>
       </div>`;
       const r = await sendEmail(to, subject, html, integrations?.email_from_name);
       if (r.success) delivered.push("email");
@@ -266,8 +266,8 @@ export async function executeAutomationAction(
             detail: "Go to Settings → Connections, verify your email with the code we send you.",
           };
         }
-        const subject = interpolate(config.subject ?? "KernelHub: {{workflow}}", ctx);
-        const html = `<div style="font-family:sans-serif;line-height:1.5"><h2>${ctx.workflow_name}</h2><p>${msg.replace(/\n/g, "<br>")}</p><p style="color:#888;font-size:12px">Sent by KernelHub Automations</p></div>`;
+        const subject = interpolate(config.subject ?? "Javis: {{workflow}}", ctx);
+        const html = `<div style="font-family:sans-serif;line-height:1.5"><h2>${ctx.workflow_name}</h2><p>${msg.replace(/\n/g, "<br>")}</p><p style="color:#888;font-size:12px">Sent by Javis Automations</p></div>`;
         return sendEmail(to, subject, html, integrations?.email_from_name);
       }
 

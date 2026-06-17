@@ -120,7 +120,7 @@ export function NotificationBell() {
 
       {/* Toast popup */}
       {toast && (
-        <div className="fixed top-12 right-4 z-[60] w-80 rounded-xl border border-border bg-card shadow-2xl animate-in slide-in-from-top-2 fade-in duration-300">
+        <div className="fixed top-[4.5rem] right-6 z-[60] w-80 rounded-xl border border-border bg-card shadow-2xl animate-in slide-in-from-top-2 fade-in duration-300">
           <div className="flex items-start gap-3 p-4">
             <div className="rounded-lg bg-primary/10 p-2 shrink-0">
               <Bell className="h-4 w-4 text-primary" />
