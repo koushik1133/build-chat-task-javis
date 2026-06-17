@@ -524,8 +524,8 @@ export default function ProductionPage() {
       </div>
 
       {/* ── Top bar ────────────────────────────────────────────────────── */}
-      <div className="border-b border-border px-6 py-3 flex items-center justify-between gap-3 bg-card shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="border-b border-border px-6 py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-card shrink-0">
+        <div className="flex min-w-0 items-center gap-3">
           {editingName ? (
             <input
               value={boardName}
@@ -548,8 +548,8 @@ export default function ProductionPage() {
             {cols.length} columns · {tasks.length} cards
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="hidden md:flex items-center gap-4 text-xs mr-2">
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="hidden lg:flex items-center gap-4 text-xs pr-1 border-r border-border mr-1">
             <span className="text-muted-foreground">Pipeline <strong className="text-foreground">{inPipeline}</strong></span>
             <span className="text-muted-foreground">Done <strong className="text-foreground">{done}</strong></span>
             <span className={cn("font-semibold", efficiency >= 70 ? "text-green-600" : efficiency >= 40 ? "text-yellow-600" : "text-muted-foreground")}>

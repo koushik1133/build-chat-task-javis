@@ -1,27 +1,26 @@
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getServerSession } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/sidebar";
+import { AppHeader } from "@/components/app-header";
 import { CommandPalette } from "@/components/command-palette";
-import { NotificationBell } from "@/components/notification-bell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  // Read session from cookie — no network call, no redirect loop.
-  // Token freshness is guaranteed by the middleware running before this layout.
   const session = await getServerSession();
-  if (!session) redirect("/login");
+  if (!session) {
+    const pathname = (await headers()).get("x-pathname") ?? "/chat";
+    redirect(`/login?next=${encodeURIComponent(pathname)}`);
+  }
 
   const email = session.user.email ?? "(no email)";
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
-      <Sidebar userEmail={email} />
-      <section className="relative flex-1 overflow-hidden bg-background">
-        <NotificationBell />
-        {/* Reserve space so the fixed bell never covers page header actions */}
-        <div className="h-full overflow-hidden pr-14">
-          {children}
-        </div>
-      </section>
+    <div className="flex h-screen w-screen flex-col overflow-hidden">
+      <AppHeader />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar userEmail={email} />
+        <main className="min-w-0 flex-1 overflow-hidden bg-background">{children}</main>
+      </div>
       <CommandPalette />
     </div>
   );

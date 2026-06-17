@@ -4,19 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  MessageSquare,
-  FileText,
-  Github,
-  ListTodo,
   LogOut,
   Plus,
-  Sparkles,
-  Wand2,
-  BarChart2,
-  Briefcase,
-  Bot,
-  Zap,
-  Kanban,
   Moon,
   Sun,
   Command,
@@ -27,22 +16,6 @@ import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 
 type Chat = { id: string; title: string; updated_at: string };
-
-const NAV_TOP = [
-  { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/files", label: "Files", icon: FileText },
-  { href: "/github", label: "GitHub", icon: Github },
-  { href: "/build", label: "AI Studio", icon: Wand2 },
-];
-
-const NAV_BOTTOM = [
-  { href: "/production", label: "Production", icon: Kanban },
-  { href: "/agents", label: "AI Agents", icon: Bot },
-  { href: "/automations", label: "Automations", icon: Zap },
-  { href: "/strategy", label: "Strategy Hub", icon: Briefcase },
-  { href: "/analytics", label: "Data Analysis", icon: BarChart2 },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
-];
 
 export function Sidebar({ userEmail }: { userEmail: string }) {
   const router = useRouter();
@@ -86,62 +59,8 @@ export function Sidebar({ userEmail }: { userEmail: string }) {
   }
 
   return (
-    <aside className="flex h-full w-56 flex-col border-r border-border bg-card">
-      {/* Brand */}
-      <div className="flex items-center gap-2 px-4 py-4">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/15">
-          <Sparkles className="h-4 w-4 text-primary" />
-        </div>
-        <span className="text-sm font-semibold tracking-tight">Javis</span>
-      </div>
-
-      {/* Main nav */}
-      <nav className="px-2 space-y-0.5">
-        {NAV_TOP.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + "/");
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
-                active
-                  ? "bg-secondary text-foreground font-medium"
-                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Divider + secondary nav */}
-      <div className="mx-3 my-2 border-t border-border" />
-      <nav className="px-2 space-y-0.5">
-        {NAV_BOTTOM.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + "/");
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
-                active
-                  ? "bg-secondary text-foreground font-medium"
-                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Recent chats */}
-      <div className="mt-3 px-3">
+    <aside className="flex h-full w-52 flex-col border-r border-border bg-card">
+      <div className="px-3 py-3">
         <div className="mb-1 flex items-center justify-between text-xs uppercase tracking-wider text-muted-foreground">
           <span>Recent chats</span>
           <Link href="/chat" className="hover:text-foreground">
@@ -173,17 +92,16 @@ export function Sidebar({ userEmail }: { userEmail: string }) {
         )}
       </div>
 
-      {/* Footer: theme toggle + Cmd+K hint + signout */}
-      <div className="border-t border-border p-3 space-y-2">
+      <div className="space-y-2 border-t border-border p-3">
         <div className="flex items-center justify-between">
           <button
             onClick={toggleTheme}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             {dark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
             {dark ? "Light mode" : "Dark mode"}
           </button>
-          <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground border border-border rounded px-1 py-0.5">
+          <span className="flex items-center gap-0.5 rounded border border-border px-1 py-0.5 text-[10px] text-muted-foreground">
             <Command className="h-2.5 w-2.5" />K
           </span>
         </div>

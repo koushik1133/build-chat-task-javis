@@ -8,14 +8,24 @@ function env(name: string): string {
   return process.env[name]?.trim() ?? "";
 }
 
-// Public paths that never require auth
-const PUBLIC = ["/", "/login", "/auth/", "/api/"];
+/** Routes that never require authentication. */
 function isPublicPath(path: string) {
-  return PUBLIC.some((p) => path === p || path.startsWith(p));
+  if (path === "/" || path === "/login") return true;
+  if (path.startsWith("/auth/")) return true;
+  // API routes enforce auth individually (requireUser, cron secret, public webhooks).
+  if (path.startsWith("/api/")) return true;
+  return false;
+}
+
+function forwardRequest(request: NextRequest, path: string) {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", path);
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export async function updateSession(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  const path = request.nextUrl.pathname;
+  let response = forwardRequest(request, path);
 
   const supabase = createServerClient(
     env("NEXT_PUBLIC_SUPABASE_URL"),
@@ -24,9 +34,8 @@ export async function updateSession(request: NextRequest) {
       cookies: {
         getAll: () => request.cookies.getAll(),
         setAll: (toSet: CookieToSet[]) => {
-          // Write refreshed tokens onto both the forwarded request and the response
           toSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
+          response = forwardRequest(request, path);
           toSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options)
           );
@@ -35,22 +44,23 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  const path = request.nextUrl.pathname;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (isPublicPath(path)) {
-    // Still call getUser on public paths so Supabase can refresh the token
-    // and write updated cookies — but never redirect.
-    await supabase.auth.getUser().catch(() => null);
+    if (user && path === "/login") {
+      const next = request.nextUrl.searchParams.get("next");
+      const dest =
+        next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login")
+          ? next
+          : "/chat";
+      return NextResponse.redirect(publicRedirect(dest, request));
+    }
     return response;
   }
 
-  // Protected path — check session from cookies (no network call → no loop risk).
-  // getUser() in the middleware already refreshed the token above when needed.
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
+  if (!user) {
     return NextResponse.redirect(
       publicRedirect(`/login?next=${encodeURIComponent(path)}`, request)
     );

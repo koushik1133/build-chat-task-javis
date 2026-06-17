@@ -120,7 +120,7 @@ export function NotificationBell() {
 
       {/* Toast popup */}
       {toast && (
-        <div className="fixed top-16 right-4 z-[60] w-80 rounded-xl border border-border bg-card shadow-2xl animate-in slide-in-from-top-2 fade-in duration-300">
+        <div className="fixed top-12 right-4 z-[60] w-80 rounded-xl border border-border bg-card shadow-2xl animate-in slide-in-from-top-2 fade-in duration-300">
           <div className="flex items-start gap-3 p-4">
             <div className="rounded-lg bg-primary/10 p-2 shrink-0">
               <Bell className="h-4 w-4 text-primary" />
@@ -142,14 +142,14 @@ export function NotificationBell() {
         </div>
       )}
 
-      <div ref={panelRef} className="fixed top-3 right-4 z-50">
+      <div ref={panelRef} className="relative">
         <button
           onClick={() => {
             if (!showNotifs) refresh();
             setShowNotifs(v => !v);
           }}
           className={cn(
-            "relative rounded-lg p-2 transition-colors",
+            "relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background transition-colors",
             showNotifs
               ? "bg-secondary text-foreground shadow-sm"
               : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
@@ -158,7 +158,7 @@ export function NotificationBell() {
           aria-expanded={showNotifs}
           aria-label="Notifications"
         >
-          <Bell className={cn("h-5 w-5", loading && "opacity-70")} />
+          <Bell className={cn("h-4 w-4", loading && "opacity-70")} />
           {unread > 0 && (
             <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-0.5 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center animate-in zoom-in duration-200">
               {unread > 9 ? "9+" : unread}
@@ -167,7 +167,7 @@ export function NotificationBell() {
         </button>
 
         {showNotifs && (
-          <div className="absolute right-0 top-full mt-2 w-80 rounded-xl border border-border bg-card shadow-2xl max-h-[min(24rem,70vh)] overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-card shadow-2xl max-h-[min(24rem,70vh)] overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 duration-150">
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
               <span className="text-sm font-semibold">Notifications</span>
               {unread > 0 && (
