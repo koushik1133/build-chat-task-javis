@@ -18,7 +18,16 @@ In Supabase Auth URL configuration:
 - Local Site URL: `http://localhost:3001`
 - Local Redirect URL: `http://localhost:3001/auth/callback`
 - Production Site URL: your deployed domain
-- Production Redirect URL: `https://your-domain.com/auth/callback`
+- Production Redirect URL: `https://your-domain.com/**` (wildcard covers `/auth/callback`)
+
+### Confirmation & magic-link emails
+
+Signup and magic-link emails are sent by **Supabase**, not the Javis app.
+
+- [Supabase → Authentication → Email Templates](https://supabase.com/dashboard/project/_/auth/templates) — customize copy
+- [Supabase → Authentication → SMTP Settings](https://supabase.com/dashboard/project/_/auth/smtp) — add custom SMTP (e.g. Resend) for reliable delivery
+- Free tier limits auth emails to ~4/hour; check spam if nothing arrives
+- To skip confirmation emails during testing: Authentication → Providers → Email → disable **Confirm email**
 
 For Google OAuth:
 

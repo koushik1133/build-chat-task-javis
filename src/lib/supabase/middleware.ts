@@ -1,7 +1,12 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { publicRedirect } from "@/lib/supabase/callback";
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions };
+
+function env(name: string): string {
+  return process.env[name]?.trim() ?? "";
+}
 
 // Public paths that never require auth
 const PUBLIC = ["/", "/login", "/auth/", "/api/"];
@@ -13,8 +18,8 @@ export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env("NEXT_PUBLIC_SUPABASE_URL"),
+    env("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     {
       cookies: {
         getAll: () => request.cookies.getAll(),
@@ -46,17 +51,9 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getSession();
 
   if (!session) {
-    const forwardedHost = request.headers.get("x-forwarded-host");
-    const proto = request.headers.get("x-forwarded-proto") ?? "https";
-    const base =
-      (forwardedHost &&
-        !forwardedHost.split(",")[0]!.trim().startsWith("0.0.0.0") &&
-        `${proto}://${forwardedHost.split(",")[0]!.trim()}`) ||
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-      request.nextUrl.origin;
-    const url = new URL("/login", base);
-    url.searchParams.set("next", path);
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(
+      publicRedirect(`/login?next=${encodeURIComponent(path)}`, request)
+    );
   }
 
   return response;

@@ -156,23 +156,32 @@ function LoginForm() {
     setBusy(true);
     setError(null);
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
     });
-    setBusy(false);
     if (error) {
+      setBusy(false);
       setError(
         error.message.toLowerCase().includes("already registered")
           ? "Account already exists — switch to Sign in."
           : error.message
       );
-    } else {
-      setSent(true);
+      return;
     }
+    // Email confirmation disabled → session returned immediately
+    if (data.session) {
+      const authenticated = await serverHasSession(5);
+      if (authenticated) {
+        router.replace(next);
+        return;
+      }
+    }
+    setBusy(false);
+    setSent(true);
   }
 
   async function googleSignIn() {
@@ -236,10 +245,21 @@ function LoginForm() {
           </div>
 
           {sent ? (
-            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-400">
-              {tab === "magic"
-                ? <><strong>{email}</strong> — check your inbox for a sign-in link.</>
-                : <><strong>{email}</strong> — check your inbox to confirm your account, then sign in.</>}
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-400 space-y-1">
+              {tab === "magic" ? (
+                <>
+                  <p><strong>{email}</strong> — check your inbox for a sign-in link.</p>
+                  <p className="text-xs opacity-80">Check spam if it doesn&apos;t arrive within a minute.</p>
+                </>
+              ) : (
+                <>
+                  <p><strong>{email}</strong> — check your inbox to confirm your account.</p>
+                  <p className="text-xs opacity-80">
+                    Confirmation emails are sent by Supabase. Check spam, or ask your admin to
+                    configure SMTP under Supabase → Authentication → Email.
+                  </p>
+                </>
+              )}
             </div>
 
           ) : tab === "signin" ? (
