@@ -46,8 +46,17 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getSession();
 
   if (!session) {
-    const next = encodeURIComponent(path);
-    return NextResponse.redirect(`/login?next=${next}`);
+    const forwardedHost = request.headers.get("x-forwarded-host");
+    const proto = request.headers.get("x-forwarded-proto") ?? "https";
+    const base =
+      (forwardedHost &&
+        !forwardedHost.split(",")[0]!.trim().startsWith("0.0.0.0") &&
+        `${proto}://${forwardedHost.split(",")[0]!.trim()}`) ||
+      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
+      request.nextUrl.origin;
+    const url = new URL("/login", base);
+    url.searchParams.set("next", path);
+    return NextResponse.redirect(url);
   }
 
   return response;
