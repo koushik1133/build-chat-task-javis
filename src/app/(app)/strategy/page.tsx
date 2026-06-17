@@ -191,7 +191,7 @@ export default function StrategyPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "javis-strategies-export.json";
+      a.download = "kernelhub-strategies-export.json";
       a.click();
     }
   }

@@ -13,7 +13,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { JarvisMascot } from "@/components/jarvis-mascot";
+import { KernelHubMascot } from "@/components/kernelhub-mascot";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { cn, timeAgo } from "@/lib/utils";
@@ -191,7 +191,7 @@ export default function BuildPage() {
       <div className="flex h-full items-center justify-center">
         <div className="space-y-4 text-center">
           <Loader2 className="mx-auto h-10 w-10 animate-spin text-primary" />
-          <JarvisMascot
+          <KernelHubMascot
             size="md"
             message="Building your site… first pass usually takes 20–60 seconds. Hang tight."
           />
@@ -214,7 +214,7 @@ export default function BuildPage() {
               )}
             </div>
 
-            <JarvisMascot
+            <KernelHubMascot
               size="lg"
               message="Pick a category. I'll ask a few questions tailored to it, show themes that fit, and suggest features the world's top sites in your niche actually use."
             />
@@ -355,7 +355,7 @@ export default function BuildPage() {
 
         {step === 3 && category && (
           <div className="space-y-6">
-            <JarvisMascot
+            <KernelHubMascot
               size="md"
               message="Here's what I'll build. Looks right? Hit Generate."
             />
@@ -663,7 +663,7 @@ function StepShell({
 }) {
   return (
     <div className="space-y-6">
-      <JarvisMascot size="md" message={mascot} />
+      <KernelHubMascot size="md" message={mascot} />
       <div>{children}</div>
       <div className="flex items-center justify-between">
         <Button variant="outline" onClick={back}>

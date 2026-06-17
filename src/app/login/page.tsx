@@ -6,6 +6,7 @@ import { Sparkles, Loader2, Mail, Eye, EyeOff, UserPlus, LogIn } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 
 type Tab = "magic" | "signin" | "signup";
@@ -219,8 +220,8 @@ function LoginForm() {
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-lg shadow-orange-500/25">
             <Sparkles className="h-6 w-6 text-white" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Javis</h1>
-          <p className="text-sm text-muted-foreground">Your everyday AI assistant</p>
+          <h1 className="text-2xl font-bold tracking-tight">{KERNELHUB_NAME}</h1>
+          <p className="text-sm text-muted-foreground">{KERNELHUB_TAGLINE}</p>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-7 shadow-sm">

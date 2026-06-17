@@ -76,7 +76,7 @@ if (forceClean || isNextCacheCorrupt()) {
   console.log("[dev] Cleared .next cache");
 }
 
-console.log(`[dev] Javis → http://localhost:${PORT}`);
+console.log(`[dev] KernelHub → http://localhost:${PORT}`);
 console.log("[dev] Tip: npm run dev:clean  forces a fresh cache\n");
 
 let cronProc;

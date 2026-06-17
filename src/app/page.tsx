@@ -8,10 +8,17 @@ import {
   Wand2,
   ListTodo,
   ArrowRight,
+  Bot,
+  Zap,
+  Kanban,
+  Briefcase,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
+
+const GITHUB_REPO = "https://github.com/koushik1133/build-chat-task-javis";
 
 export default async function Landing() {
   const supabase = await createClient();
@@ -22,20 +29,18 @@ export default async function Landing() {
 
   return (
     <main className="relative min-h-screen overflow-hidden">
-      {/* background glow */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,hsl(263_70%_60%_/_0.18),transparent_70%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,hsl(25_95%_53%_/_0.12),transparent_70%)]" />
 
-      {/* header */}
-      <header className="relative z-10 flex items-center justify-between px-8 py-5">
+      <header className="relative z-10 flex items-center justify-between px-4 py-5 sm:px-8">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/15">
             <Sparkles className="h-4 w-4 text-primary" />
           </div>
-          <span className="text-sm font-semibold">Javis</span>
+          <span className="text-sm font-semibold">{KERNELHUB_NAME}</span>
         </div>
         <div className="flex items-center gap-3">
           <Button asChild size="sm" variant="ghost">
-            <Link href="https://github.com/koushik1133/jarvis" target="_blank">
+            <Link href={GITHUB_REPO} target="_blank">
               GitHub
             </Link>
           </Button>
@@ -45,19 +50,17 @@ export default async function Landing() {
         </div>
       </header>
 
-      {/* hero */}
-      <section className="relative z-10 mx-auto max-w-4xl px-6 pt-20 text-center">
+      <section className="relative z-10 mx-auto max-w-4xl px-4 pt-16 text-center sm:px-6 sm:pt-20">
         <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs text-muted-foreground">
           <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-          Full-stack AI dev co-pilot · AWS DynamoDB + Vercel
+          End-to-end AI workspace · Cloud Run + Aurora DSQL
         </div>
-        <h1 className="text-5xl font-semibold tracking-tight sm:text-6xl">
-          A <span className="gradient-text">Jarvis</span> for developers.
+        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl">
+          <span className="gradient-text">{KERNELHUB_NAME}</span>
         </h1>
-        <p className="mx-auto mt-5 max-w-xl text-base text-muted-foreground">
-          Chat with an AI that knows your files, reviews your repos, tracks
-          your tasks, and generates entire production-ready sites — all on a
-          stack that scales from prototype to millions.
+        <p className="mx-auto mt-5 max-w-2xl text-base text-muted-foreground sm:text-lg">
+          {KERNELHUB_TAGLINE} Chat with your data, run production boards, deploy AI agents,
+          automate workflows, build strategy docs, and launch sites — all in one place.
         </p>
         <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
           <Button asChild size="lg">
@@ -66,19 +69,18 @@ export default async function Landing() {
             </Link>
           </Button>
           <Button asChild size="lg" variant="outline">
-            <Link href="https://github.com/koushik1133/jarvis" target="_blank">
+            <Link href={GITHUB_REPO} target="_blank">
               View on GitHub
             </Link>
           </Button>
         </div>
       </section>
 
-      {/* stack badge strip */}
-      <section className="relative z-10 mt-16 flex justify-center">
-        <div className="flex flex-wrap items-center justify-center gap-3 rounded-2xl border border-border bg-card/50 px-6 py-4 backdrop-blur-sm">
-          <StackBadge label="AWS DynamoDB" color="text-orange-400" dot />
+      <section className="relative z-10 mt-16 flex justify-center px-4">
+        <div className="flex flex-wrap items-center justify-center gap-3 rounded-2xl border border-border bg-card/50 px-4 py-4 backdrop-blur-sm sm:px-6">
+          <StackBadge label="Aurora DSQL" color="text-orange-400" dot />
           <Divider />
-          <StackBadge label="Vercel" color="text-foreground" dot />
+          <StackBadge label="Cloud Run" color="text-foreground" dot />
           <Divider />
           <StackBadge label="Next.js 15" color="text-foreground" dot />
           <Divider />
@@ -90,76 +92,88 @@ export default async function Landing() {
         </div>
       </section>
 
-      {/* features grid */}
-      <section className="relative z-10 mx-auto mt-16 grid max-w-5xl grid-cols-1 gap-4 px-6 sm:grid-cols-2 lg:grid-cols-3">
+      <section className="relative z-10 mx-auto mt-16 grid max-w-5xl grid-cols-1 gap-4 px-4 sm:grid-cols-2 sm:px-6 lg:grid-cols-3">
         <Feature
           icon={MessageSquare}
-          title="Streaming RAG chat"
-          body="Token-by-token answers grounded in your uploaded files. Context pulled from Pinecone vector search."
+          title="AI Chat & RAG"
+          body="Streaming answers grounded in your uploaded files. Semantic search pulls the right context every time."
+        />
+        <Feature
+          icon={Kanban}
+          title="Production board"
+          body="Customizable Kanban with human-in-the-loop approvals, priorities, and pipeline metrics."
+        />
+        <Feature
+          icon={Bot}
+          title="AI Agents"
+          body="Deploy pre-built or custom agents with role-specific prompts and run history."
+        />
+        <Feature
+          icon={Zap}
+          title="Automations"
+          body="Scheduled and event-driven workflows — Slack, email, notifications, and task creation."
+        />
+        <Feature
+          icon={Briefcase}
+          title="Strategy Hub"
+          body="AI-generated business strategy documents tailored to your company profile."
+        />
+        <Feature
+          icon={Wand2}
+          title="AI Studio"
+          body="Generate full production websites from a prompt. Refine, version, and publish."
         />
         <Feature
           icon={FileText}
           title="File knowledge base"
-          body="Drop PDFs, code, docs — chunked, embedded, retrieved per query. Your codebase becomes the context."
+          body="Drop PDFs, code, and docs — chunked, embedded, and retrieved per query."
         />
         <Feature
           icon={Github}
-          title="GitHub code review"
+          title="GitHub review"
           body="Paste a repo URL and get an AI code review with a generated README in seconds."
         />
         <Feature
           icon={ListTodo}
-          title="Auto task extraction"
-          body="Every chat is scanned for actionable items. Tasks surface in a dedicated board automatically."
-        />
-        <Feature
-          icon={Wand2}
-          title="AI site builder"
-          body="Generate a full production website from a prompt. Refine, version, publish to GitHub Pages or Vercel."
-        />
-        <Feature
-          icon={Database}
-          title="AWS DynamoDB backend"
-          body="Chat messages and site analytics stored in DynamoDB — partition key per chat or site for sub-millisecond reads at any scale."
+          title="Tasks & analytics"
+          body="Auto-extracted tasks from chats plus live metrics across sites, agents, and production."
         />
       </section>
 
-      {/* architecture callout */}
-      <section className="relative z-10 mx-auto mt-16 max-w-5xl px-6">
-        <div className="rounded-2xl border border-border bg-card/60 p-8 backdrop-blur-sm">
+      <section className="relative z-10 mx-auto mt-16 max-w-5xl px-4 sm:px-6">
+        <div className="rounded-2xl border border-border bg-card/60 p-6 backdrop-blur-sm sm:p-8">
           <h2 className="mb-1 text-lg font-semibold">Production-ready architecture</h2>
           <p className="mb-6 text-sm text-muted-foreground">
             Each data layer is chosen for its workload — not convenience.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <ArchBlock
-              label="AWS DynamoDB"
+              label="Aurora DSQL"
               color="border-orange-400/40 bg-orange-400/5"
               dot="bg-orange-400"
-              items={["Chat messages (append-only, PK=chatId)", "Site page-view events (PK=siteId)", "Sub-ms reads at any throughput"]}
+              items={["Users, chats, tasks, boards", "Agents & automations metadata", "ACID relational consistency"]}
             />
             <ArchBlock
-              label="Supabase Postgres"
+              label="Supabase Auth"
               color="border-emerald-400/40 bg-emerald-400/5"
               dot="bg-emerald-400"
-              items={["User accounts + RLS auth", "Chat / task / site metadata", "ACID relational consistency"]}
+              items={["Password & OAuth sign-in", "Magic link support", "Secure session cookies"]}
             />
             <ArchBlock
               label="Pinecone"
               color="border-violet-400/40 bg-violet-400/5"
               dot="bg-violet-400"
-              items={["768-dim text embeddings", "Per-user namespaced index", "Semantic RAG retrieval"]}
+              items={["Text embeddings per user", "Namespaced vector index", "Semantic RAG retrieval"]}
             />
           </div>
         </div>
       </section>
 
-      {/* metrics row */}
-      <section className="relative z-10 mx-auto mt-12 grid max-w-5xl grid-cols-2 gap-4 px-6 pb-24 sm:grid-cols-4">
-        <Metric value="< 200 ms" label="DynamoDB p99 read" />
-        <Metric value="∞" label="Chat message scale" />
-        <Metric value="5" label="RAG context chunks" />
-        <Metric value="Vercel" label="Deployed on" />
+      <section className="relative z-10 mx-auto mt-12 grid max-w-5xl grid-cols-2 gap-4 px-4 pb-24 sm:grid-cols-4 sm:px-6">
+        <Metric value="10+" label="Integrated modules" />
+        <Metric value="RAG" label="File-grounded chat" />
+        <Metric value="HITL" label="Approval workflows" />
+        <Metric value="Cloud Run" label="Deployed on" />
       </section>
     </main>
   );
@@ -175,7 +189,7 @@ function StackBadge({ label, color, dot }: { label: string; color: string; dot?:
 }
 
 function Divider() {
-  return <span className="h-4 w-px bg-border" />;
+  return <span className="hidden h-4 w-px bg-border sm:block" />;
 }
 
 function Feature({
@@ -232,4 +246,3 @@ function Metric({ value, label }: { value: string; label: string }) {
     </div>
   );
 }
-

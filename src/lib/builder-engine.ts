@@ -160,7 +160,7 @@ export const BUILDER_ENGINE_SCRIPT = `
     // Clone body to strip out injected attributes/scripts before saving
     const clone = document.documentElement.cloneNode(true);
     
-    // Remove all Jarvis scripts and elements
+    // Remove all KernelHub scripts and elements
     ['#jarvis-builder-engine', '#jarvis-edit-script', '#jarvis-edit-style', '#jarvis-edit-toast'].forEach(selector => {
       const el = clone.querySelector(selector);
       if (el) el.remove();

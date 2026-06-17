@@ -28,7 +28,7 @@ import {
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { JarvisMascot } from "@/components/jarvis-mascot";
+import { KernelHubMascot } from "@/components/kernelhub-mascot";
 import { cn } from "@/lib/utils";
 import { injectEditScript } from "@/lib/inline-edit";
 import { BUILDER_ENGINE_SCRIPT } from "@/lib/builder-engine";
@@ -414,7 +414,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
 
             {tab === "refine" && (
               <div className="space-y-4">
-                <JarvisMascot
+                <KernelHubMascot
                   size="sm"
                   message="Tap any chip to apply that change. Or write your own."
                 />
@@ -461,7 +461,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
 
             {tab === "features" && (
               <div className="space-y-3">
-                <JarvisMascot
+                <KernelHubMascot
                   size="sm"
                   message="Features picked for your specific site. One click adds it."
                 />
@@ -553,7 +553,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
 
             {tab === "security" && (
               <div className="space-y-3">
-                <JarvisMascot
+                <KernelHubMascot
                   size="sm"
                   message="Plain-English review of issues a real user might run into. Re-runs after each change."
                 />
@@ -956,7 +956,7 @@ function LeadsPanel({ siteId }: { siteId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <JarvisMascot size="sm" message="Form submissions from your generated site will appear here." />
+        <KernelHubMascot size="sm" message="Form submissions from your generated site will appear here." />
         <Button size="sm" variant="outline" className="h-8 px-2" onClick={loadLeads}>
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
@@ -1006,7 +1006,7 @@ function ComponentsPanel() {
   
   return (
     <div className="space-y-4">
-      <JarvisMascot size="sm" message="Drag these components into the live preview to insert them! You can also drag existing sections inside the preview to reorder them." />
+      <KernelHubMascot size="sm" message="Drag these components into the live preview to insert them! You can also drag existing sections inside the preview to reorder them." />
       <div className="grid grid-cols-2 gap-2">
         {components.map(c => (
           <div
@@ -1048,7 +1048,7 @@ function AnalyticsPanel({ siteId }: { siteId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <JarvisMascot size="sm" message="Here are your real-time page views." />
+        <KernelHubMascot size="sm" message="Here are your real-time page views." />
         <Button size="sm" variant="outline" className="h-8 px-2" onClick={load}>
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>

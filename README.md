@@ -1,4 +1,4 @@
-# Javis — AI Personal Project Assistant
+# KernelHub — End-to-End Operating System for Modern Business
 
 A full-stack AI workspace for developers and teams: chat with RAG over your files, review GitHub repos, run automations on a schedule, manage production Kanban, generate landing pages, and more.
 

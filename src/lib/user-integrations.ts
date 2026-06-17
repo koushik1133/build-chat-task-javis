@@ -52,12 +52,12 @@ export function isPlatformEmailAvailable(): boolean {
 }
 
 export function platformFromAddress(fromName?: string | null): string {
-  const base = process.env.RESEND_FROM ?? "Javis <onboarding@resend.dev>";
+  const base = process.env.RESEND_FROM ?? "KernelHub <onboarding@resend.dev>";
   if (!fromName?.trim()) return base;
 
   const match = base.match(/<([^>]+)>/);
   const email = match?.[1] ?? base;
-  return `${fromName.trim()} via Javis <${email}>`;
+  return `${fromName.trim()} via KernelHub <${email}>`;
 }
 
 export async function getUserIntegrations(userId: string): Promise<UserIntegrations | null> {
@@ -147,7 +147,7 @@ function humanizeResendError(message: string): string {
     return `Resend is in test mode — codes can only be sent to ${ownerMatch[1]} until your team verifies a domain at resend.com/domains. For now, use that email to test, or ask your admin to verify your company domain.`;
   }
   if (message.includes("verify a domain")) {
-    return "Your Javis admin needs to verify a sending domain in Resend before emails can go to any address.";
+    return "Your KernelHub admin needs to verify a sending domain in Resend before emails can go to any address.";
   }
   return message;
 }
@@ -180,10 +180,10 @@ export async function startEmailVerification(
     body: JSON.stringify({
       from,
       to: [normalized],
-      subject: `${code} is your Javis verification code`,
+      subject: `${code} is your KernelHub verification code`,
       html: `<div style="font-family:sans-serif;line-height:1.6;max-width:420px">
         <h2>Verify your email</h2>
-        <p>Enter this code in Javis to confirm <strong>${normalized}</strong>:</p>
+        <p>Enter this code in KernelHub to confirm <strong>${normalized}</strong>:</p>
         <p style="font-size:28px;font-weight:bold;letter-spacing:4px;margin:24px 0">${code}</p>
         <p style="color:#888;font-size:12px">Expires in 10 minutes. If you didn't request this, ignore this email.</p>
       </div>`,

@@ -65,7 +65,7 @@ const TRIGGER_OPTIONS = [
 const ACTION_OPTIONS = [
   { value: "Send Slack Message", desc: "Posts to your connected Slack channel." },
   { value: "Send Email", desc: "Sends to your saved email address." },
-  { value: "Send Notification", desc: "Bell icon alert on Javis — no setup needed." },
+  { value: "Send Notification", desc: "Bell icon alert on KernelHub — no setup needed." },
   { value: "Create Task", desc: "Adds a task to Tasks + bell notification when it runs." },
   { value: "Deploy Agent", desc: "AI runs a daily brief (Groq), saves output, sends to bell/email/Slack." },
 ];
@@ -339,7 +339,7 @@ export default function AutomationsPage() {
                     <p className="text-amber-800 dark:text-amber-200 mb-2">
                       {form.action === "Send Slack Message"
                         ? "Connect Slack once in Settings — then all workflows use it automatically."
-                        : "Add your email in Settings — Javis sends from your company AI address."}
+                        : "Add your email in Settings — KernelHub sends from your company AI address."}
                     </p>
                     <Link href="/settings/integrations">
                       <Button size="sm" variant="outline" className="h-7 text-xs">
@@ -429,7 +429,7 @@ function ActionConfigForm({
           </div>
           <Field label="Subject (optional)">
             <input value={config.subject ?? ""} onChange={e => onChange({ subject: e.target.value })}
-              placeholder={isScheduled ? "Javis daily: {{workflow}}" : "Javis: {{workflow}} — {{task_title}}"}
+              placeholder={isScheduled ? "KernelHub daily: {{workflow}}" : "KernelHub: {{workflow}} — {{task_title}}"}
               className={inputCls} />
           </Field>
           <TemplateField config={config} onChange={onChange} vars={vars} />
@@ -444,7 +444,7 @@ function ActionConfigForm({
     return (
       <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-xs text-amber-800 dark:text-amber-200">
         {!integrations?.email_available
-          ? "Email will be enabled by your Javis admin. Then add your address in Settings → Connections."
+          ? "Email will be enabled by your KernelHub admin. Then add your address in Settings → Connections."
           : <>Add your email in <Link href="/settings/integrations" className="text-primary hover:underline">Settings → Connections</Link>.</>}
       </div>
     );

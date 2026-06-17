@@ -78,7 +78,7 @@ export const INLINE_EDIT_SCRIPT = `
     saveTimer = setTimeout(function () {
       var clone = document.documentElement.cloneNode(true);
       
-      // Remove all Jarvis scripts and elements
+      // Remove all KernelHub scripts and elements
       ['#jarvis-builder-engine', '#jarvis-edit-script', '#jarvis-edit-style', '#jarvis-edit-toast'].forEach(function(selector) {
         var el = clone.querySelector(selector);
         if (el) el.remove();
