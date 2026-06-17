@@ -14,7 +14,12 @@ type Notification = {
 
 export const NOTIFICATIONS_REFRESH = "javis:notifications-refresh";
 
-export function NotificationBell() {
+type NotificationBellProps = {
+  /** inline = toolbar button (Production header). fixed = top-right overlay (all other pages). */
+  variant?: "inline" | "fixed";
+};
+
+export function NotificationBell({ variant = "inline" }: NotificationBellProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [showNotifs, setShowNotifs] = useState(false);
@@ -108,6 +113,8 @@ export function NotificationBell() {
     setUnread(0);
   }
 
+  const isFixed = variant === "fixed";
+
   return (
     <>
       {showNotifs && (
@@ -120,7 +127,12 @@ export function NotificationBell() {
 
       {/* Toast popup */}
       {toast && (
-        <div className="fixed top-20 right-4 z-[60] w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-border bg-card shadow-2xl animate-in slide-in-from-top-2 fade-in duration-300 lg:top-4">
+        <div
+          className={cn(
+            "fixed right-4 z-[60] w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-border bg-card shadow-2xl animate-in slide-in-from-top-2 fade-in duration-300",
+            isFixed ? "top-14 lg:top-16" : "top-20 lg:top-4"
+          )}
+        >
           <div className="flex items-start gap-3 p-4">
             <div className="rounded-lg bg-primary/10 p-2 shrink-0">
               <Bell className="h-4 w-4 text-primary" />
@@ -142,23 +154,36 @@ export function NotificationBell() {
         </div>
       )}
 
-      <div ref={panelRef} className="relative">
+      <div
+        ref={panelRef}
+        className={cn(isFixed ? "fixed top-3 right-4 z-50 max-lg:top-14" : "relative")}
+      >
         <button
           onClick={() => {
             if (!showNotifs) refresh();
             setShowNotifs(v => !v);
           }}
           className={cn(
-            "relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background transition-colors",
-            showNotifs
-              ? "bg-secondary text-foreground shadow-sm"
-              : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
+            "relative transition-colors",
+            isFixed
+              ? cn(
+                  "rounded-lg p-2",
+                  showNotifs
+                    ? "bg-secondary text-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
+                )
+              : cn(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background",
+                  showNotifs
+                    ? "bg-secondary text-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
+                )
           )}
           title="Notifications"
           aria-expanded={showNotifs}
           aria-label="Notifications"
         >
-          <Bell className={cn("h-4 w-4", loading && "opacity-70")} />
+          <Bell className={cn(isFixed ? "h-5 w-5" : "h-4 w-4", loading && "opacity-70")} />
           {unread > 0 && (
             <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-0.5 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center animate-in zoom-in duration-200">
               {unread > 9 ? "9+" : unread}

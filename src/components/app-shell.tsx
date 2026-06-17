@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { GlobalNotificationBell } from "@/components/global-notification-bell";
 import { KERNELHUB_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +71,7 @@ export function AppShell({
         <main className={cn("min-h-0 min-w-0 flex-1 overflow-hidden bg-background")}>
           {children}
         </main>
+        <GlobalNotificationBell />
       </div>
     </div>
   );
