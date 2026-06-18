@@ -26,7 +26,7 @@ function passwordRules(password: string) {
 }
 
 function safeNext(raw: string | null): string {
-  if (!raw) return "/chat";
+  if (!raw) return "/onboarding";
   try {
     const decoded = decodeURIComponent(raw);
     if (decoded.startsWith("/") && !decoded.startsWith("//") && !decoded.startsWith("/login")) {
@@ -35,7 +35,7 @@ function safeNext(raw: string | null): string {
   } catch {
     // Ignore malformed values and use the default app landing page.
   }
-  return "/chat";
+  return "/onboarding";
 }
 
 function LoginForm() {
