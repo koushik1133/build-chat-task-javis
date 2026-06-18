@@ -9,6 +9,7 @@ import {
   upsertUserIntegrations,
   toPublicView,
   isValidSlackWebhook,
+  isSandboxSender,
 } from "@/lib/user-integrations";
 
 export async function POST(req: Request) {
@@ -105,6 +106,49 @@ export async function POST(req: Request) {
         detail: (data as { message?: string }).message ?? res.statusText,
       });
     }
+
+    const emailId = (data as { id?: string }).id;
+    if (emailId && isSandboxSender(from)) {
+      // Poll to check sandbox delivery status
+      let delivered = true;
+      let lastEvent = "pending";
+      const start = Date.now();
+      while (Date.now() - start < 3000) {
+        try {
+          const pollRes = await fetch(`https://api.resend.com/emails/${emailId}`, {
+            headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` }
+          });
+          if (pollRes.ok) {
+            const pollData = await pollRes.json() as { last_event?: string };
+            lastEvent = pollData.last_event ?? "unknown";
+            if (lastEvent === "delivered") {
+              delivered = true;
+              break;
+            }
+            if (["bounced", "complained"].includes(lastEvent)) {
+              delivered = false;
+              break;
+            }
+          }
+        } catch {}
+        await new Promise((r) => setTimeout(r, 800));
+      }
+
+      if (!delivered || lastEvent === "bounced") {
+        return NextResponse.json({
+          success: false,
+          message: "Email rejected by recipient server",
+          detail: `Status: ${lastEvent}. Resend sandbox (onboarding@resend.dev) can only deliver to the Resend account owner's email. Verify a custom domain at resend.com/domains to send to any address.`,
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Test email sent to ${to}`,
+        detail: "⚠️ Using Resend sandbox — emails only reach the account owner's inbox. Verify a domain at resend.com/domains for reliable delivery.",
+      });
+    }
+
     return NextResponse.json({ success: true, message: `Test email sent to ${to}` });
   }
 

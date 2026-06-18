@@ -110,14 +110,19 @@ export async function POST(req: Request) {
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
     [siteId, user.id, title, categoryId, JSON.stringify(plan), finalHtml]
-  );
+  ).catch((e) => {
+    console.error("[generate] DSQL site insert error:", e);
+    return null;
+  });
   if (!site) return NextResponse.json({ error: "insert failed" }, { status: 500 });
 
   await query(
     `INSERT INTO site_revisions (site_id, user_id, source, prompt, html)
      VALUES ($1, $2, 'initial', $3, $4)`,
     [siteId, user.id, brief, finalHtml]
-  );
+  ).catch((e) => {
+    console.error("[generate] DSQL site_revision insert error:", e);
+  });
 
   return NextResponse.json({ siteId: site.id });
 }

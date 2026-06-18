@@ -3,7 +3,7 @@
  */
 
 import { query, queryOne } from "@/lib/dsql";
-import { platformFromAddress, type UserIntegrations } from "@/lib/user-integrations";
+import { platformFromAddress, isSandboxSender, type UserIntegrations } from "@/lib/user-integrations";
 import { runAgentJob } from "@/lib/agent-runner";
 
 export type AutomationContext = {
@@ -43,6 +43,22 @@ export type ExecuteResult = {
   detail?: string;
 };
 
+// ─── Timeout helper ───────────────────────────────────────────────────────────
+const FETCH_TIMEOUT_MS = 10_000;
+
+function fetchWithTimeout(
+  url: string,
+  opts: RequestInit,
+  timeoutMs = FETCH_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...opts, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
+
+// ─── Interpolation ────────────────────────────────────────────────────────────
 function interpolate(template: string, ctx: AutomationContext): string {
   const now = new Date();
   return template
@@ -67,30 +83,82 @@ function defaultMessage(ctx: AutomationContext): string {
   return parts.join("\n");
 }
 
+// ─── Slack ────────────────────────────────────────────────────────────────────
 async function sendSlack(webhookUrl: string, text: string): Promise<ExecuteResult> {
-  const res = await fetch(webhookUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    return { success: false, message: "Slack delivery failed", detail: `${res.status}: ${body.slice(0, 200)}` };
+  try {
+    const res = await fetchWithTimeout(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { success: false, message: "Slack delivery failed", detail: `${res.status}: ${body.slice(0, 200)}` };
+    }
+    return { success: true, message: "Slack message sent" };
+  } catch (err) {
+    const msg = (err as Error).name === "AbortError"
+      ? "Slack webhook timed out (10s). Check the webhook URL and try again."
+      : (err as Error).message;
+    return { success: false, message: "Slack delivery failed", detail: msg };
   }
-  return { success: true, message: "Slack message sent" };
 }
 
+// ─── Webhook ──────────────────────────────────────────────────────────────────
 async function sendWebhook(url: string, payload: Record<string, unknown>): Promise<ExecuteResult> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": "KernelHub-Automations/1.0" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    return { success: false, message: "Webhook failed", detail: `${res.status}: ${body.slice(0, 200)}` };
+  try {
+    const res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": "KernelHub-Automations/1.0" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { success: false, message: "Webhook failed", detail: `${res.status}: ${body.slice(0, 200)}` };
+    }
+    return { success: true, message: `Webhook POST ${url.slice(0, 40)}…` };
+  } catch (err) {
+    const msg = (err as Error).name === "AbortError"
+      ? "Webhook timed out (10s)."
+      : (err as Error).message;
+    return { success: false, message: "Webhook failed", detail: msg };
   }
-  return { success: true, message: `Webhook POST ${url.slice(0, 40)}…` };
+}
+
+// ─── Email (Resend) with delivery verification ────────────────────────────────
+/**
+ * Check whether Resend actually delivered the email, not just accepted it.
+ * Resend sandbox silently drops emails to non-owner addresses while returning 200.
+ */
+async function verifyResendDelivery(
+  emailId: string,
+  apiKey: string,
+  maxWaitMs = 3000
+): Promise<{ delivered: boolean; lastEvent: string }> {
+  const start = Date.now();
+  const pollInterval = 800;
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://api.resend.com/emails/${emailId}`,
+        { headers: { Authorization: `Bearer ${apiKey}` } },
+        5000
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { last_event?: string };
+        const evt = data.last_event ?? "unknown";
+        // "delivered" means Resend's MTA accepted it.
+        // "bounced", "complained", "delivery_delayed" indicate real failures.
+        if (evt === "delivered") return { delivered: true, lastEvent: evt };
+        if (["bounced", "complained"].includes(evt)) return { delivered: false, lastEvent: evt };
+      }
+    } catch {
+      // poll failed, try again
+    }
+    await new Promise((r) => setTimeout(r, pollInterval));
+  }
+  // Timeout — assume pending
+  return { delivered: true, lastEvent: "pending" };
 }
 
 async function sendEmail(to: string, subject: string, html: string, fromName?: string | null): Promise<ExecuteResult> {
@@ -102,19 +170,56 @@ async function sendEmail(to: string, subject: string, html: string, fromName?: s
       detail: "Ask your KernelHub admin to enable platform email (one-time setup).",
     };
   }
+
   const from = platformFromAddress(fromName);
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to: [to], subject, html }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return { success: false, message: "Email failed", detail: (data as { message?: string }).message ?? res.statusText };
+
+  // Warn if using sandbox sender
+  if (isSandboxSender(from)) {
+    console.warn(
+      `[email] Sending from sandbox domain (${from}). Emails will only reach the Resend account owner's address. Verify a custom domain at resend.com/domains.`
+    );
   }
-  return { success: true, message: `Email sent to ${to}` };
+
+  try {
+    const res = await fetchWithTimeout("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: [to], subject, html }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { id?: string; message?: string };
+
+    if (!res.ok) {
+      return { success: false, message: "Email failed", detail: data.message ?? res.statusText };
+    }
+
+    // Verify actual delivery if we got an email ID
+    if (data.id && isSandboxSender(from)) {
+      const check = await verifyResendDelivery(data.id, apiKey);
+      if (!check.delivered) {
+        return {
+          success: false,
+          message: "Email rejected by recipient server",
+          detail: `Status: ${check.lastEvent}. Resend sandbox (onboarding@resend.dev) can only deliver to the Resend account owner's email. Verify a custom domain at resend.com/domains to send to any address.`,
+        };
+      }
+      // Even if "delivered", warn about sandbox
+      return {
+        success: true,
+        message: `Email sent to ${to}`,
+        detail: "⚠️ Using Resend sandbox — emails only reach the account owner's inbox. Verify a domain at resend.com/domains for reliable delivery.",
+      };
+    }
+
+    return { success: true, message: `Email sent to ${to}` };
+  } catch (err) {
+    const msg = (err as Error).name === "AbortError"
+      ? "Resend API timed out (10s). Try again."
+      : (err as Error).message;
+    return { success: false, message: "Email failed", detail: msg };
+  }
 }
 
+// ─── Notifications & Tasks ────────────────────────────────────────────────────
 async function createInAppNotification(userId: string, title: string, body: string): Promise<ExecuteResult> {
   await query(
     `INSERT INTO notifications (user_id, title, body) VALUES ($1, $2, $3)`,
@@ -136,6 +241,7 @@ async function createTask(userId: string, title: string, workflowName: string): 
   return { success: true, message: `Task created: ${title.slice(0, 50)}` };
 }
 
+// ─── Deploy Agent ─────────────────────────────────────────────────────────────
 async function runAgentWithDelivery(
   userId: string,
   config: ActionConfig,
@@ -172,16 +278,18 @@ async function runAgentWithDelivery(
   const excerpt = run.output.length > 280 ? `${run.output.slice(0, 280)}…` : run.output;
   const delivered: string[] = [];
 
+  // Fire all delivery channels in parallel for speed
+  const deliveryPromises: Promise<void>[] = [];
+
   if (deliver.includes("notification")) {
-    await query(
-      `INSERT INTO notifications (user_id, title, body) VALUES ($1, $2, $3)`,
-      [
-        userId,
-        `${run.agent.name} — daily report`,
-        excerpt,
-      ]
-    ).catch(() => {});
-    delivered.push("website");
+    deliveryPromises.push(
+      query(
+        `INSERT INTO notifications (user_id, title, body) VALUES ($1, $2, $3)`,
+        [userId, `${run.agent.name} — daily report`, excerpt]
+      )
+        .then(() => { delivered.push("website"); })
+        .catch(() => {})
+    );
   }
 
   if (deliver.includes("email")) {
@@ -196,8 +304,10 @@ async function runAgentWithDelivery(
         <p style="white-space:pre-wrap">${run.output.replace(/</g, "&lt;")}</p>
         <p style="color:#888;font-size:12px">Stored in KernelHub → AI Agents → Run history</p>
       </div>`;
-      const r = await sendEmail(to, subject, html, integrations?.email_from_name);
-      if (r.success) delivered.push("email");
+      deliveryPromises.push(
+        sendEmail(to, subject, html, integrations?.email_from_name)
+          .then((r) => { if (r.success) delivered.push("email"); })
+      );
     }
   }
 
@@ -205,10 +315,14 @@ async function runAgentWithDelivery(
     const url = integrations?.slack_webhook_url?.trim();
     if (url) {
       const text = `*${run.agent.name}* (${run.agent.role})\n_${ctx.workflow_name}_\n\n${run.output.slice(0, 3000)}`;
-      const r = await sendSlack(url, text);
-      if (r.success) delivered.push("Slack");
+      deliveryPromises.push(
+        sendSlack(url, text)
+          .then((r) => { if (r.success) delivered.push("Slack"); })
+      );
     }
   }
+
+  await Promise.allSettled(deliveryPromises);
 
   return {
     success: true,
@@ -217,6 +331,7 @@ async function runAgentWithDelivery(
   };
 }
 
+// ─── Main dispatcher ──────────────────────────────────────────────────────────
 export async function executeAutomationAction(
   actionType: string,
   config: ActionConfig,

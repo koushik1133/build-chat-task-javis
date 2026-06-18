@@ -83,7 +83,7 @@ export async function deleteFile(userId: string, fileId: string) {
   do {
     const page = await ns.listPaginated({ prefix: `${fileId}:`, paginationToken: pageToken });
     const ids = (page.vectors ?? []).map((v) => v.id!).filter(Boolean);
-    if (ids.length) await ns.deleteMany(ids);
+    if (ids.length) await ns.deleteMany({ ids });
     pageToken = page.pagination?.next;
   } while (pageToken);
 }

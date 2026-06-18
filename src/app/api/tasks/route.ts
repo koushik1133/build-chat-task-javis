@@ -18,7 +18,10 @@ export async function GET() {
      ORDER BY created_at DESC
      LIMIT 100`,
     [user.id]
-  );
+  ).catch((err) => {
+    console.error("[tasks] list failed:", err);
+    return [];
+  });
 
   return NextResponse.json({ tasks });
 }

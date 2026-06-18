@@ -6,7 +6,7 @@ import {
   type AutomationContext,
   type ExecuteResult,
 } from "@/lib/automation-executor";
-import { getUserIntegrations, mergeActionWithIntegrations } from "@/lib/user-integrations";
+import { getUserIntegrations, mergeActionWithIntegrations, type UserIntegrations } from "@/lib/user-integrations";
 
 type AutoRow = {
   id: string;
@@ -19,10 +19,11 @@ type AutoRow = {
 export async function runAutomation(
   userId: string,
   row: AutoRow,
-  ctx: Omit<AutomationContext, "user_id" | "workflow_name" | "trigger">
+  ctx: Omit<AutomationContext, "user_id" | "workflow_name" | "trigger">,
+  prefetchedIntegrations?: UserIntegrations | null
 ): Promise<ExecuteResult & { id: string; name: string; action: string }> {
   const config = parseActionConfig(row.action_config);
-  const integrations = await getUserIntegrations(userId);
+  const integrations = prefetchedIntegrations !== undefined ? prefetchedIntegrations : await getUserIntegrations(userId);
   const mergedConfig = mergeActionWithIntegrations(row.action_type, config, integrations) as ActionConfig;
   const fullCtx: AutomationContext = {
     user_id: userId,
@@ -60,20 +61,33 @@ export async function fireKanbanAutomations(
   ).catch(() => []);
 
   const rows = matched as AutoRow[];
-  const results = [];
+  if (rows.length === 0) return [];
 
-  for (const row of rows) {
-    const result = await runAutomation(userId, row, {
+  // Fetch integrations once for the entire batch
+  const integrations = await getUserIntegrations(userId);
+
+  const promises = rows.map((row) =>
+    runAutomation(userId, row, {
       task_title: context.task_title,
       from_column: context.from_column,
       to_column: context.to_column,
       kanban_label: label,
       via_approval: context.via_approval,
-    });
-    results.push(result);
-  }
+    }, integrations)
+  );
 
-  return results;
+  const settled = await Promise.allSettled(promises);
+  return settled.map((r, i) => {
+    if (r.status === "fulfilled") return r.value;
+    return {
+      id: rows[i].id,
+      name: rows[i].name,
+      action: rows[i].action_type,
+      success: false,
+      message: "Execution failed",
+      detail: String(r.reason),
+    };
+  });
 }
 
 export async function getAutomationById(userId: string, id: string): Promise<AutoRow | null> {

@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   // Prevent Next from using the wrong monorepo root (parent package-lock.json)
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ["pdf-parse", "pptxgenjs"],
+  serverExternalPackages: ["pdf-parse", "pptxgenjs", "pg", "@aws/aurora-dsql-node-postgres-connector"],
   experimental: {
     serverActions: { bodySizeLimit: "20mb" },
   },

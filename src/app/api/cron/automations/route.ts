@@ -89,15 +89,27 @@ async function handleCron(req: Request) {
 
       // Email/Slack/etc. must finish before cron returns; agents can run in background.
       if (FAST_ACTIONS.has(row.action_type)) {
-        const result = await runAutomation(row.user_id, row, ctx);
-        ran.push({
-          id: row.id,
-          name: row.name,
-          success: result.success,
-          message: result.message,
-          fired_at: fireAt,
-          latency_ms: Date.now() - tickStart,
-        });
+        try {
+          const result = await runAutomation(row.user_id, row, ctx);
+          ran.push({
+            id: row.id,
+            name: row.name,
+            success: result.success,
+            message: result.message,
+            fired_at: fireAt,
+            latency_ms: Date.now() - tickStart,
+          });
+        } catch (err) {
+          console.error(`[cron] run failed for ${row.id}:`, err);
+          ran.push({
+            id: row.id,
+            name: row.name,
+            success: false,
+            message: err instanceof Error ? err.message : "run failed",
+            fired_at: fireAt,
+            latency_ms: Date.now() - tickStart,
+          });
+        }
         return;
       }
 
@@ -127,9 +139,25 @@ async function handleCron(req: Request) {
 }
 
 export async function GET(req: Request) {
-  return handleCron(req);
+  try {
+    return await handleCron(req);
+  } catch (err) {
+    console.error("[cron] unhandled:", err);
+    return NextResponse.json(
+      { error: "cron failed", detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {
-  return handleCron(req);
+  try {
+    return await handleCron(req);
+  } catch (err) {
+    console.error("[cron] unhandled:", err);
+    return NextResponse.json(
+      { error: "cron failed", detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
+  }
 }

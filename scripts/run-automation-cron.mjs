@@ -34,10 +34,15 @@ async function tick() {
   try {
     const res = await fetch(`${URL}/api/cron/automations`, {
       headers: { Authorization: `Bearer ${SECRET}` },
-      // Fast actions (email/Slack) finish in ~1–3s; agent runs continue server-side.
       signal: AbortSignal.timeout(15_000),
     });
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text.slice(0, 200) };
+    }
     const ts = new Date().toLocaleTimeString(undefined, { hour12: false });
     if (data.ran?.length > 0) {
       for (const r of data.ran) {
@@ -60,7 +65,7 @@ function msUntilNextSecond() {
   return 1000 - (Date.now() % 1000);
 }
 
-console.log(`Javis scheduler → ${URL} (every ${INTERVAL_MS / 1000}s, second-aligned)`);
+console.log(`KernelHub scheduler → ${URL} (every ${INTERVAL_MS / 1000}s, second-aligned)`);
 console.log(`CRON_SECRET: ${SECRET.slice(0, 6)}…`);
 console.log("Scheduled automations fire within ~1s of the set time (e.g. 3:45 → 3:45:01).");
 

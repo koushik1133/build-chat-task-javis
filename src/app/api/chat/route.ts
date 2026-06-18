@@ -3,7 +3,8 @@ import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
 import { searchChunks } from "@/lib/pinecone";
 import { streamChat, completeJson, type ChatMessage } from "@/lib/llm";
-import { SYSTEM_BASE, buildContextBlock, TASK_EXTRACTOR_SYS } from "@/lib/prompts";
+import { SYSTEM_BASE, buildBusinessDnaBlock, buildContextBlock, TASK_EXTRACTOR_SYS } from "@/lib/prompts";
+import type { BusinessContext } from "@/lib/strategy";
 import { putMessage, getMessages } from "@/lib/dynamodb";
 import { queryOne, query } from "@/lib/dsql";
 
@@ -36,7 +37,10 @@ export async function POST(req: Request) {
     const row = await queryOne<{ id: string }>(
       "INSERT INTO chats (user_id, title) VALUES ($1, $2) RETURNING id",
       [user.id, title]
-    );
+    ).catch((e) => {
+      console.error("[chat] DSQL chat insert error:", e);
+      return null;
+    });
     if (!row) return NextResponse.json({ error: "failed to create chat" }, { status: 500 });
     chatId = row.id;
   }
@@ -54,18 +58,26 @@ export async function POST(req: Request) {
     role: "user",
     content: message,
     createdAt: now,
+  }).catch((e) => {
+    console.error("[chat] DynamoDB user message error:", e);
   });
 
-  // 3. Pull last 10 turns from DynamoDB + RAG hits from Pinecone in parallel.
-  const [history, chunks] = await Promise.all([
+  // 3. Pull history, RAG hits, and Business DNA in parallel.
+  const [history, chunks, profile] = await Promise.all([
     getMessages(resolvedChatId, 10).catch(() => []),
     searchChunks(user.id, message, 5).catch(() => []),
+    queryOne<BusinessContext>(
+      "SELECT company_name, industry, product_desc, target_market, stage, geography, challenge, revenue_range FROM business_profile WHERE user_id = $1",
+      [user.id]
+    ).catch(() => null),
   ]);
 
   const context = buildContextBlock(chunks);
+  const dna = buildBusinessDnaBlock(profile);
+  const systemParts = [SYSTEM_BASE, dna, context].filter(Boolean);
 
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_BASE + (context ? `\n\n${context}` : "") },
+    { role: "system", content: systemParts.join("\n\n") },
     ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
   ];
 

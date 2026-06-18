@@ -52,8 +52,13 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   values: unknown[] = []
 ): Promise<T[]> {
   const pool = getPool();
-  const result = await pool.query<T>(sql, values);
-  return result.rows;
+  try {
+    const result = await pool.query<T>(sql, values);
+    return result.rows;
+  } catch (err) {
+    console.error("[DSQL Query Error]", sql, values, err);
+    throw err;
+  }
 }
 
 /** Run a parameterised query and return the first row (or null). */

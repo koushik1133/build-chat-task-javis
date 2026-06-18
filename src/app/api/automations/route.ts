@@ -62,6 +62,9 @@ export async function POST(req: Request) {
         db_error: msg,
       }, { status: 500 });
     }
-    throw err;
+    return NextResponse.json({
+      error: "Failed to create workflow",
+      detail: msg || "Database error",
+    }, { status: 503 });
   }
 }

@@ -1,12 +1,29 @@
 import type { RetrievedChunk } from "./pinecone";
+import type { BusinessContext } from "./strategy";
 
-export const SYSTEM_BASE = `You are KernelHub, a friendly, general-purpose AI assistant.
-You can help with anything: casual conversation, writing, research, math, planning, study help,
-career advice, cooking, travel, fitness, life questions, and yes — coding too. Match the user's
-register: greet warmly when greeted, be playful when they're casual, be precise and code-first
-when they ask technical questions. Don't assume every message is a coding task.
+export const SYSTEM_BASE = `You are KernelHub, an AI business operating assistant for founders and operators.
+Help with strategy, operations, production planning, customer communication, competitive analysis,
+team priorities, automations, and decisions grounded in the user's Business DNA and uploaded files.
+Be direct, practical, and action-oriented. Prefer concrete next steps over generic advice.
 When citing a user-uploaded file, name it inline like (from notes.md). Never invent file content.
+If Business DNA is missing or incomplete, answer from context and files; suggest completing onboarding when relevant.
 If unsure, say so and ask one focused follow-up question.`;
+
+export function buildBusinessDnaBlock(profile: Partial<BusinessContext> | null): string {
+  if (!profile?.company_name?.trim()) return "";
+  const lines = [
+    "## Business DNA (from onboarding)",
+    `- Company: ${profile.company_name}`,
+  ];
+  if (profile.industry) lines.push(`- Industry: ${profile.industry}`);
+  if (profile.stage) lines.push(`- Stage: ${profile.stage}`);
+  if (profile.product_desc) lines.push(`- Product/Service: ${profile.product_desc}`);
+  if (profile.target_market) lines.push(`- Target market: ${profile.target_market}`);
+  if (profile.geography) lines.push(`- Geography: ${profile.geography}`);
+  if (profile.challenge) lines.push(`- Key challenge: ${profile.challenge.replace(/_/g, " ")}`);
+  if (profile.revenue_range) lines.push(`- Revenue range: ${profile.revenue_range}`);
+  return lines.join("\n");
+}
 
 export function buildContextBlock(chunks: RetrievedChunk[]): string {
   if (chunks.length === 0) return "";

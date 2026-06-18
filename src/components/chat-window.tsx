@@ -1,12 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Send, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Markdown } from "@/components/markdown";
 import { KERNELHUB_TAGLINE } from "@/lib/brand";
+import {
+  buildChatSuggestions,
+  chatEmptySubtitle,
+  chatPlaceholder,
+  type BusinessDna,
+} from "@/lib/chat-suggestions";
 
 type Msg = { id?: string; role: "user" | "assistant"; content: string };
 
@@ -21,7 +27,20 @@ export function ChatWindow({
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [profile, setProfile] = useState<BusinessDna | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+
+  const suggestions = useMemo(() => buildChatSuggestions(profile), [profile]);
+  const placeholder = useMemo(() => chatPlaceholder(profile), [profile]);
+
+  useEffect(() => {
+    fetch("/api/onboarding")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.profile) setProfile(d.profile);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     setMessages(initialMessages);
@@ -94,7 +113,7 @@ export function ChatWindow({
     <div className="flex h-full flex-col">
       <div ref={scrollerRef} className="scrollbar-thin flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
         {messages.length === 0 ? (
-          <EmptyState onPick={(p) => setInput(p)} />
+          <EmptyState profile={profile} suggestions={suggestions} onPick={(p) => setInput(p)} />
         ) : (
           <div className="mx-auto max-w-3xl space-y-6">
             {messages.map((m, i) => (
@@ -115,7 +134,7 @@ export function ChatWindow({
                 send();
               }
             }}
-            placeholder="Ask anything — code, study, life, planning, or just chat…"
+            placeholder={placeholder}
             rows={2}
             className="resize-none"
           />
@@ -124,7 +143,7 @@ export function ChatWindow({
           </Button>
         </div>
         <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-muted-foreground">
-          General-purpose AI, grounded in your uploaded files. Shift+Enter for newline.
+          Business AI grounded in your Business DNA and uploaded files. Shift+Enter for newline.
         </p>
       </div>
     </div>
@@ -165,18 +184,15 @@ function Bubble({
   );
 }
 
-const SUGGESTIONS = [
-  "Plan a 7-day high-protein meal plan for a college student.",
-  "Summarize my uploaded notes into a 5-bullet study guide.",
-  "Help me draft a polite email asking my professor for an extension.",
-  "Give me 3 weekend trip ideas under $300 from Iowa.",
-  "Write a Postgres schema for a habit tracker app.",
-  "Explain how transformers work like I'm a CS senior.",
-  "Suggest a 30-minute beginner workout I can do at home.",
-  "Brainstorm side-project ideas that look great on a SWE resume.",
-];
-
-function EmptyState({ onPick }: { onPick: (p: string) => void }) {
+function EmptyState({
+  profile,
+  suggestions,
+  onPick,
+}: {
+  profile: BusinessDna | null;
+  suggestions: string[];
+  onPick: (p: string) => void;
+}) {
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center px-4 pt-8 text-center sm:px-6 sm:pt-12 lg:pt-16">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/30">
@@ -187,10 +203,10 @@ function EmptyState({ onPick }: { onPick: (p: string) => void }) {
       </h1>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">{KERNELHUB_TAGLINE}</p>
       <p className="mt-3 text-xs text-muted-foreground/80">
-        Ask anything — your uploaded files add extra context to every reply.
+        {chatEmptySubtitle(profile)}
       </p>
       <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-        {SUGGESTIONS.map((s) => (
+        {suggestions.map((s) => (
           <button
             key={s}
             onClick={() => onPick(s)}

@@ -60,6 +60,12 @@ export function platformFromAddress(fromName?: string | null): string {
   return `${fromName.trim()} via KernelHub <${email}>`;
 }
 
+export function isSandboxSender(fromAddress: string | null | undefined): boolean {
+  if (!fromAddress) return false;
+  return fromAddress.toLowerCase().includes("onboarding@resend.dev") || fromAddress.toLowerCase().includes("resend.dev");
+}
+
+
 export async function getUserIntegrations(userId: string): Promise<UserIntegrations | null> {
   return queryOne<UserIntegrations>(
     `SELECT user_id, slack_webhook_url, slack_channel_name, slack_connected_at,

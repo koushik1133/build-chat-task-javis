@@ -17,7 +17,10 @@ export async function GET() {
      ORDER BY updated_at DESC
      LIMIT 50`,
     [user.id]
-  );
+  ).catch((err) => {
+    console.error("[chats] list failed:", err);
+    return [];
+  });
 
   return NextResponse.json({ chats });
 }

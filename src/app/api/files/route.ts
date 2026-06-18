@@ -23,7 +23,10 @@ export async function GET() {
      WHERE user_id = $1
      ORDER BY created_at DESC`,
     [user.id]
-  );
+  ).catch((err) => {
+    console.error("[files] list failed:", err);
+    return [];
+  });
 
   return NextResponse.json({ files });
 }
