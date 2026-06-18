@@ -54,7 +54,7 @@ export async function updateSession(request: NextRequest) {
       const dest =
         next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login")
           ? next
-          : "/chat";
+          : "/onboarding";
       return NextResponse.redirect(publicRedirect(dest, request));
     }
     return response;
