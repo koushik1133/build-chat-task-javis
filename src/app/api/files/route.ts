@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireUser, createAdminClient } from "@/lib/supabase/server";
 import { query, queryOne } from "@/lib/dsql";
 import { extractText, chunkText } from "@/lib/chunk";
 import { upsertChunks, deleteFile as deleteFromVector } from "@/lib/pinecone";
@@ -66,6 +66,18 @@ export async function POST(req: Request) {
   // 2. Upload raw file to Supabase Storage (blob storage, not a database).
   const storagePath = `${user.id}/${Date.now()}-${file.name}`;
   const buf = Buffer.from(await file.arrayBuffer());
+
+  // Ensure files bucket exists
+  try {
+    const adminSupabase = createAdminClient();
+    const { data: buckets } = await adminSupabase.storage.listBuckets();
+    if (!buckets?.some((b) => b.name === "files")) {
+      await adminSupabase.storage.createBucket("files", { public: false });
+    }
+  } catch (bucketErr) {
+    console.warn("[files] Failed to list/create files bucket with admin client:", bucketErr);
+  }
+
   const { error: upErr } = await supabase.storage
     .from("files")
     .upload(storagePath, buf, { contentType: file.type, upsert: false });

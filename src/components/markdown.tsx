@@ -3,19 +3,10 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import hljs from "highlight.js/lib/common";
-import { useEffect, useRef } from "react";
 
 export function Markdown({ children }: { children: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    ref.current?.querySelectorAll("pre code").forEach((el) => {
-      hljs.highlightElement(el as HTMLElement);
-    });
-  }, [children]);
-
   return (
     <div
-      ref={ref}
       className="prose max-w-none text-sm leading-relaxed
                  [&>*]:my-2 [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2
                  [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground
@@ -29,7 +20,49 @@ export function Markdown({ children }: { children: string }) {
                  [&_table]:text-xs [&_th]:px-2 [&_td]:px-2 [&_th]:py-1 [&_td]:py-1
                  [&_th]:border [&_td]:border [&_th]:border-border [&_td]:border-border"
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          code({ className, children, ...props }) {
+            const match = /language-(\w+)/.exec(className || "");
+            const codeContent = String(children).replace(/\n$/, "");
+            const isBlock = className?.includes("language-") || codeContent.includes("\n");
+
+            if (isBlock) {
+              if (match) {
+                try {
+                  const highlighted = hljs.highlight(codeContent, { language: match[1] }).value;
+                  return (
+                    <pre className="!bg-secondary/40 p-4 rounded-lg overflow-x-auto my-3">
+                      <code
+                        className={className}
+                        dangerouslySetInnerHTML={{ __html: highlighted }}
+                      />
+                    </pre>
+                  );
+                } catch (e) {
+                  // fallback
+                }
+              }
+              return (
+                <pre className="!bg-secondary/40 p-4 rounded-lg overflow-x-auto my-3">
+                  <code className={className} {...props}>
+                    {children}
+                  </code>
+                </pre>
+              );
+            }
+
+            return (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            );
+          },
+        }}
+      >
+        {children}
+      </ReactMarkdown>
     </div>
   );
 }

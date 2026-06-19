@@ -87,7 +87,10 @@ export async function runAgentJob(
       userPrompt,
       output,
     ]
-  ).catch(() => null);
+  ).catch((dbErr) => {
+    console.error("[agent-runner] failed to log agent_run:", dbErr);
+    return { id: `fallback-run-${crypto.randomUUID()}` };
+  });
 
   await query(
     `UPDATE agents SET status = 'active', tasks_completed = tasks_completed + 1 WHERE id = $1`,
