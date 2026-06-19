@@ -136,16 +136,17 @@ function LoginForm() {
     setBusy(true);
     setError(null);
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       setBusy(false);
       setError(
         error.message.toLowerCase().includes("invalid login credentials")
-          ? "Wrong email or password. If you just signed up, make sure your email is confirmed (or email confirmation is disabled in Supabase)."
+          ? "Wrong email or password."
           : error.message
       );
+    } else if (data.session) {
+      router.replace(next);
     }
-    // success → onAuthStateChange SIGNED_IN fires → router.replace(next)
   }
 
   async function signUp(e: React.FormEvent) {
@@ -156,33 +157,44 @@ function LoginForm() {
     }
     setBusy(true);
     setError(null);
-    const supabase = createClient();
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-      },
-    });
-    if (error) {
-      setBusy(false);
-      setError(
-        error.message.toLowerCase().includes("already registered")
-          ? "Account already exists — switch to Sign in."
-          : error.message
-      );
-      return;
-    }
-    // Email confirmation disabled → session returned immediately
-    if (data.session) {
-      const authenticated = await serverHasSession(5);
-      if (authenticated) {
-        router.replace(next);
+
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const resData = await res.json();
+      if (!res.ok) {
+        setBusy(false);
+        setError(
+          resData.error?.toLowerCase().includes("already registered") || resData.error?.toLowerCase().includes("user_already_exists")
+            ? "Account already exists — switch to Sign in."
+            : resData.error || "Sign up failed."
+        );
         return;
       }
+
+      // Automatically sign in the user now that they are created & auto-confirmed
+      const supabase = createClient();
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (authError) {
+        setBusy(false);
+        setError(`Account created, but sign-in failed: ${authError.message}`);
+        return;
+      }
+
+      if (authData.session) {
+        router.replace(next);
+      }
+    } catch (err) {
+      setBusy(false);
+      setError(err instanceof Error ? err.message : "An error occurred during sign up.");
     }
-    setBusy(false);
-    setSent(true);
   }
 
   async function googleSignIn() {
@@ -206,45 +218,53 @@ function LoginForm() {
     const demoPassword = "DemoPassword123!";
 
     // First try to sign in
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email: demoEmail,
       password: demoPassword,
     });
 
     if (signInError) {
-      // If user doesn't exist or is not confirmed, try to sign up/auto-create
       if (signInError.message.toLowerCase().includes("invalid login credentials")) {
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email: demoEmail,
-          password: demoPassword,
-        });
-
-        if (signUpError) {
-          setBusy(false);
-          setError(`Demo login failed: ${signUpError.message}`);
-          return;
-        }
-
-        // If email confirmation is disabled, session will be returned immediately
-        if (signUpData.session) {
-          const authenticated = await serverHasSession(5);
-          if (authenticated) {
-            router.replace(next);
+        // Try programmatic auto-confirmed signup for the demo account
+        try {
+          const res = await fetch("/api/auth/signup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: demoEmail, password: demoPassword }),
+          });
+          const resData = await res.json();
+          if (!res.ok) {
+            setBusy(false);
+            setError(`Demo account creation failed: ${resData.error}`);
             return;
           }
-        } else {
-          // If email confirmation is enabled, notify user
+
+          // Sign in after creation
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: demoEmail,
+            password: demoPassword,
+          });
+
+          if (authError) {
+            setBusy(false);
+            setError(`Demo sign-in failed: ${authError.message}`);
+            return;
+          }
+
+          if (authData.session) {
+            router.replace(next);
+          }
+        } catch (err) {
           setBusy(false);
-          setError("Demo account created, but requires email confirmation. Please disable 'Confirm email' in your Supabase Auth settings to enable direct logins.");
-          return;
+          setError(err instanceof Error ? err.message : "An error occurred during demo sign in.");
         }
       } else {
         setBusy(false);
         setError(signInError.message);
-        return;
       }
+    } else if (data.session) {
+      router.replace(next);
     }
-    // success → onAuthStateChange SIGNED_IN fires → router.replace(next)
   }
 
   const tabs: { id: Tab; icon: React.ReactNode; label: string }[] = [

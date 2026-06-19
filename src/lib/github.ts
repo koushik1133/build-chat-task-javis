@@ -16,14 +16,24 @@ export function parseRepoUrl(input: string): { owner: string; repo: string } | n
 }
 
 export async function getRepoMeta(owner: string, repo: string) {
-  const { data } = await gh().repos.get({ owner, repo });
-  return {
-    name: data.name,
-    description: data.description,
-    defaultBranch: data.default_branch,
-    language: data.language,
-    stars: data.stargazers_count,
-  };
+  try {
+    const { data } = await gh().repos.get({ owner, repo });
+    return {
+      name: data.name,
+      description: data.description,
+      defaultBranch: data.default_branch,
+      language: data.language,
+      stars: data.stargazers_count,
+    };
+  } catch (err: unknown) {
+    const errorWithStatus = err as { status?: number };
+    if (errorWithStatus.status === 404) {
+      throw new Error(
+        "Repository not found. It may be private, or does not exist. (If private, please make sure the repository is public so KernelHub can access it.)"
+      );
+    }
+    throw err;
+  }
 }
 
 export async function getFileTree(owner: string, repo: string, branch: string) {
