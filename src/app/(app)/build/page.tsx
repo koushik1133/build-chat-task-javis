@@ -23,6 +23,7 @@ import {
   type IntakeField,
   type Theme,
 } from "@/lib/build-categories";
+import { NotificationBell } from "@/components/notification-bell";
 
 type BusinessProfile = {
   company_name?: string;
@@ -207,11 +208,14 @@ export default function BuildPage() {
           <div className="space-y-8">
             <div className="flex items-center justify-between">
               <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Build something</h1>
-              {sites.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {sites.length} site{sites.length === 1 ? "" : "s"}
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                {sites.length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {sites.length} site{sites.length === 1 ? "" : "s"}
+                  </span>
+                )}
+                <NotificationBell />
+              </div>
             </div>
 
             <KernelHubMascot

@@ -32,6 +32,7 @@ import { KernelHubMascot } from "@/components/kernelhub-mascot";
 import { cn } from "@/lib/utils";
 import { injectEditScript } from "@/lib/inline-edit";
 import { BUILDER_ENGINE_SCRIPT } from "@/lib/builder-engine";
+import { NotificationBell } from "@/components/notification-bell";
 
 async function safeJson(r: Response) {
   const text = await r.text();
@@ -341,6 +342,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
           <Button size="sm" onClick={() => setPublishOpen(true)}>
             <Github className="h-3.5 w-3.5" /> Publish
           </Button>
+          <NotificationBell />
         </div>
       </header>
 
@@ -768,6 +770,12 @@ function PublishModal({
   onClose: () => void;
 }) {
   const [name, setName] = useState(defaultName);
+  const [customToken, setCustomToken] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("kernelhub_github_pat") ?? "";
+    }
+    return "";
+  });
   const [enablePages, setEnablePages] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -780,7 +788,7 @@ function PublishModal({
       const r = await fetch(`/api/build/sites/${siteId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repoName: name, enablePages }),
+        body: JSON.stringify({ repoName: name, enablePages, githubToken: customToken }),
       });
       const data = await safeJson(r);
       if (!r.ok) throw new Error(data.error ?? "Publish failed");
@@ -861,7 +869,26 @@ function PublishModal({
                 disabled={busy}
               />
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Letters, numbers, dot, dash, underscore. A new public repo will be created on the GitHub account tied to your GITHUB_TOKEN.
+                Letters, numbers, dot, dash, underscore. A new public repo will be created.
+              </p>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium">GitHub Personal Access Token (Optional)</label>
+              <Input
+                type="password"
+                value={customToken}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCustomToken(val);
+                  if (typeof window !== "undefined") {
+                    localStorage.setItem("kernelhub_github_pat", val);
+                  }
+                }}
+                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                disabled={busy}
+              />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Optional. Leave blank to use server&apos;s GITHUB_TOKEN. Provide your own PAT with <code className="bg-secondary px-0.5 rounded text-[10px]">repo</code> and <code className="bg-secondary px-0.5 rounded text-[10px]">workflow</code> scopes if the default fails.
               </p>
             </div>
             <label className="flex items-center gap-2 text-xs">

@@ -14,6 +14,7 @@ const Body = z.object({
     .max(100)
     .regex(/^[a-zA-Z0-9._-]+$/, "letters, numbers, dot, dash, underscore only"),
   enablePages: z.boolean().default(true),
+  githubToken: z.string().optional(),
 });
 
 export async function POST(
@@ -27,14 +28,6 @@ export async function POST(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) {
-    return NextResponse.json(
-      { error: "GITHUB_TOKEN not configured on the server" },
-      { status: 500 }
-    );
-  }
-
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json(
@@ -42,8 +35,16 @@ export async function POST(
       { status: 400 }
     );
   }
-  const { repoName, enablePages } = parsed.data;
+  const { repoName, enablePages, githubToken } = parsed.data;
   const { id } = await ctx.params;
+
+  const token = githubToken?.trim() || process.env.GITHUB_TOKEN;
+  if (!token) {
+    return NextResponse.json(
+      { error: "GitHub token not configured on server and no custom token provided" },
+      { status: 400 }
+    );
+  }
 
   const site = await queryOne<{ id: string; title: string; html: string }>(
     "SELECT id, title, html FROM sites WHERE id = $1 AND user_id = $2",
