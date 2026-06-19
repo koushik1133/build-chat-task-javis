@@ -6,6 +6,8 @@ import {
   Sparkles, Pencil, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { dispatchNotificationRefresh } from "@/components/notification-bell";
+
 
 type AgentTemplate = {
   id: string;
@@ -64,6 +66,10 @@ export default function AgentsPage() {
   const [editSuggestions, setEditSuggestions] = useState<string[]>([]);
   const [editSuggesting, setEditSuggesting] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [confirmRunAgent, setConfirmRunAgent] = useState<Agent | null>(null);
+  const [runningAgentId, setRunningAgentId] = useState<string | null>(null);
+
 
   useEffect(() => {
     fetch("/api/agents").then(r => r.json()).then(d => setAgents(d.agents ?? [])).catch(() => {});
@@ -164,6 +170,39 @@ export default function AgentsPage() {
     await fetch(`/api/agents/${id}`, { method: "DELETE" });
     setAgents(a => a.filter(ag => ag.id !== id));
   }
+
+  async function triggerRun(agentId: string) {
+    setRunningAgentId(agentId);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/run`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Refresh agents (to update task count)
+        const agentsRes = await fetch("/api/agents").then(r => r.json()).catch(() => null);
+        if (agentsRes?.agents) setAgents(agentsRes.agents);
+
+        // Refresh run history
+        const runsRes = await fetch("/api/agents/runs").then(r => r.json()).catch(() => null);
+        if (runsRes?.runs) setRuns(runsRes.runs);
+
+        // Dispatch notification refresh to bell icon
+        if (data.notification) {
+          dispatchNotificationRefresh(data.notification);
+        }
+      } else {
+        alert(data.error || "Failed to run agent.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error occurred while triggering agent run.");
+    } finally {
+      setRunningAgentId(null);
+      setConfirmRunAgent(null);
+    }
+  }
+
 
   const filtered = agents.filter(a =>
     a.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -425,7 +464,7 @@ export default function AgentsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
-                      variant="outline" size="sm" className="flex-1"
+                      variant="outline" size="sm" className="flex-1 text-xs"
                       onClick={() => toggle(agent.id, agent.status)}
                     >
                       {agent.status === "active" ? (
@@ -433,6 +472,14 @@ export default function AgentsPage() {
                       ) : (
                         <><Play className="h-3.5 w-3.5" /> Activate</>
                       )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 text-xs hover:bg-primary/5 border-primary/20 text-primary"
+                      onClick={() => setConfirmRunAgent(agent)}
+                    >
+                      <Play className="h-3.5 w-3.5 fill-primary/10" /> Run
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => openEdit(agent)} title="Edit prompt">
                       <Pencil className="h-3.5 w-3.5" />
@@ -485,6 +532,37 @@ export default function AgentsPage() {
               <div className="text-sm font-medium">Multi-Agent Squad Ready</div>
               <div className="text-xs text-muted-foreground">
                 Your {agents.filter(a => a.status === "active").length} active agents can now be grouped into high-performance squads.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Confirmation and denial popup with right-side aligned action buttons */}
+        {confirmRunAgent && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setConfirmRunAgent(null)}>
+            <div
+              className="bg-card border border-border rounded-xl p-6 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="font-semibold text-base mb-2">Run Agent Confirmation</h2>
+              <p className="text-xs text-muted-foreground mb-6 leading-relaxed font-sans">
+                Are you sure you want to trigger a manual test run for agent <strong className="text-foreground font-semibold">{confirmRunAgent.name}</strong> ({confirmRunAgent.role})? This will start the agent job immediately.
+              </p>
+              <div className="flex justify-end gap-2.5">
+                <Button variant="outline" size="sm" onClick={() => setConfirmRunAgent(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => triggerRun(confirmRunAgent.id)}
+                  disabled={runningAgentId !== null}
+                >
+                  {runningAgentId === confirmRunAgent.id ? (
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Running...</>
+                  ) : (
+                    "Confirm Run"
+                  )}
+                </Button>
               </div>
             </div>
           </div>
