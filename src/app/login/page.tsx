@@ -210,62 +210,8 @@ function LoginForm() {
     if (error) { setBusy(false); setError(error.message); }
   }
 
-  async function demoSignIn() {
-    setBusy(true);
-    setError(null);
-    const supabase = createClient();
-    const demoEmail = "demo@kernelhub.com";
-    const demoPassword = "DemoPassword123!";
 
-    // First try to sign in
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email: demoEmail,
-      password: demoPassword,
-    });
 
-    if (signInError) {
-      if (signInError.message.toLowerCase().includes("invalid login credentials")) {
-        // Try programmatic auto-confirmed signup for the demo account
-        try {
-          const res = await fetch("/api/auth/signup", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: demoEmail, password: demoPassword }),
-          });
-          const resData = await res.json();
-          if (!res.ok) {
-            setBusy(false);
-            setError(`Demo account creation failed: ${resData.error}`);
-            return;
-          }
-
-          // Sign in after creation
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: demoEmail,
-            password: demoPassword,
-          });
-
-          if (authError) {
-            setBusy(false);
-            setError(`Demo sign-in failed: ${authError.message}`);
-            return;
-          }
-
-          if (authData.session) {
-            router.replace(next);
-          }
-        } catch (err) {
-          setBusy(false);
-          setError(err instanceof Error ? err.message : "An error occurred during demo sign in.");
-        }
-      } else {
-        setBusy(false);
-        setError(signInError.message);
-      }
-    } else if (data.session) {
-      router.replace(next);
-    }
-  }
 
   const tabs: { id: Tab; icon: React.ReactNode; label: string }[] = [
     { id: "signin",  icon: <LogIn className="h-3.5 w-3.5" />,    label: "Sign in" },
@@ -421,11 +367,6 @@ function LoginForm() {
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
               </svg>
               Continue with Google
-            </Button>
-
-            <Button onClick={demoSignIn} variant="secondary" className="w-full bg-gradient-to-r from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 border border-orange-500/20 text-orange-700 dark:text-orange-300" disabled={busy}>
-              <Sparkles className="mr-2 h-4 w-4 text-orange-500 animate-pulse" />
-              Sign in as Demo User (Instant)
             </Button>
           </div>
         </div>
