@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, X } from "lucide-react";
 import { cn, timeAgo } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 
 type Notification = {
   id: string;
@@ -19,7 +20,32 @@ type NotificationBellProps = {
   variant?: "inline" | "fixed";
 };
 
+function inferNotificationPath(title: string, body: string | null): string {
+  const t = title.toLowerCase();
+  const b = (body ?? "").toLowerCase();
+  if (t.includes("agent") || b.includes("agent") || b.includes("brief") || b.includes("report")) {
+    return "/agents";
+  }
+  if (t.includes("task") || b.includes("task")) {
+    return "/tasks";
+  }
+  if (t.includes("lead") || b.includes("lead") || t.includes("publish") || b.includes("publish")) {
+    return "/analytics";
+  }
+  if (t.includes("strategy") || b.includes("strategy")) {
+    return "/strategy";
+  }
+  if (t.includes("chat") || b.includes("chat") || t.includes("session") || b.includes("session")) {
+    return "/chat";
+  }
+  if (t.includes("production") || b.includes("production") || t.includes("kanban") || b.includes("kanban")) {
+    return "/production";
+  }
+  return "/agents"; // default destination
+}
+
 export function NotificationBell({ variant = "inline" }: NotificationBellProps) {
+  const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [showNotifs, setShowNotifs] = useState(false);
@@ -113,14 +139,32 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
     setUnread(0);
   }
 
+  function markRead(id: string) {
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+    setNotifications(n => n.map(x => x.id === id ? { ...x, read: true } : x));
+    setUnread(u => Math.max(0, u - 1));
+  }
+
+  const handleNotifClick = (n: Notification) => {
+    if (!n.read) {
+      markRead(n.id);
+    }
+    const path = inferNotificationPath(n.title, n.body);
+    router.push(path);
+    setShowNotifs(false);
+  };
+
   const isFixed = variant === "fixed";
 
   return (
     <>
       {showNotifs && (
         <div
-          className="fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]"
-          aria-hidden
+          className="fixed inset-0 z-40 bg-transparent"
           onClick={() => setShowNotifs(false)}
         />
       )}
@@ -156,39 +200,30 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
 
       <div
         ref={panelRef}
-        className={cn(isFixed ? "fixed top-3 right-4 z-50 max-lg:top-14" : "relative")}
+        className={cn(
+          "relative",
+          isFixed && "fixed right-6 top-16 z-50 lg:right-8"
+        )}
       >
         <button
           onClick={() => {
-            if (!showNotifs) refresh();
             setShowNotifs(v => !v);
+            if (!showNotifs) refresh();
           }}
           className={cn(
-            "relative transition-colors",
-            isFixed
-              ? cn(
-                  "rounded-lg p-2",
-                  showNotifs
-                    ? "bg-secondary text-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
-                )
-              : cn(
-                  "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background",
-                  showNotifs
-                    ? "bg-secondary text-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
-                )
+            "flex items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors relative",
+            isFixed ? "h-9 w-9 shadow-md" : "h-7 w-7"
           )}
           title="Notifications"
-          aria-expanded={showNotifs}
           aria-label="Notifications"
         >
-          <Bell className={cn(isFixed ? "h-5 w-5" : "h-4 w-4", loading && "opacity-70")} />
           {unread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-0.5 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center animate-in zoom-in duration-200">
-              {unread > 9 ? "9+" : unread}
+            <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
             </span>
           )}
+          <Bell className={cn(isFixed ? "h-5 w-5" : "h-4 w-4", loading && "opacity-70")} />
         </button>
 
         {showNotifs && (
@@ -209,19 +244,20 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
                 <p className="text-xs text-muted-foreground p-6 text-center">No notifications yet</p>
               ) : (
                 notifications.slice(0, 20).map(n => (
-                  <div
+                  <button
                     key={n.id}
+                    onClick={() => handleNotifClick(n)}
                     className={cn(
-                      "px-3 py-2.5 border-b border-border/50 last:border-0",
-                      !n.read && "bg-primary/5"
+                      "w-full text-left px-3 py-2.5 border-b border-border/50 last:border-0 hover:bg-secondary/40 transition-colors block",
+                      !n.read && "bg-primary/5 font-medium"
                     )}
                   >
-                    <p className="text-xs font-medium">{n.title}</p>
+                    <p className="text-xs font-medium text-foreground">{n.title}</p>
                     {n.body && (
                       <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
                     )}
                     <p className="text-[10px] text-muted-foreground mt-1">{timeAgo(n.created_at)}</p>
-                  </div>
+                  </button>
                 ))
               )}
             </div>

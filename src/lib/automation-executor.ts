@@ -194,19 +194,18 @@ async function sendEmail(to: string, subject: string, html: string, fromName?: s
 
     // Verify actual delivery if we got an email ID
     if (data.id && isSandboxSender(from)) {
-      const check = await verifyResendDelivery(data.id, apiKey);
-      if (!check.delivered) {
-        return {
-          success: false,
-          message: "Email rejected by recipient server",
-          detail: `Status: ${check.lastEvent}. Resend sandbox (onboarding@resend.dev) can only deliver to the Resend account owner's email. Verify a custom domain at resend.com/domains to send to any address.`,
-        };
-      }
-      // Even if "delivered", warn about sandbox
+      // Run sandbox delivery verification in the background to prevent blocking
+      verifyResendDelivery(data.id, apiKey).then((check) => {
+        if (!check.delivered) {
+          console.warn(`[email] Sandbox delivery failed for ${data.id}: ${check.lastEvent}`);
+        }
+      }).catch(() => {});
+
+      // Return immediately so execution remains fast
       return {
         success: true,
         message: `Email sent to ${to}`,
-        detail: "⚠️ Using Resend sandbox — emails only reach the account owner's inbox. Verify a domain at resend.com/domains for reliable delivery.",
+        detail: "⚠️ Using Resend sandbox (background check enabled) — verify your custom domain in Resend for external routing.",
       };
     }
 
