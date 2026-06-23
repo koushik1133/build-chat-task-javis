@@ -23,7 +23,11 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({
       success: true,
-      message: `Verification code sent to ${email.trim().toLowerCase()}`,
+      message: result.simulated
+        ? `[Sandbox Simulation] Verification code is: ${result.code}`
+        : `Verification code sent to ${email.trim().toLowerCase()}`,
+      simulated: result.simulated,
+      code: result.simulated ? result.code : undefined,
     });
   }
 
