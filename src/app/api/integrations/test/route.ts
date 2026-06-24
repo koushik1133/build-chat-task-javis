@@ -4,13 +4,11 @@ import { sendEmailUnified } from "@/lib/email-sender";
 import { queryOne } from "@/lib/dsql";
 import {
   getUserIntegrations,
-  platformFromAddress,
   isPlatformEmailAvailable,
   resolveSlackWebhook,
   upsertUserIntegrations,
   toPublicView,
   isValidSlackWebhook,
-  isSandboxSender,
 } from "@/lib/user-integrations";
 
 export async function POST(req: Request) {

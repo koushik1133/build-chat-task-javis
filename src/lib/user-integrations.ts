@@ -180,7 +180,6 @@ export async function startEmailVerification(
   const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const existing = await getUserIntegrations(userId);
 
-  const from = platformFromAddress(fromName);
   let simulated = false;
 
   const emailRes = await sendEmailUnified({

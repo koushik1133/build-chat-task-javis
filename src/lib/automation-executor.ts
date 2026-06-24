@@ -3,7 +3,7 @@
  */
 
 import { query, queryOne } from "@/lib/dsql";
-import { platformFromAddress, isSandboxSender, type UserIntegrations } from "@/lib/user-integrations";
+import { type UserIntegrations } from "@/lib/user-integrations";
 import { runAgentJob } from "@/lib/agent-runner";
 import { sendEmailUnified } from "@/lib/email-sender";
 
@@ -127,40 +127,7 @@ async function sendWebhook(url: string, payload: Record<string, unknown>): Promi
 }
 
 // ─── Email (Resend) with delivery verification ────────────────────────────────
-/**
- * Check whether Resend actually delivered the email, not just accepted it.
- * Resend sandbox silently drops emails to non-owner addresses while returning 200.
- */
-async function verifyResendDelivery(
-  emailId: string,
-  apiKey: string,
-  maxWaitMs = 3000
-): Promise<{ delivered: boolean; lastEvent: string }> {
-  const start = Date.now();
-  const pollInterval = 800;
-  while (Date.now() - start < maxWaitMs) {
-    try {
-      const res = await fetchWithTimeout(
-        `https://api.resend.com/emails/${emailId}`,
-        { headers: { Authorization: `Bearer ${apiKey}` } },
-        5000
-      );
-      if (res.ok) {
-        const data = (await res.json()) as { last_event?: string };
-        const evt = data.last_event ?? "unknown";
-        // "delivered" means Resend's MTA accepted it.
-        // "bounced", "complained", "delivery_delayed" indicate real failures.
-        if (evt === "delivered") return { delivered: true, lastEvent: evt };
-        if (["bounced", "complained"].includes(evt)) return { delivered: false, lastEvent: evt };
-      }
-    } catch {
-      // poll failed, try again
-    }
-    await new Promise((r) => setTimeout(r, pollInterval));
-  }
-  // Timeout — assume pending
-  return { delivered: true, lastEvent: "pending" };
-}
+
 
 async function sendEmail(to: string, subject: string, html: string, fromName?: string | null): Promise<ExecuteResult> {
   const result = await sendEmailUnified({ to, subject, html, fromName });

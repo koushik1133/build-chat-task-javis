@@ -6,7 +6,7 @@ import { X, MessageSquare, FileText, Play, Mail, Compass, HelpCircle } from "luc
 type TourStep = {
   title: string;
   description: string;
-  icon: React.ComponentType<any>;
+  icon: React.ComponentType<{ className?: string }>;
   badge: string;
   actionDescription: string;
 };
