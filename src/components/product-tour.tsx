@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, MessageSquare, FileText, Play, Mail, Compass, HelpCircle } from "lucide-react";
+import { X, MessageSquare, FileText, Play, Mail, Compass, HelpCircle, Bot, Target } from "lucide-react";
 
 type TourStep = {
   title: string;
@@ -32,6 +32,20 @@ const TOUR_STEPS: TourStep[] = [
     icon: FileText,
     badge: "Context & RAG",
     actionDescription: "Upload source documents here to enrich your agent's knowledge.",
+  },
+  {
+    title: "AI Agents",
+    description: "Create, configure, and template specialized background AI agents. Provision autonomous roles like Market Researchers, Recruiters, or Code Auditors to work on your tasks in the background.",
+    icon: Bot,
+    badge: "Autonomous Agents",
+    actionDescription: "Define system instructions and run automated multi-agent tasks.",
+  },
+  {
+    title: "Business Strategies",
+    description: "Formulate business plans, product-market alignments, and competitive landscape analyses. Write strategy docs and run templates using target analytics.",
+    icon: Target,
+    badge: "Strategic Planning",
+    actionDescription: "Draft business models and review analytics to track operations.",
   },
   {
     title: "Automations Runner",
