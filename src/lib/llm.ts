@@ -9,24 +9,40 @@ export type ChatMessage = {
   content: string;
 };
 
-export const MODEL = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
-
 function client() {
-  const key = process.env.GROQ_API_KEY;
-  if (!key) {
+  const groqKey = process.env.GROQ_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY;
+
+  if (!groqKey && !geminiKey) {
     throw new Error(
-      "GROQ_API_KEY is not set. Add it in Vercel → Settings → Environment Variables."
+      "Neither GROQ_API_KEY nor GEMINI_API_KEY is set. Add one to Vercel → Settings → Environment Variables."
     );
   }
-  return new OpenAI({
-    apiKey: key,
-    baseURL: "https://api.groq.com/openai/v1",
-  });
+
+  if (groqKey) {
+    return {
+      openai: new OpenAI({
+        apiKey: groqKey,
+        baseURL: "https://api.groq.com/openai/v1",
+      }),
+      model: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
+    };
+  }
+
+  // Fallback to Gemini
+  return {
+    openai: new OpenAI({
+      apiKey: geminiKey!,
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+    }),
+    model: process.env.GEMINI_MODEL ?? "gemini-1.5-flash",
+  };
 }
 
 export async function streamChat(messages: ChatMessage[]) {
-  return client().chat.completions.create({
-    model: MODEL,
+  const { openai, model } = client();
+  return openai.chat.completions.create({
+    model,
     messages,
     stream: true,
     temperature: 0.4,
@@ -37,9 +53,9 @@ export async function completeJson<T>(
   messages: ChatMessage[],
   schemaHint: string
 ): Promise<T | null> {
-  const c = client();
-  const res = await c.chat.completions.create({
-    model: MODEL,
+  const { openai, model } = client();
+  const res = await openai.chat.completions.create({
+    model,
     messages: [
       ...messages,
       {
@@ -64,8 +80,9 @@ export async function complete(
 ): Promise<string> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await client().chat.completions.create({
-        model: MODEL,
+      const { openai, model } = client();
+      const res = await openai.chat.completions.create({
+        model,
         messages,
         temperature: 0.4,
         max_tokens: maxTokens,
