@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/sidebar";
 import { GlobalNotificationBell } from "@/components/global-notification-bell";
 import { KERNELHUB_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
+import { ProductTour } from "@/components/product-tour";
 
 export function AppShell({
   userEmail,
@@ -72,6 +73,7 @@ export function AppShell({
           {children}
         </main>
         <GlobalNotificationBell />
+        <ProductTour />
       </div>
     </div>
   );

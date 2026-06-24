@@ -233,6 +233,9 @@ export default function ConnectionsPage() {
             </div>
           ) : (
             <>
+              <p className="text-[11px] text-muted-foreground/80 mb-3 italic">
+                (Note: You will receive verification and alert emails from <strong>shagantikoushik@gmail.com</strong> because we did not buy a custom domain yet. Later, it will change to a genuine address like <strong>noreply@kernelhub.com</strong>)
+              </p>
               {data?.email_verified ? (
                 <div className="rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 p-3 mb-3">
                   <p className="text-xs font-medium text-green-800 dark:text-green-200 flex items-center gap-1">
@@ -249,9 +252,6 @@ export default function ConnectionsPage() {
                     <input value={emailFromName} onChange={e => setEmailFromName(e.target.value)}
                       placeholder="Acme Corp" className={inputCls} disabled={codeSent} />
                   </Field>
-                  <p className="text-[11px] text-muted-foreground/80 mb-3 italic">
-                    (Note: You will receive verification and alert emails from <strong>shagantikoushik@gmail.com</strong> because we did not buy a custom domain yet. Later, it will change to a genuine address like <strong>noreply@kernelhub.com</strong>)
-                  </p>
                   {!codeSent ? (
                     <Button size="sm" onClick={sendEmailCode} disabled={sendingCode || !emailTo.trim()}>
                       {sendingCode ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Send verification code"}
