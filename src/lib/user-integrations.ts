@@ -1,4 +1,5 @@
 import { queryOne } from "@/lib/dsql";
+import { sendEmailUnified } from "@/lib/email-sender";
 
 export type UserIntegrations = {
   user_id: string;
@@ -48,6 +49,9 @@ export function maskWebhookUrl(url: string | null): string | null {
 }
 
 export function isPlatformEmailAvailable(): boolean {
+  if (process.env.EMAIL_PROVIDER === "gmail") {
+    return !!((process.env.GMAIL_USER || process.env.SMTP_USER) && (process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD));
+  }
   return !!process.env.RESEND_API_KEY?.trim();
 }
 
@@ -179,31 +183,22 @@ export async function startEmailVerification(
   const from = platformFromAddress(fromName);
   let simulated = false;
 
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    cache: "no-store",
-    body: JSON.stringify({
-      from,
-      to: [normalized],
-      subject: `${code} is your KernelHub verification code`,
-      html: `<div style="font-family:sans-serif;line-height:1.6;max-width:420px">
-        <h2>Verify your email</h2>
-        <p>Enter this code in KernelHub to confirm <strong>${normalized}</strong>:</p>
-        <p style="font-size:28px;font-weight:bold;letter-spacing:4px;margin:24px 0">${code}</p>
-        <p style="color:#888;font-size:12px">Expires in 10 minutes. If you didn't request this, ignore this email.</p>
-      </div>`,
-    }),
+  const emailRes = await sendEmailUnified({
+    to: normalized,
+    subject: `${code} is your KernelHub verification code`,
+    html: `<div style="font-family:sans-serif;line-height:1.6;max-width:420px">
+      <h2>Verify your email</h2>
+      <p>Enter this code in KernelHub to confirm <strong>${normalized}</strong>:</p>
+      <p style="font-size:28px;font-weight:bold;letter-spacing:4px;margin:24px 0">${code}</p>
+      <p style="color:#888;font-size:12px">Expires in 10 minutes. If you didn't request this, ignore this email.</p>
+    </div>`,
+    fromName,
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const raw = (data as { message?: string }).message ?? "Could not send verification email.";
-    console.log("[startEmailVerification] Resend failed status:", res.status, "message:", raw);
-    const isSandboxError = res.status === 403 || 
-      /your own email address/i.test(raw) || 
+
+  if (!emailRes.success) {
+    const raw = emailRes.detail ?? emailRes.message;
+    console.log("[startEmailVerification] Email sending failed:", raw);
+    const isSandboxError = /your own email address/i.test(raw) || 
       /verify a domain/i.test(raw) || 
       /sandbox/i.test(raw);
 

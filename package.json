@@ -28,6 +28,7 @@
     "highlight.js": "^11.10.0",
     "lucide-react": "^0.460.0",
     "next": "^15.5.15",
+    "nodemailer": "^9.0.1",
     "openai": "^4.73.0",
     "pdf-parse": "^1.1.1",
     "pg": "^8.21.0",
@@ -41,6 +42,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/pdf-parse": "^1.1.4",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

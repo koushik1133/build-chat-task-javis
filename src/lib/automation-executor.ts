@@ -5,6 +5,7 @@
 import { query, queryOne } from "@/lib/dsql";
 import { platformFromAddress, isSandboxSender, type UserIntegrations } from "@/lib/user-integrations";
 import { runAgentJob } from "@/lib/agent-runner";
+import { sendEmailUnified } from "@/lib/email-sender";
 
 export type AutomationContext = {
   user_id: string;
@@ -162,74 +163,24 @@ async function verifyResendDelivery(
 }
 
 async function sendEmail(to: string, subject: string, html: string, fromName?: string | null): Promise<ExecuteResult> {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    return {
-      success: false,
-      message: "Email not enabled",
-      detail: "Ask your KernelHub admin to enable platform email (one-time setup).",
-    };
-  }
+  const result = await sendEmailUnified({ to, subject, html, fromName });
+  if (!result.success) {
+    const raw = result.detail ?? result.message;
+    const isSandboxError = /your own email address/i.test(raw) || 
+      /verify a domain/i.test(raw) || 
+      /sandbox/i.test(raw);
 
-  const from = platformFromAddress(fromName);
-
-  // Warn if using sandbox sender
-  if (isSandboxSender(from)) {
-    console.warn(
-      `[email] Sending from sandbox domain (${from}). Emails will only reach the Resend account owner's address. Verify a custom domain at resend.com/domains.`
-    );
-  }
-
-  try {
-    const res = await fetchWithTimeout("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [to], subject, html }),
-    });
-    const data = (await res.json().catch(() => ({}))) as { id?: string; message?: string };
-
-    if (!res.ok) {
-      const raw = data.message ?? res.statusText;
-      const isSandboxError = res.status === 403 || 
-        /your own email address/i.test(raw) || 
-        /verify a domain/i.test(raw) || 
-        /sandbox/i.test(raw);
-
-      if (isSandboxError) {
-        console.warn(`[email] Sandbox restriction detected sending to ${to}. Simulating delivery.`);
-        return {
-          success: true,
-          message: `Simulated email to ${to}`,
-          detail: `⚠️ Sandbox Mode: Simulated email logged to console due to Resend restrictions. Subject: "${subject}"`,
-        };
-      }
-      return { success: false, message: "Email failed", detail: raw };
-    }
-
-    // Verify actual delivery if we got an email ID
-    if (data.id && isSandboxSender(from)) {
-      // Run sandbox delivery verification in the background to prevent blocking
-      verifyResendDelivery(data.id, apiKey).then((check) => {
-        if (!check.delivered) {
-          console.warn(`[email] Sandbox delivery failed for ${data.id}: ${check.lastEvent}`);
-        }
-      }).catch(() => {});
-
-      // Return immediately so execution remains fast
+    if (isSandboxError) {
+      console.warn(`[email] Sandbox restriction detected sending to ${to}. Simulating delivery.`);
       return {
         success: true,
-        message: `Email sent to ${to}`,
-        detail: "⚠️ Using Resend sandbox (background check enabled) — verify your custom domain in Resend for external routing.",
+        message: `Simulated email to ${to}`,
+        detail: `⚠️ Sandbox Mode: Simulated email logged to console due to Resend restrictions. Subject: "${subject}"`,
       };
     }
-
-    return { success: true, message: `Email sent to ${to}` };
-  } catch (err) {
-    const msg = (err as Error).name === "AbortError"
-      ? "Resend API timed out (10s). Try again."
-      : (err as Error).message;
-    return { success: false, message: "Email failed", detail: msg };
+    return result;
   }
+  return result;
 }
 
 // ─── Notifications & Tasks ────────────────────────────────────────────────────

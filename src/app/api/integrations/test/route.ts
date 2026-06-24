@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { sendEmailUnified } from "@/lib/email-sender";
 import { queryOne } from "@/lib/dsql";
 import {
   getUserIntegrations,
@@ -80,29 +81,19 @@ export async function POST(req: Request) {
       });
     }
     const to = integrations.email_default_to.trim();
-    const from = platformFromAddress(integrations.email_from_name);
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject: "KernelHub — email connection test",
-        html: `<div style="font-family:sans-serif;line-height:1.6">
-          <h2>You're all set!</h2>
-          <p>KernelHub will send automation emails to this verified address.</p>
-          <p style="color:#888;font-size:12px">Sent from ${from}</p>
-        </div>`,
-      }),
+    const emailRes = await sendEmailUnified({
+      to,
+      subject: "KernelHub — email connection test",
+      html: `<div style="font-family:sans-serif;line-height:1.6">
+        <h2>You're all set!</h2>
+        <p>KernelHub will send automation emails to this verified address.</p>
+      </div>`,
+      fromName: integrations.email_from_name,
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const raw = (data as { message?: string }).message ?? res.statusText;
-      const isSandboxError = res.status === 403 || 
-        /your own email address/i.test(raw) || 
+
+    if (!emailRes.success) {
+      const raw = emailRes.detail ?? emailRes.message;
+      const isSandboxError = /your own email address/i.test(raw) || 
         /verify a domain/i.test(raw) || 
         /sandbox/i.test(raw);
 
@@ -118,48 +109,6 @@ export async function POST(req: Request) {
         success: false,
         message: "Email test failed",
         detail: raw,
-      });
-    }
-
-    const emailId = (data as { id?: string }).id;
-    if (emailId && isSandboxSender(from)) {
-      // Poll to check sandbox delivery status
-      let delivered = true;
-      let lastEvent = "pending";
-      const start = Date.now();
-      while (Date.now() - start < 3000) {
-        try {
-          const pollRes = await fetch(`https://api.resend.com/emails/${emailId}`, {
-            headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` }
-          });
-          if (pollRes.ok) {
-            const pollData = await pollRes.json() as { last_event?: string };
-            lastEvent = pollData.last_event ?? "unknown";
-            if (lastEvent === "delivered") {
-              delivered = true;
-              break;
-            }
-            if (["bounced", "complained"].includes(lastEvent)) {
-              delivered = false;
-              break;
-            }
-          }
-        } catch {}
-        await new Promise((r) => setTimeout(r, 800));
-      }
-
-      if (!delivered || lastEvent === "bounced") {
-        return NextResponse.json({
-          success: false,
-          message: "Email rejected by recipient server",
-          detail: `Status: ${lastEvent}. Resend sandbox (onboarding@resend.dev) can only deliver to the Resend account owner's email. Verify a custom domain at resend.com/domains to send to any address.`,
-        });
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `Test email sent to ${to}`,
-        detail: "⚠️ Using Resend sandbox — emails only reach the account owner's inbox. Verify a domain at resend.com/domains for reliable delivery.",
       });
     }
 
