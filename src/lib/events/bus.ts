@@ -1,0 +1,72 @@
+import { randomUUID } from "crypto";
+import { query } from "@/lib/dsql";
+import { enqueueJob } from "@/lib/agents/queue";
+import type { EventRecord } from "@/lib/agents/types";
+
+/**
+ * Append-only event log + trigger fan-out.
+ *
+ * Call sites emit one line (`emitEvent(userId, {...})`) and never know who is
+ * listening. Matching `agent_triggers` of kind "event" become queued runs;
+ * the worker tick picks them up.
+ *
+ * Emitting must never break the caller: every failure is logged and swallowed.
+ */
+export async function emitEvent(userId: string, evt: EventRecord): Promise<void> {
+  const id = randomUUID();
+  try {
+    await query(
+      `INSERT INTO events (id, user_id, type, entity, entity_id, data)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, userId, evt.type, evt.entity, evt.entityId, JSON.stringify(evt.data ?? {})]
+    );
+  } catch (err) {
+    console.error(`[events] failed to record ${evt.type}:`, err);
+    return;
+  }
+
+  try {
+    const triggers = await query<{ id: string; agent_id: string; config: string | null }>(
+      `SELECT id, agent_id, config FROM agent_triggers
+       WHERE user_id = $1 AND kind = 'event' AND enabled = TRUE AND event_type = $2`,
+      [userId, evt.type]
+    );
+
+    for (const t of triggers) {
+      const runId = randomUUID();
+      await query(
+        `INSERT INTO agent_runs (id, user_id, agent_id, status, trigger_kind, trigger_ref, prompt, output)
+         VALUES ($1, $2, $3, 'queued', 'event', $4, $5, '')`,
+        [
+          runId,
+          userId,
+          t.agent_id,
+          t.id,
+          `Event ${evt.type} on ${evt.entity} ${evt.entityId}: ${JSON.stringify(evt.data ?? {}).slice(0, 2000)}`,
+        ]
+      );
+      await enqueueJob(userId, { kind: "run", runId });
+      await query(`UPDATE agent_triggers SET last_run_at = NOW() WHERE id = $1`, [t.id]);
+    }
+  } catch (err) {
+    console.error(`[events] trigger fan-out failed for ${evt.type}:`, err);
+  }
+}
+
+/** Well-known event types. Keep additions here so triggers can offer a picker. */
+export const EVENT_TYPES = [
+  "crm.contact.created",
+  "crm.contact.stage_changed",
+  "lead.captured",
+  "lead.enriched",
+  "production.card.moved",
+  "production.card.approved",
+  "production.card.rejected",
+  "message.received",
+  "social.post.published",
+  "social.post.failed",
+  "task.created",
+  "invoice.paid",
+] as const;
+
+export type EventType = (typeof EVENT_TYPES)[number];

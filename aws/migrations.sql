@@ -604,3 +604,161 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   hash       TEXT PRIMARY KEY,
   applied_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Phase 1 — autonomous agent runtime
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── agents: runtime configuration ────────────────────────────────────────────
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS tools TEXT;              -- JSON array of tool names (NULL = all)
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS autonomy_level TEXT;     -- draft | approve | auto
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS max_steps INTEGER;
+UPDATE agents SET autonomy_level = 'approve' WHERE autonomy_level IS NULL;
+
+-- ── agent_runs: lifecycle + cost ─────────────────────────────────────────────
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS status TEXT;         -- queued|running|awaiting_approval|done|failed|cancelled
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS trigger_kind TEXT;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS trigger_ref TEXT;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS error TEXT;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS tokens_in INTEGER;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS tokens_out INTEGER;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS cost_micros BIGINT;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS attempt INTEGER;
+UPDATE agent_runs SET status = 'done' WHERE status IS NULL;
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_runs_user_status ON agent_runs (user_id, status);
+
+-- ── agent_run_steps: every LLM turn, tool call and approval, in order ────────
+CREATE TABLE IF NOT EXISTS agent_run_steps (
+  id         TEXT PRIMARY KEY,
+  run_id     TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  idx        INTEGER NOT NULL,
+  kind       TEXT NOT NULL,          -- llm | tool | approval | note
+  name       TEXT,
+  input      TEXT,
+  output     TEXT,
+  tokens     INTEGER,
+  ms         INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_run_steps_run ON agent_run_steps (run_id, idx);
+
+-- ── agent_jobs: durable work queue (claim-by-UPDATE, lease reclaim, DLQ) ─────
+CREATE TABLE IF NOT EXISTS agent_jobs (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  kind         TEXT NOT NULL,        -- run | resume | playbook | outbox
+  payload      TEXT NOT NULL,
+  status       TEXT NOT NULL,        -- queued | running | done | failed | dead
+  attempts     INTEGER DEFAULT 0,
+  max_attempts INTEGER DEFAULT 3,
+  run_after    TIMESTAMPTZ NOT NULL,
+  locked_at    TIMESTAMPTZ,
+  locked_by    TEXT,
+  last_error   TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_jobs_due ON agent_jobs (status, run_after);
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_jobs_user ON agent_jobs (user_id, created_at);
+
+-- ── agent_triggers: schedule / event / webhook / inbound ─────────────────────
+CREATE TABLE IF NOT EXISTS agent_triggers (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  agent_id     TEXT NOT NULL,
+  kind         TEXT NOT NULL,        -- schedule | event | webhook | inbound
+  cron_expr    TEXT,
+  timezone     TEXT,
+  event_type   TEXT,
+  secret_hash  TEXT,                 -- webhook token, hashed
+  config       TEXT,                 -- JSON: prompt override, filters
+  enabled      BOOLEAN DEFAULT TRUE,
+  next_run_at  TIMESTAMPTZ,
+  last_run_at  TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_triggers_user ON agent_triggers (user_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_triggers_due ON agent_triggers (kind, enabled, next_run_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_triggers_event ON agent_triggers (user_id, event_type);
+
+-- ── events: append-only business event log ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS events (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  type       TEXT NOT NULL,
+  entity     TEXT NOT NULL,
+  entity_id  TEXT NOT NULL,
+  data       TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_events_user_type ON events (user_id, type, created_at);
+
+-- ── approvals: human-in-the-loop inbox for gated tool calls ──────────────────
+CREATE TABLE IF NOT EXISTS approvals (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  run_id     TEXT,
+  agent_id   TEXT,
+  tool_name  TEXT NOT NULL,
+  input      TEXT,
+  preview    TEXT,
+  status     TEXT NOT NULL,          -- pending | approved | rejected | expired
+  decided_by TEXT,
+  decided_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_approvals_user_status ON approvals (user_id, status, created_at);
+
+-- ── ai_usage / ai_budgets: metering, caps and model governance ───────────────
+CREATE TABLE IF NOT EXISTS ai_usage (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  run_id            TEXT,
+  feature           TEXT NOT NULL,   -- agent | copilot | chat | playbook | receptionist | generate
+  provider          TEXT NOT NULL,
+  model             TEXT NOT NULL,
+  prompt_tokens     INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  cost_micros       BIGINT DEFAULT 0,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_ai_usage_user_time ON ai_usage (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS ai_budgets (
+  user_id           TEXT PRIMARY KEY,
+  monthly_cap_micros BIGINT,
+  hard_stop         BOOLEAN DEFAULT TRUE,
+  model_allowlist   TEXT,             -- JSON array of provider ids / model names
+  updated_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── playbook_runs: dedupe / cooldown for proactive workflows ─────────────────
+CREATE TABLE IF NOT EXISTS playbook_runs (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  playbook_id TEXT NOT NULL,
+  entity_id   TEXT,
+  run_id      TEXT,
+  status      TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_playbook_runs_key ON playbook_runs (user_id, playbook_id, entity_id, created_at);
+
+-- ── api_keys: MCP / public API access ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS api_keys (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  key_hash     TEXT NOT NULL,
+  key_prefix   TEXT NOT NULL,        -- first 8 chars, for display
+  scopes       TEXT,                 -- JSON array
+  last_used_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  revoked_at   TIMESTAMPTZ
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_api_keys_hash ON api_keys (key_hash);
+CREATE INDEX ASYNC IF NOT EXISTS idx_api_keys_user ON api_keys (user_id);

@@ -39,9 +39,12 @@ const isDryRun = process.argv.includes("--dry-run");
 const sql = readFileSync(join(ROOT, "aws/migrations.sql"), "utf8");
 
 // Split on semicolons, keep non-empty statements, strip comments
+// Strip line comments BEFORE splitting, so a ";" inside a comment can't
+// become a statement boundary.
 const statements = sql
+  .replace(/--[^\n]*/g, "")
   .split(";")
-  .map(s => s.replace(/--[^\n]*/g, "").trim())
+  .map(s => s.trim())
   .filter(Boolean);
 
 if (isDryRun) {
