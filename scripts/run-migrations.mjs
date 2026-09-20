@@ -115,8 +115,8 @@ const applied = new Set(
 let ok = 0, skip = 0, fail = 0;
 
 for (const rawStmt of statements) {
-  // Local Postgres has no CREATE INDEX ASYNC — strip the DSQL-only keyword.
-  const stmt = isLocal ? rawStmt.replace(/CREATE\s+INDEX\s+ASYNC/gi, "CREATE INDEX") : rawStmt;
+  // Local Postgres has no CREATE [UNIQUE] INDEX ASYNC — strip the DSQL-only keyword.
+  const stmt = isLocal ? rawStmt.replace(/CREATE\s+(UNIQUE\s+)?INDEX\s+ASYNC/gi, "CREATE $1INDEX") : rawStmt;
   const hash = hashOf(rawStmt);
   const preview = stmt.replace(/\s+/g, " ").slice(0, 80);
   if (applied.has(hash)) {
