@@ -76,6 +76,7 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
   const [site, setSite] = useState<Site | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [tab, setTab] = useState<"refine" | "features" | "security" | "images" | "leads" | "components" | "analytics">("refine");
   const [features, setFeatures] = useState<Feature[]>([]);
   const [featuresHeadline, setFeaturesHeadline] = useState<string>("");
@@ -92,9 +93,16 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const load = useCallback(async () => {
-    const r = await fetch(`/api/build/sites/${siteId}`);
-    const data = await safeJson(r);
-    if (r.ok) setSite(data.site);
+    try {
+      setLoadError("");
+      const r = await fetch(`/api/build/sites/${siteId}`);
+      const data = await safeJson(r);
+      if (!r.ok) throw new Error(data?.error ?? `Failed to load site (${r.status})`);
+      if (!data?.site) throw new Error("Site not found");
+      setSite(data.site);
+    } catch (e) {
+      setLoadError((e as Error).message || "Failed to load site");
+    }
   }, [siteId]);
 
   const loadHistory = useCallback(async (selectLatest = true) => {
@@ -219,7 +227,12 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
         body: JSON.stringify({ siteId }),
       });
       const d = await safeJson(r);
-      setIssues(d.issues ?? []);
+      if (!r.ok || !Array.isArray(d?.issues)) {
+        throw new Error(d?.error ?? `Security scan failed (${r.status})`);
+      }
+      setIssues(d.issues);
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setBusy(null);
     }
@@ -288,8 +301,19 @@ export default function LiveStudio({ params }: { params: Promise<{ siteId: strin
 
   if (!site) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="flex h-full items-center justify-center p-4">
+        {loadError ? (
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 text-center shadow-sm">
+            <AlertTriangle className="mx-auto mb-3 h-6 w-6 text-destructive" />
+            <p className="mb-1 text-sm font-semibold text-foreground">Could not load this site</p>
+            <p className="mb-4 text-xs text-muted-foreground break-words">{loadError}</p>
+            <Button size="sm" onClick={() => { void load(); }}>
+              <RefreshCw className="mr-2 h-3.5 w-3.5" /> Try again
+            </Button>
+          </div>
+        ) : (
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        )}
       </div>
     );
   }

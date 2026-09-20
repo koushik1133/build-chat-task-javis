@@ -14,7 +14,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const { id } = await ctx.params;
-  const body = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const body = rawBody;
 
   const existing = await queryOne<{ id: string; title: string; status: string; automation: string | null }>(
     "SELECT id, title, status, automation FROM production_tasks WHERE id = $1 AND user_id = $2",

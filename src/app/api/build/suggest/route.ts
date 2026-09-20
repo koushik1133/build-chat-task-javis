@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
 import { completeJson } from "@/lib/llm";
+import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { NICHE_FEATURES_SYS, FEATURE_SUGGESTIONS_SYS } from "@/lib/build-prompts";
 import { getCategory } from "@/lib/build-categories";
 import { queryOne } from "@/lib/dsql";
@@ -27,7 +28,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const parsed = Body.safeParse(await req.json());
+  const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
 
   const site = await queryOne<{ plan: string | null; title: string; persona: string | null }>(
@@ -49,7 +50,9 @@ export async function POST(req: Request) {
         [{ role: "system", content: FEATURE_SUGGESTIONS_SYS }, { role: "user", content: brief }],
         `{"features":[{"title":string,"why":string}]}`
       );
-    } catch {
+    } catch (err) {
+      const notConfigured = llmNotConfiguredResponse(err);
+      if (notConfigured) return notConfigured;
       return NextResponse.json({ headline: "Suggested features", features: [] });
     }
     return NextResponse.json({ headline: "Suggested features for your site", features: result?.features ?? [] });
@@ -77,7 +80,9 @@ export async function POST(req: Request) {
       [{ role: "system", content: NICHE_FEATURES_SYS }, { role: "user", content: briefForLLM }],
       `{"headline":string,"features":[{"title":string,"why":string}]}`
     );
-  } catch {
+  } catch (err) {
+    const notConfigured = llmNotConfiguredResponse(err);
+    if (notConfigured) return notConfigured;
     return NextResponse.json({
       headline: `Used by top ${category.label.toLowerCase()} websites today`,
       features: category.topFeatures,

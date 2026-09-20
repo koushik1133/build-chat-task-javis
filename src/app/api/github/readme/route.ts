@@ -9,6 +9,7 @@ import {
   pickSourceFiles,
 } from "@/lib/github";
 import { complete } from "@/lib/llm";
+import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { README_SYS } from "@/lib/prompts";
 
 export const runtime = "nodejs";
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const parsed = Body.safeParse(await req.json());
+  const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
 
   const ref = parseRepoUrl(parsed.data.repoUrl);
@@ -33,10 +34,8 @@ export async function POST(req: Request) {
   try {
     meta = await getRepoMeta(owner, repo);
   } catch (e) {
-    return NextResponse.json(
-      { error: `github: ${(e as Error).message}` },
-      { status: 400 }
-    );
+    console.error("[github/readme] repo lookup failed:", e);
+    return NextResponse.json({ error: "Could not access that GitHub repository" }, { status: 400 });
   }
   const tree = await getFileTree(owner, repo, meta.defaultBranch);
   const top = pickSourceFiles(tree, 6);
@@ -64,7 +63,9 @@ export async function POST(req: Request) {
     .map((t) => t.path)
     .join("\n");
 
-  const readme = await complete(
+  let readme: string;
+  try {
+  readme = await complete(
     [
       { role: "system", content: README_SYS },
       {
@@ -82,6 +83,12 @@ ${entries.join("\n\n")}`,
     ],
     { maxTokens: 2000 }
   );
+  } catch (err) {
+    const notConfigured = llmNotConfiguredResponse(err);
+    if (notConfigured) return notConfigured;
+    console.error("[github/readme] LLM call failed:", err);
+    return NextResponse.json({ error: "README generation failed. Please try again." }, { status: 502 });
+  }
 
   return NextResponse.json({ repo: `${owner}/${repo}`, readme });
 }

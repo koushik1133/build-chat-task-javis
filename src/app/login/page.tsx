@@ -213,10 +213,10 @@ function LoginForm() {
 
 
 
-  const tabs: { id: Tab; icon: React.ReactNode; label: string }[] = [
-    { id: "signin",  icon: <LogIn className="h-3.5 w-3.5" />,    label: "Sign in" },
-    { id: "signup",  icon: <UserPlus className="h-3.5 w-3.5" />, label: "Create account" },
-    { id: "magic",   icon: <Mail className="h-3.5 w-3.5" />,     label: "Magic link" },
+  const tabs: { id: Tab; icon: React.ReactNode; label: string; short: string }[] = [
+    { id: "signin",  icon: <LogIn className="h-3.5 w-3.5" />,    label: "Sign in",        short: "Sign in" },
+    { id: "signup",  icon: <UserPlus className="h-3.5 w-3.5" />, label: "Create account", short: "Sign up" },
+    { id: "magic",   icon: <Mail className="h-3.5 w-3.5" />,     label: "Magic link",     short: "Magic" },
   ];
 
   if (checking) {
@@ -239,7 +239,7 @@ function LoginForm() {
           <p className="text-sm text-muted-foreground">{KERNELHUB_TAGLINE}</p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-7 shadow-sm">
+        <div className="rounded-2xl border border-border bg-card p-5 sm:p-7 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">Welcome</h2>
 
           {/* Tab row */}
@@ -247,15 +247,19 @@ function LoginForm() {
             {tabs.map(t => (
               <button
                 key={t.id}
+                type="button"
+                aria-pressed={tab === t.id}
                 onClick={() => { setTab(t.id); resetForm(); }}
                 className={cn(
-                  "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium transition-all",
+                  "flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-md px-1 py-1.5 text-xs font-medium transition-all",
                   tab === t.id
                     ? "bg-background shadow-sm text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {t.icon} {t.label}
+                <span className="hidden shrink-0 sm:inline-flex" aria-hidden>{t.icon}</span>
+                <span className="sm:hidden">{t.short}</span>
+                <span className="hidden sm:inline">{t.label}</span>
               </button>
             ))}
           </div>

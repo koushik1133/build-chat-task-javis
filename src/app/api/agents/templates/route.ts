@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { queryOne } from "@/lib/dsql";
 import { completeJson } from "@/lib/llm";
+import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { getAgentTemplate, AGENT_TEMPLATES } from "@/lib/agent-templates";
 
 export async function GET() {
@@ -13,7 +14,9 @@ export async function POST(req: Request) {
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const { template_id, system_prompt, type = "system" } = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { template_id, system_prompt, type = "system" } = rawBody;
   const template = template_id ? getAgentTemplate(template_id) : null;
 
   const profile = await queryOne<{ company_name: string; industry: string; product_desc: string }>(
@@ -36,7 +39,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ suggestions });
   }
 
-  const result = await completeJson<{ suggestions: string[] }>(
+  let result: { suggestions: string[] } | null = null;
+  try {
+    result = await completeJson<{ suggestions: string[] }>(
     [
       {
         role: "system",
@@ -53,7 +58,13 @@ Generate 3 improved alternative system prompts (each 2-4 sentences, specific to 
       },
     ],
     `{ "suggestions": string[] }`
-  ).catch(() => null);
+    );
+  } catch (err) {
+    const notConfigured = llmNotConfiguredResponse(err);
+    if (notConfigured) return notConfigured;
+    console.error("[agents/templates] suggestion generation failed:", err);
+    result = null;
+  }
 
   const suggestions = result?.suggestions?.filter(Boolean).slice(0, 3);
   if (suggestions?.length) {

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notification-bell";
 import { timeAgo, cn } from "@/lib/utils";
 import { validateMove, sortByPriority } from "@/lib/production-board";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type Column = { id: string; label: string; hitl: boolean; color: string };
@@ -117,6 +118,18 @@ function parseTags(raw: string): string[] {
   try { return JSON.parse(raw || "[]"); } catch { return []; }
 }
 
+/** Parse a JSON array string; on parse failure or non-array, return the fallback. */
+function parseList<T>(raw: unknown, fallback: T[]): T[] {
+  if (Array.isArray(raw)) return raw as T[];
+  if (typeof raw !== "string" || raw.trim() === "") return fallback;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /* ─── Main component ─────────────────────────────────────────────────────── */
 export default function ProductionPage() {
   const [tasks,   setTasks]   = useState<PTask[]>([]);
@@ -184,8 +197,8 @@ export default function ProductionPage() {
       const cfg = cfgRes.value.config;
       const parsed: BoardConfig = {
         ...cfg,
-        columns:     JSON.parse(cfg.columns     || "[]"),
-        card_fields: JSON.parse(cfg.card_fields || "[]"),
+        columns:     parseList<Column>(cfg.columns, TEMPLATES.default.columns),
+        card_fields: parseList<CardField>(cfg.card_fields, ["priority","due_date","tags"]),
       };
       setConfig(parsed);
       setBoardName(parsed.name);
@@ -538,13 +551,16 @@ export default function ProductionPage() {
                 className="w-full max-w-[12rem] border-b border-primary bg-transparent text-base font-semibold outline-none sm:max-w-xs sm:text-lg"
               />
             ) : (
-              <button
-                className="group flex min-w-0 items-center gap-1.5 text-base font-semibold transition-colors hover:text-primary sm:text-lg"
-                onClick={() => setEditingName(true)}
-              >
-                <span className="truncate">{boardName || "My Board"}</span>
-                <Pencil className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-50" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  className="group flex min-w-0 items-center gap-1.5 text-base font-semibold transition-colors hover:text-primary sm:text-lg"
+                  onClick={() => setEditingName(true)}
+                >
+                  <span className="truncate">{boardName || "My Board"}</span>
+                  <Pencil className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-50" />
+                </button>
+                <InfoTooltip text="Your project management board. Track tasks, deadlines, and progress. Agents can also create tasks here." />
+              </div>
             )}
             <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
               {cols.length} columns · {tasks.length} cards

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 type PageContainerProps = {
   children: React.ReactNode;
@@ -7,6 +8,8 @@ type PageContainerProps = {
   wide?: boolean;
   title?: string;
   description?: string;
+  /** Plain-English tooltip for the page title */
+  tooltip?: string;
 };
 
 export function PageContainer({
@@ -15,6 +18,7 @@ export function PageContainer({
   wide = false,
   title,
   description,
+  tooltip,
 }: PageContainerProps) {
   return (
     <div
@@ -27,7 +31,10 @@ export function PageContainer({
         {(title || description) && (
           <header className="mb-6 sm:mb-8">
             {title && (
-              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
+              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl flex items-center gap-2">
+                {title}
+                {tooltip && <InfoTooltip text={tooltip} />}
+              </h1>
             )}
             {description && (
               <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>

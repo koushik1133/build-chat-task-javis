@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Bell, Mail, MessageSquare, CheckCircle2, AlertCircle,
-  Loader2, FlaskConical, ChevronRight, Sparkles, ExternalLink,
+  Loader2, FlaskConical, ChevronRight, Sparkles, ExternalLink, Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,10 @@ type Integrations = {
   email_from_name: string | null;
   email_available: boolean;
   notifications_enabled: boolean;
+  twilio_from_number?: string | null;
+  messaging_auto_reply?: boolean;
+  upload_post_profile?: string | null;
+  publishing_available?: boolean;
 };
 
 export default function ConnectionsPage() {
@@ -36,6 +40,13 @@ export default function ConnectionsPage() {
   const [sendingCode, setSendingCode] = useState(false);
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, string>>({});
+  
+  const [twilioNumber, setTwilioNumber] = useState("");
+  const [autoReply, setAutoReply] = useState(false);
+  const [savingMessaging, setSavingMessaging] = useState(false);
+
+  const [publishProfile, setPublishProfile] = useState("");
+  const [savingPublishing, setSavingPublishing] = useState(false);
 
   useEffect(() => {
     fetch("/api/integrations")
@@ -48,10 +59,55 @@ export default function ConnectionsPage() {
         setEmailTo(i.email_default_to ?? i.email_pending ?? "");
         setEmailFromName(i.email_from_name ?? "");
         setCodeSent(!!i.email_pending && !i.email_verified);
+        setTwilioNumber(i.twilio_from_number ?? "");
+        setAutoReply(!!i.messaging_auto_reply);
+        setPublishProfile(i.upload_post_profile ?? "");
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  async function saveMessaging() {
+    setSavingMessaging(true);
+    setTestResults(r => ({ ...r, messaging: "Saving..." }));
+    const res = await fetch("/api/integrations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        twilio_from_number: twilioNumber,
+        messaging_auto_reply: autoReply,
+      }),
+    }).then(r => r.json()).catch(() => null);
+
+    if (res?.integrations) {
+      const i = res.integrations as Integrations;
+      setData(i);
+      setTestResults(r => ({ ...r, messaging: "✓ Settings saved successfully." }));
+    } else {
+      setTestResults(r => ({ ...r, messaging: "✗ Failed to save messaging settings." }));
+    }
+    setSavingMessaging(false);
+  }
+
+  async function savePublishing() {
+    setSavingPublishing(true);
+    setTestResults(r => ({ ...r, publishing: "Saving..." }));
+    const res = await fetch("/api/integrations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ upload_post_profile: publishProfile }),
+    }).then(r => r.json()).catch(() => null);
+
+    if (res?.integrations) {
+      const i = res.integrations as Integrations;
+      setData(i);
+      setPublishProfile(i.upload_post_profile ?? "");
+      setTestResults(r => ({ ...r, publishing: "✓ Publishing profile saved." }));
+    } else {
+      setTestResults(r => ({ ...r, publishing: `✗ ${res?.error ?? "Failed to save publishing profile."}` }));
+    }
+    setSavingPublishing(false);
+  }
 
   async function connectSlack() {
     const url = slackUrl.trim();
@@ -331,6 +387,81 @@ export default function ConnectionsPage() {
             Saves your webhook and sends a test message in one step — no separate Save needed.
           </p>
           {testResults.slack && <TestResult msg={testResults.slack} />}
+        </ConnectionCard>
+
+        {/* Messaging (WhatsApp/SMS) */}
+        <ConnectionCard
+          icon={MessageSquare}
+          title="WhatsApp & SMS"
+          subtitle="Configure Twilio to auto-reply to incoming texts using AI"
+          connected={!!data?.twilio_from_number}
+          connectedLabel={data?.twilio_from_number ? data.twilio_from_number : "Connected"}
+        >
+          <div className="rounded-lg bg-secondary/50 p-3 mb-4 space-y-2">
+            <p className="text-xs font-semibold">How to connect Twilio Sandbox</p>
+            <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
+              <li>Open Twilio Sandbox for WhatsApp</li>
+              <li>Set the Webhook URL to: <code className="bg-white/50 dark:bg-black/20 px-1 rounded">https://your-domain/api/integrations/whatsapp/webhook</code></li>
+              <li>Enter your Twilio Sandbox number below (e.g. +14155238886)</li>
+            </ol>
+          </div>
+          <Field label="Twilio From Number (or Sandbox Number)">
+            <input value={twilioNumber} onChange={e => setTwilioNumber(e.target.value)}
+              placeholder="+14155238886" className={inputCls} />
+          </Field>
+          <div className="mb-4 mt-2 flex items-center gap-2">
+            <input 
+              type="checkbox" 
+              id="autoReply" 
+              checked={autoReply} 
+              onChange={e => setAutoReply(e.target.checked)}
+              className="rounded border-border"
+            />
+            <label htmlFor="autoReply" className="text-xs text-foreground font-medium">
+              Enable AI Auto-Reply (Respond to inbound messages automatically)
+            </label>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={saveMessaging} disabled={savingMessaging || !twilioNumber.trim()}>
+              {savingMessaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Messaging Settings"}
+            </Button>
+          </div>
+          {testResults.messaging && <TestResult msg={testResults.messaging} />}
+        </ConnectionCard>
+
+        {/* Social publishing (Upload-Post) */}
+        <ConnectionCard
+          icon={Share2}
+          title="Social Publishing"
+          subtitle="Publish scheduled posts to your connected social channels"
+          connected={!!data?.upload_post_profile}
+          connectedLabel={data?.upload_post_profile ?? "Connected"}
+        >
+          <div className="rounded-lg bg-secondary/50 p-3 mb-4 space-y-2">
+            <p className="text-xs font-semibold">How it works</p>
+            <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
+              <li>Your KernelHub admin connects the publishing service once for the whole platform</li>
+              <li>Create a publishing profile there and link your social accounts to it</li>
+              <li>Enter that profile name below — scheduled posts in <strong className="text-foreground">Social Media</strong> publish through it</li>
+            </ol>
+          </div>
+          {data?.publishing_available === false && (
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 mb-4 text-xs text-amber-800 dark:text-amber-200">
+              Publishing is not enabled on this deployment yet. An administrator must set
+              <code className="bg-white/50 dark:bg-black/20 px-1 rounded ml-1">UPLOAD_POST_API_KEY</code>.
+              You can still save your profile name now.
+            </div>
+          )}
+          <Field label="Publishing Profile Name">
+            <input value={publishProfile} onChange={e => setPublishProfile(e.target.value)}
+              placeholder="my-brand" className={inputCls} />
+          </Field>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={savePublishing} disabled={savingPublishing}>
+              {savingPublishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+            </Button>
+          </div>
+          {testResults.publishing && <TestResult msg={testResults.publishing} />}
         </ConnectionCard>
 
         <p className="text-xs text-center text-muted-foreground pb-8">

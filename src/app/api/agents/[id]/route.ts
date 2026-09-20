@@ -7,7 +7,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
-  const body = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const body = rawBody;
 
   if (body.status) {
     await query("UPDATE agents SET status = $1 WHERE id = $2 AND user_id = $3", [body.status, id, user.id]);

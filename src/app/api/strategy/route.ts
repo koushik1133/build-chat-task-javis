@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { query, queryOne } from "@/lib/dsql";
-import { complete } from "@/lib/llm";
+import { complete, LlmNotConfiguredError } from "@/lib/llm";
+import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import {
   buildBusinessContext,
   getStrategyPrompt,
@@ -34,8 +35,10 @@ async function generateStrategy(
       [{ role: "user", content: getStrategyPrompt(type, ctx) }],
       { maxTokens: 2000, retries: 2 }
     );
-  } catch (e) {
-    content = `# ${title}\n\nGeneration failed: ${(e as Error).message}\n\nPlease check that GROQ_API_KEY is set and try again.`;
+  } catch (err) {
+    if (err instanceof LlmNotConfiguredError) throw err;
+    console.error("[strategy] LLM call failed:", err);
+    content = `# ${title}\n\nGeneration failed. Please try again.`;
   }
 
   const proposal = await queryOne(
@@ -75,14 +78,23 @@ export async function POST(req: Request) {
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const { type, title, custom_context } = await req.json();
-  const proposal = await generateStrategy(user.id, { type, title, custom_context });
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { type, title, custom_context } = rawBody;
+  try {
+    const proposal = await generateStrategy(user.id, { type, title, custom_context });
 
-  if (!proposal) {
-    return NextResponse.json({ error: "Failed to save strategy. Check DSQL connection." }, { status: 500 });
+    if (!proposal) {
+      return NextResponse.json({ error: "Failed to save strategy" }, { status: 500 });
+    }
+
+    return NextResponse.json({ proposal });
+  } catch (err) {
+    const notConfigured = llmNotConfiguredResponse(err);
+    if (notConfigured) return notConfigured;
+    console.error("[strategy] POST error:", err);
+    return NextResponse.json({ error: "Failed to generate strategy" }, { status: 500 });
   }
-
-  return NextResponse.json({ proposal });
 }
 
 export async function PATCH(req: Request) {
@@ -90,7 +102,9 @@ export async function PATCH(req: Request) {
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const { id, status, content, title } = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { id, status, content, title } = rawBody;
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
   if (title?.trim()) {
@@ -116,7 +130,9 @@ export async function DELETE(req: Request) {
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const { id } = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { id } = rawBody;
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
   await query("DELETE FROM strategy_versions WHERE strategy_id = $1 AND user_id = $2", [id, user.id]).catch(() => {});

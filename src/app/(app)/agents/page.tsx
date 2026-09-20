@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dispatchNotificationRefresh } from "@/components/notification-bell";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 
 type AgentTemplate = {
@@ -38,6 +39,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 type AgentRun = {
   id: string;
+  agent_id: string;
   agent_name: string;
   agent_role: string;
   workflow_name: string | null;
@@ -47,10 +49,13 @@ type AgentRun = {
 
 type DeployStep = "pick" | "configure";
 
+type Correction = { id?: string; agent_id?: string };
+
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [corrections, setCorrections] = useState<Correction[]>([]);
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [deploying, setDeploying] = useState(false);
@@ -70,11 +75,15 @@ export default function AgentsPage() {
   const [confirmRunAgent, setConfirmRunAgent] = useState<Agent | null>(null);
   const [runningAgentId, setRunningAgentId] = useState<string | null>(null);
 
+  const [correctingRun, setCorrectingRun] = useState<AgentRun | null>(null);
+  const [correctionText, setCorrectionText] = useState("");
+  const [savingCorrection, setSavingCorrection] = useState(false);
 
   useEffect(() => {
     fetch("/api/agents").then(r => r.json()).then(d => setAgents(d.agents ?? [])).catch(() => {});
     fetch("/api/agents/runs").then(r => r.json()).then(d => setRuns(d.runs ?? [])).catch(() => {});
     fetch("/api/agents/templates").then(r => r.json()).then(d => setTemplates(d.templates ?? [])).catch(() => {});
+    fetch("/api/agents/corrections").then(r => r.json()).then(d => setCorrections(d.corrections ?? [])).catch(() => {});
   }, []);
 
   function openDeploy() {
@@ -203,6 +212,41 @@ export default function AgentsPage() {
     }
   }
 
+  function openCorrection(run: AgentRun) {
+    setCorrectingRun(run);
+    setCorrectionText(run.output);
+  }
+
+  async function submitCorrection() {
+    if (!correctingRun) return;
+    setSavingCorrection(true);
+    try {
+      // Find the agent ID for this run, since run model might not have agent_id directly,
+      // wait, `run` has `agent_name`. We can try finding it in `agents`.
+      const res = await fetch("/api/agents/corrections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: correctingRun.agent_id,
+          originalText: correctingRun.output,
+          correctedText: correctionText,
+          context: correctingRun.workflow_name || "manual",
+        }),
+      });
+      if (res.ok) {
+        setCorrectingRun(null);
+        fetch("/api/agents/corrections").then(r => r.json()).then(d => setCorrections(d.corrections ?? [])).catch(() => {});
+        alert("Correction saved! The agent will use this feedback in future runs.");
+      } else {
+        alert("Failed to save correction.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error saving correction.");
+    } finally {
+      setSavingCorrection(false);
+    }
+  }
 
   const filtered = agents.filter(a =>
     a.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -214,7 +258,10 @@ export default function AgentsPage() {
       <div className="mx-auto w-full max-w-4xl space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">AI Agents</h1>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl flex items-center gap-2">
+              AI Agents
+              <InfoTooltip text="Set up AI workers that run tasks on a schedule or on-demand — like a virtual employee that never sleeps." />
+            </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Pick a pre-built agent, customize its system prompt, and deploy.
             </p>
@@ -445,7 +492,17 @@ export default function AgentsPage() {
                         {tmpl?.emoji ?? <Bot className="h-4 w-4 text-primary" />}
                       </div>
                       <div>
-                        <div className="font-medium text-sm">{agent.name}</div>
+                        <div className="font-medium text-sm flex items-center gap-2">
+                          {agent.name}
+                          {(() => {
+                            const count = corrections.filter(c => c.agent_id === agent.id).length;
+                            return count > 0 ? (
+                              <span className="inline-flex items-center gap-0.5 rounded bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-medium text-violet-500 dark:bg-violet-500/20" title="AI has learned user corrections for this agent">
+                                🧠 {count}
+                              </span>
+                            ) : null;
+                          })()}
+                        </div>
                         <div className="text-xs text-muted-foreground">{agent.role}</div>
                       </div>
                     </div>
@@ -515,9 +572,19 @@ export default function AgentsPage() {
                     </div>
                   </button>
                   {expandedRun === run.id && (
-                    <pre className="mt-2 text-[11px] text-muted-foreground whitespace-pre-wrap font-sans leading-relaxed">
-                      {run.output}
-                    </pre>
+                    <div className="mt-2 space-y-2">
+                      <pre className="text-[11px] text-muted-foreground whitespace-pre-wrap font-sans leading-relaxed">
+                        {run.output}
+                      </pre>
+                      <Button 
+                        size="sm" 
+                        variant="secondary" 
+                        className="text-[10px] h-6 px-2"
+                        onClick={() => openCorrection(run)}
+                      >
+                        <Pencil className="h-3 w-3 mr-1" /> Teach AI / Correct Output
+                      </Button>
+                    </div>
                   )}
                 </div>
               ))}
@@ -562,6 +629,49 @@ export default function AgentsPage() {
                   ) : (
                     "Confirm Run"
                   )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Correction modal */}
+        {correctingRun && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setCorrectingRun(null)}>
+            <div
+              className="bg-card border border-border rounded-xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="font-semibold mb-1">Correct Agent Output</h2>
+              <p className="text-xs text-muted-foreground mb-4">
+                Teach the {correctingRun.agent_name} agent how it should have responded. 
+                It will use this feedback in future runs.
+              </p>
+
+              <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">What the agent did (Original)</label>
+                  <div className="w-full rounded-lg border border-border/50 bg-secondary/30 px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap font-sans opacity-70">
+                    {correctingRun.output}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">What it should do instead (Correction)</label>
+                  <textarea
+                    value={correctionText}
+                    onChange={e => setCorrectionText(e.target.value)}
+                    rows={12}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30 resize-none font-sans leading-relaxed"
+                    placeholder="Edit the output to be exactly what you want..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 mt-5 shrink-0">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setCorrectingRun(null)}>Cancel</Button>
+                <Button size="sm" className="flex-1" onClick={submitCorrection} disabled={savingCorrection || !correctionText.trim()}>
+                  {savingCorrection ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Correction"}
                 </Button>
               </div>
             </div>

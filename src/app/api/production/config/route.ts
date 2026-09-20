@@ -36,7 +36,9 @@ export async function POST(req: Request) {
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const body = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const body = rawBody;
   const { name, template, columns, card_fields } = body;
 
   // Upsert: try update first

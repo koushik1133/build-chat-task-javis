@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LogOut,
@@ -16,7 +16,10 @@ import {
 import { cn, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
-import { APP_NAV_TOP, APP_NAV_BOTTOM, type AppNavItem } from "@/lib/app-nav";
+import { APP_NAV_TOP, NAV_GROUPS, type AppNavItem } from "@/lib/app-nav";
+import { channelHref, iconFor } from "@/lib/channels/registry";
+import type { ChannelNavItem } from "@/lib/nav/channel-nav";
+import { useNavRefreshSignal } from "@/lib/nav/nav-refresh";
 import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 
 type Chat = { id: string; title: string; updated_at: string };
@@ -26,6 +29,8 @@ type SidebarProps = {
   mobileOpen?: boolean;
   onNavigate?: () => void;
   onClose?: () => void;
+  /** Channels the user has connected, resolved server-side for the first paint. */
+  initialChannels?: ChannelNavItem[];
 };
 
 export function Sidebar({
@@ -33,12 +38,14 @@ export function Sidebar({
   mobileOpen = false,
   onNavigate,
   onClose,
+  initialChannels = [],
 }: SidebarProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const [chats, setChats] = useState<Chat[]>([]);
+  const [channels, setChannels] = useState<ChannelNavItem[]>(initialChannels);
   const [dark, setDark] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const navSignal = useNavRefreshSignal();
 
   useEffect(() => {
     const stored = localStorage.getItem("theme");
@@ -62,6 +69,22 @@ export function Sidebar({
       .catch(() => {});
   }, [pathname]);
 
+  // Regrow the Channels group when an account is connected or disconnected.
+  // Signal 0 is the initial render, already covered by `initialChannels`.
+  useEffect(() => {
+    if (navSignal === 0) return;
+    let active = true;
+    fetch("/api/nav/channels")
+      .then((r) => r.json())
+      .then((d) => {
+        if (active) setChannels(Array.isArray(d?.channels) ? d.channels : []);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [navSignal]);
+
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
@@ -70,8 +93,20 @@ export function Sidebar({
     await supabase.auth.signOut().catch(() => {});
     await fetch("/api/auth/signout", { method: "POST" }).catch(() => {});
 
-    router.replace("/login?signed_out=1");
-    router.refresh();
+    // Full document navigation so Next's router cache can't re-show
+    // signed-in pages on Back.
+    window.location.replace("/login?signed_out=1");
+  }
+
+  function NavGroupHeading({ title }: { title: string }) {
+    return (
+      <>
+        <div className="mx-3 my-2.5 border-t border-border" />
+        <div className="px-3 mb-1">
+          <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground">{title}</span>
+        </div>
+      </>
+    );
   }
 
   function NavLinks({ items }: { items: AppNavItem[] }) {
@@ -149,8 +184,37 @@ export function Sidebar({
       <div className="scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden py-2">
         <NavLinks items={APP_NAV_TOP} />
 
-        <div className="mx-3 my-2.5 border-t border-border" />
-        <NavLinks items={APP_NAV_BOTTOM} />
+        {/* Channels — built from the user's connected accounts */}
+        <NavGroupHeading title="Channels" />
+        {channels.length > 0 ? (
+          <NavLinks
+            items={channels.map((c) => ({
+              href: channelHref(c.id),
+              label: c.label,
+              icon: iconFor(c.id),
+            }))}
+          />
+        ) : (
+          <nav className="space-y-0.5 px-2">
+            <Link
+              href="/social?tab=accounts"
+              onClick={onNavigate}
+              title="Connect a channel"
+              className="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground/70 transition-all duration-150 hover:bg-secondary/70 hover:text-foreground"
+            >
+              <Plug className="h-[18px] w-[18px] shrink-0" />
+              <span className="truncate">Connect a channel</span>
+            </Link>
+          </nav>
+        )}
+
+        {NAV_GROUPS.map((group) => (
+          <div key={group.title}>
+            <NavGroupHeading title={group.title} />
+            <NavLinks items={group.items} />
+          </div>
+        ))}
+
 
         <div className="mt-4 px-3">
           <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground">

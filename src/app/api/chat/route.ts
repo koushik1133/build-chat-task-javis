@@ -32,7 +32,13 @@ export async function POST(req: Request) {
   let chatId = parsed.data.chatId ?? null;
 
   // 1. Ensure a chat metadata row in Aurora DSQL.
-  if (!chatId) {
+  if (chatId) {
+    const owned = await queryOne<{ id: string }>(
+      "SELECT id FROM chats WHERE id = $1 AND user_id = $2",
+      [chatId, user.id]
+    ).catch(() => null);
+    if (!owned) return NextResponse.json({ error: "chat not found" }, { status: 404 });
+  } else {
     const title = message.slice(0, 60).replace(/\s+/g, " ").trim() || "New chat";
     const row = await queryOne<{ id: string }>(
       "INSERT INTO chats (user_id, title) VALUES ($1, $2) RETURNING id",
@@ -121,7 +127,7 @@ export async function POST(req: Request) {
             createdAt: assistantAt,
           });
           // Update chat updated_at in Aurora DSQL
-          await query("UPDATE chats SET updated_at = $1 WHERE id = $2", [assistantAt, finalChatId]);
+          await query("UPDATE chats SET updated_at = $1 WHERE id = $2 AND user_id = $3", [assistantAt, finalChatId, user.id]);
         }
         controller.close();
 

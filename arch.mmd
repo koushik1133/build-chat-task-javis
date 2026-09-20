@@ -1,0 +1,33 @@
+graph TD
+  subgraph VercelPlatform["Vercel Platform"]
+    v0["v0 Generated UI (Next.js React)"]
+    Edge["Vercel Edge Middleware"]
+    SupabaseAuth["Supabase Authentication"]
+  end
+
+  subgraph AWS["Amazon Web Services"]
+    DSQL[("Amazon Aurora DSQL\n(Relational Metadata)")]
+    DynamoDB[("Amazon DynamoDB\n(Analytics & Chat Logs)")]
+  end
+
+  subgraph AIStack["AI & Vector Stack"]
+    Pinecone[("Pinecone Vector Database\n(Document Embeddings)")]
+    LLM["Groq Cloud / Llama 3\n(AI Inference)"]
+  end
+
+  %% Connections
+  v0 -- "Route Protection" --> Edge
+  Edge -- "Verify Session" --> SupabaseAuth
+  
+  v0 -- "Store/Read Profiles & Configs" --> DSQL
+  v0 -- "High-throughput Logs" --> DynamoDB
+  
+  v0 -- "Upload/Query Documents" --> Pinecone
+  v0 -- "User Chat Queries" --> LLM
+  LLM -- "RAG Context Retrieval" --> Pinecone
+  
+  %% Styling to make Vercel pop
+  style VercelPlatform fill:#000,color:#fff,stroke:#fff
+  style v0 fill:#fff,color:#000,stroke:#ccc
+  style AWS fill:#232f3e,color:#fff,stroke:#fff
+  style AIStack fill:#f4f4f5,color:#000,stroke:#e4e4e7

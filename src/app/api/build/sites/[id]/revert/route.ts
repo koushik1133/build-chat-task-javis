@@ -18,15 +18,21 @@ export async function POST(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const parsed = Body.safeParse(await req.json());
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return NextResponse.json({ error: "bad request" }, { status: 400 });
+  }
+  const parsed = Body.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
   const { id } = await ctx.params;
   const { revisionId } = parsed.data;
 
   // Verify revision belongs to this site (application-layer integrity)
   const rev = await queryOne<{ html: string; site_id: string }>(
-    "SELECT html, site_id FROM site_revisions WHERE id = $1",
-    [revisionId]
+    "SELECT html, site_id FROM site_revisions WHERE id = $1 AND user_id = $2",
+    [revisionId, user.id]
   );
   if (!rev || rev.site_id !== id) {
     return NextResponse.json({ error: "revision not found" }, { status: 404 });

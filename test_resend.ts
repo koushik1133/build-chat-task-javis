@@ -29,7 +29,7 @@ async function main() {
   console.log("\n--- Sending test email ---");
   const payload = {
     from: RESEND_FROM,
-    to: ["delivered@resend.dev"],  // Resend's own test inbox - always works
+    to: ["koushik.lf38@gmail.com"],  // Resend's own test inbox - always works
     subject: "Javis Debug Test " + new Date().toISOString(),
     html: "<h1>Test</h1><p>If you see this, Resend is working.</p>",
   };

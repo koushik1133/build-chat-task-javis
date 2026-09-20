@@ -105,7 +105,7 @@ async function handleCron(req: Request) {
             id: row.id,
             name: row.name,
             success: false,
-            message: err instanceof Error ? err.message : "run failed",
+            message: "run failed",
             fired_at: fireAt,
             latency_ms: Date.now() - tickStart,
           });
@@ -144,7 +144,7 @@ export async function GET(req: Request) {
   } catch (err) {
     console.error("[cron] unhandled:", err);
     return NextResponse.json(
-      { error: "cron failed", detail: err instanceof Error ? err.message : String(err) },
+      { error: "cron failed" },
       { status: 500 }
     );
   }
@@ -156,7 +156,7 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("[cron] unhandled:", err);
     return NextResponse.json(
-      { error: "cron failed", detail: err instanceof Error ? err.message : String(err) },
+      { error: "cron failed" },
       { status: 500 }
     );
   }

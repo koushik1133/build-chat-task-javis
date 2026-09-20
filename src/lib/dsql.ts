@@ -20,12 +20,13 @@
  *   - One DDL statement per transaction
  */
 
+import { Pool } from "pg";
 import { AuroraDSQLPool } from "@aws/aurora-dsql-node-postgres-connector";
 import type { PoolClient, QueryResultRow } from "pg";
 
-let _pool: AuroraDSQLPool | null = null;
+let _pool: Pool | AuroraDSQLPool | null = null;
 
-function getPool(): AuroraDSQLPool {
+function getPool(): Pool | AuroraDSQLPool {
   if (_pool) return _pool;
 
   const host = process.env.DSQL_ENDPOINT;
@@ -35,29 +36,93 @@ function getPool(): AuroraDSQLPool {
     );
   }
 
-  _pool = new AuroraDSQLPool({
-    host,
-    database: "postgres",
-    max: 10,
-    idleTimeoutMillis: 30_000,
-    ssl: { rejectUnauthorized: false },
-  });
+  if (host === "localhost" || host === "127.0.0.1") {
+    _pool = new Pool({
+      host,
+      port: 5432,
+      database: process.env.DB_NAME || "postgres",
+      user: process.env.DB_USER || "postgres",
+      password: process.env.DB_PASSWORD || "",
+      max: 10,
+      idleTimeoutMillis: 30_000,
+    });
+  } else {
+    _pool = new AuroraDSQLPool({
+      host,
+      database: "postgres",
+      max: 10,
+      idleTimeoutMillis: 30_000,
+      ssl: { rejectUnauthorized: false },
+    });
+  }
 
   return _pool;
 }
 
-/** Run a parameterised query and return all rows. */
+
+// ─── Errors & retry ───────────────────────────────────────────────────────────
+
+/** Thrown when a database query fails. Wraps the underlying pg error. */
+export class DbError extends Error {
+  readonly code: string | undefined;
+  readonly cause: unknown;
+
+  constructor(message: string, cause: unknown) {
+    super(message);
+    this.name = "DbError";
+    this.cause = cause;
+    this.code =
+      cause && typeof cause === "object" && "code" in cause
+        ? String((cause as { code: unknown }).code)
+        : undefined;
+  }
+}
+
+export function isDbError(e: unknown): e is DbError {
+  return e instanceof DbError || (e instanceof Error && e.name === "DbError");
+}
+
+/** True for DSQL optimistic-concurrency conflicts (retryable). */
+function isConcurrencyConflict(e: unknown): boolean {
+  const err = isDbError(e) ? e.cause : e;
+  if (!err || typeof err !== "object") return false;
+  const code = "code" in err ? String((err as { code: unknown }).code) : "";
+  const msg = "message" in err ? String((err as { message: unknown }).message) : "";
+  return (
+    code === "40001" ||
+    msg.includes("OC000") ||
+    msg.toLowerCase().includes("serialization")
+  );
+}
+
+/** Retry `fn` on DSQL optimistic-concurrency conflicts with small backoff. */
+export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (!isConcurrencyConflict(e) || i === attempts - 1) throw e;
+      const delay = 50 * 2 ** i + Math.floor(Math.random() * 50);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+/** Run a parameterised query and return all rows. Throws DbError on failure. */
 export async function query<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   values: unknown[] = []
 ): Promise<T[]> {
-  const pool = getPool();
   try {
+    const pool = getPool();
     const result = await pool.query<T>(sql, values);
     return result.rows;
   } catch (err) {
     console.error("[DSQL Query Error]", sql, values, err);
-    throw err;
+    throw new DbError(err instanceof Error ? err.message : String(err), err);
   }
 }
 

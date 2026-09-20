@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   TrendingUp, Users, Eye, Bot, ListTodo, Clock, DollarSign,
-  Briefcase, Zap, Loader2, ChevronRight,
+  Briefcase, Zap, Loader2, ChevronRight, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 type Analytics = {
   totalLeads: number;
@@ -147,7 +148,10 @@ export default function AnalyticsPage() {
     <div className="h-full overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
       <div className="mx-auto w-full max-w-5xl space-y-6">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Data Analysis</h1>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl flex items-center gap-2">
+            Data Analysis
+            <InfoTooltip text="See your business metrics at a glance. Use the AI consultant below to ask questions about your data." />
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Live metrics from your sites, agents, production board, and automations.
           </p>
@@ -292,6 +296,138 @@ export default function AnalyticsPage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* AI Consultant Panel */}
+        <ConsultantPanel />
+      </div>
+    </div>
+  );
+}
+
+function ConsultantPanel() {
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const suggestions = [
+    "Where did my lead conversion drop off this week?",
+    "Which agent is performing best?",
+    "What tasks are most overdue?",
+    "Summarize my business health this month",
+    "What automation should I set up next?",
+    "How many hours has AI saved me?",
+    "Which strategy goals are falling behind?",
+    "What should I focus on tomorrow?"
+  ];
+
+  async function askQuestion(q: string) {
+    if (!q.trim()) return;
+    setQuestion(q);
+    setAnswer("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/analytics/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q }),
+      });
+
+      if (!res.ok) throw new Error("Failed to fetch");
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) return;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value);
+        const lines = text.split("\n\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const dataStr = line.slice(6);
+            if (dataStr === "[DONE]") {
+              setLoading(false);
+              break;
+            }
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.chunk) {
+                setAnswer((prev) => prev + data.chunk);
+              }
+            } catch {
+              // Ignore parse errors on chunks
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setAnswer("Error communicating with AI Consultant.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-8 rounded-xl border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+      <div className="bg-gradient-to-r from-orange-500/10 to-transparent px-6 py-4 border-b border-border">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-orange-500" />
+          <div>
+            <h2 className="text-base font-semibold">AI Business Consultant</h2>
+            <p className="text-xs text-muted-foreground">Ask anything about your business metrics</p>
+          </div>
+        </div>
+      </div>
+      
+      <div className="p-6 flex flex-col gap-6">
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+          {suggestions.map((s, i) => (
+            <button 
+              key={i}
+              onClick={() => askQuestion(s)}
+              className="shrink-0 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground whitespace-nowrap"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
+        <form 
+          onSubmit={(e) => { e.preventDefault(); askQuestion(question); }} 
+          className="relative flex items-center"
+        >
+          <input
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Ask your AI business consultant..."
+            className="w-full rounded-lg border border-input bg-background py-3 pl-4 pr-12 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-sm"
+          />
+          <button 
+            type="submit" 
+            disabled={!question.trim() || loading}
+            className="absolute right-2 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-secondary/80 disabled:opacity-50 transition-colors"
+          >
+            <Bot className="h-5 w-5" />
+          </button>
+        </form>
+
+        {(answer || loading) && (
+          <div className="rounded-lg bg-secondary/30 p-4 border border-border">
+            {answer ? (
+              <div className="text-sm prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
+                {answer}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Analyzing your metrics...
+              </div>
+            )}
           </div>
         )}
       </div>

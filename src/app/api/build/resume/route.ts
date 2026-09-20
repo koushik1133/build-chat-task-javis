@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { completeJson } from "@/lib/llm";
+import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { RESUME_ANALYSIS_SYS } from "@/lib/build-prompts";
 
 export const runtime = "nodejs";
@@ -54,11 +55,9 @@ export async function POST(req: Request) {
     };
     const out = await mod.default(buf);
     text = (out.text ?? "").trim();
-  } catch (e) {
-    return NextResponse.json(
-      { error: "failed to read PDF: " + (e as Error).message },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error("[resume] failed to read PDF:", err);
+    return NextResponse.json({ error: "Failed to read PDF" }, { status: 500 });
   }
 
   if (!text || text.length < 80) {
@@ -71,13 +70,21 @@ export async function POST(req: Request) {
   // Cap to keep prompts cheap.
   const trimmed = text.slice(0, 12000);
 
-  const profile = await completeJson<ResumeProfile>(
+  let profile: ResumeProfile | null = null;
+  try {
+    profile = await completeJson<ResumeProfile>(
     [
       { role: "system", content: RESUME_ANALYSIS_SYS },
       { role: "user", content: trimmed },
     ],
     `{"name":string,"role":string,"shortBio":string,"skills":string[],"projects":[{"title":string,"desc":string}],"experience":[{"company":string,"role":string,"years":string}],"suggestedThemes":string[],"themeReason":string}`
   );
+  } catch (err) {
+    const notConfigured = llmNotConfiguredResponse(err);
+    if (notConfigured) return notConfigured;
+    console.error("[resume] LLM analysis failed:", err);
+    return NextResponse.json({ error: "couldn't analyze resume" }, { status: 502 });
+  }
 
   if (!profile) {
     return NextResponse.json({ error: "couldn't analyze resume" }, { status: 502 });

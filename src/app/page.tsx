@@ -3,7 +3,6 @@ import {
   Sparkles,
   FileText,
   Github,
-  Database,
   MessageSquare,
   Wand2,
   ListTodo,
@@ -169,12 +168,26 @@ export default async function Landing() {
         </div>
       </section>
 
-      <section className="relative z-10 mx-auto mt-12 grid max-w-5xl grid-cols-2 gap-4 px-4 pb-24 sm:grid-cols-4 sm:px-6">
+      <section className="relative z-10 mx-auto mt-12 grid max-w-5xl grid-cols-2 gap-4 px-4 pb-16 sm:grid-cols-4 sm:px-6">
         <Metric value="10+" label="Integrated modules" />
         <Metric value="RAG" label="File-grounded chat" />
         <Metric value="HITL" label="Approval workflows" />
         <Metric value="Cloud Run" label="Deployed on" />
       </section>
+
+      {/* Footer */}
+      <footer className="relative z-10 border-t border-border bg-background/50 px-4 py-8 backdrop-blur-md sm:px-6 lg:px-8 mt-12 text-center text-sm text-muted-foreground">
+        <div className="mx-auto max-w-5xl flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+          <div>
+            &copy; {new Date().getFullYear()} {KERNELHUB_NAME}. All rights reserved.
+          </div>
+          <div className="flex gap-4 sm:gap-6">
+            <Link href="/privacy" className="hover:text-foreground hover:underline underline-offset-4">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-foreground hover:underline underline-offset-4">Terms of Service</Link>
+            <a href="mailto:koushik9924@gmail.com" className="hover:text-foreground hover:underline underline-offset-4">Contact: koushik9924@gmail.com</a>
+          </div>
+        </div>
+      </footer>
     </main>
   );
 }

@@ -17,7 +17,7 @@ export function Markdown({ children }: { children: string }) {
                  [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5
                  [&_:not(pre)>code]:text-[0.85em]
                  [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4
-                 [&_table]:text-xs [&_th]:px-2 [&_td]:px-2 [&_th]:py-1 [&_td]:py-1
+                 [&_table]:block [&_table]:w-full [&_table]:overflow-x-auto [&_table]:text-xs [&_th]:px-2 [&_td]:px-2 [&_th]:py-1 [&_td]:py-1
                  [&_th]:border [&_td]:border [&_th]:border-border [&_td]:border-border"
     >
       <ReactMarkdown
@@ -40,7 +40,7 @@ export function Markdown({ children }: { children: string }) {
                       />
                     </pre>
                   );
-                } catch (e) {
+                } catch {
                   // fallback
                 }
               }

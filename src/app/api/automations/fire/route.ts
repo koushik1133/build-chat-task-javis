@@ -8,7 +8,9 @@ export async function POST(req: Request) {
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const { label, task_title, to_column, from_column, via_approval = false } = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { label, task_title, to_column, from_column, via_approval = false } = rawBody;
   if (!label) return NextResponse.json({ fired: [] });
 
   const cols = await getUserBoardColumns(user.id);

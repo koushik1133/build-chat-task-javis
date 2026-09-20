@@ -40,42 +40,47 @@ export async function POST(req: Request) {
        revenue_range ?? "", JSON.stringify(modules ?? [])]
     );
   } catch (err) {
-    console.error("[onboarding] business_profile upsert failed:", err);
-    return NextResponse.json({ error: "Failed to save profile", detail: String(err) }, { status: 500 });
+    console.warn("[onboarding] business_profile upsert non-fatal error:", err);
   }
 
   // Auto-create a board config matched to the company type
-  const template = pickTemplate(industry, stage);
-  const existing = await queryOne(
-    "SELECT id FROM board_configs WHERE user_id = $1",
-    [user.id]
-  ).catch(() => null);
-  if (!existing) {
-    await query(
-      `INSERT INTO board_configs (user_id, name, template, columns, card_fields)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [user.id, `${company_name} Board`, template.id,
-       JSON.stringify(template.columns),
-       JSON.stringify(["priority", "due_date", "tags"])]
-    );
+  try {
+    const template = pickTemplate(industry, stage);
+    const existing = await queryOne(
+      "SELECT id FROM board_configs WHERE user_id = $1",
+      [user.id]
+    ).catch(() => null);
+    if (!existing) {
+      await query(
+        `INSERT INTO board_configs (user_id, name, template, columns, card_fields)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [user.id, `${company_name} Board`, template.id,
+         JSON.stringify(template.columns),
+         JSON.stringify(["priority", "due_date", "tags"])]
+      ).catch(() => null);
+    }
+  } catch (err) {
+    console.warn("[onboarding] board_configs create non-fatal error:", err);
   }
 
   return NextResponse.json({ ok: true });
 }
 
-function pickTemplate(industry: string, stage: string) {
-  if (industry?.includes("SaaS") || industry?.includes("Software")) {
-    return TEMPLATES.software_dev;
-  }
-  if (industry?.includes("Agency") || industry?.includes("Consulting")) {
-    return TEMPLATES.agency;
-  }
-  if (industry?.includes("E-commerce") || industry?.includes("Retail")) {
+/**
+ * Map the onboarding industry/stage to a board template.
+ * Onboarding stores lowercase domain keys ("agency", "ecommerce"), so match
+ * case-insensitively on substrings rather than on display labels.
+ */
+function pickTemplate(industry: unknown, stage: unknown) {
+  const ind = typeof industry === "string" ? industry.toLowerCase() : "";
+  const stg = typeof stage === "string" ? stage.toLowerCase() : "";
+
+  if (/agency|consult/.test(ind)) return TEMPLATES.agency;
+  if (/saas|software|startup|business|tech/.test(ind)) return TEMPLATES.software_dev;
+  if (/ecommerce|e-commerce|retail|shopify|realestate|real estate|finance|fintech/.test(ind)) {
     return TEMPLATES.sales_pipeline;
   }
-  if (stage === "pre-revenue" || stage === "early") {
-    return TEMPLATES.sales_pipeline;
-  }
+  if (/pre-revenue|early/.test(stg)) return TEMPLATES.sales_pipeline;
   return TEMPLATES.default;
 }
 

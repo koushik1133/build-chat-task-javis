@@ -17,10 +17,12 @@ export async function POST(req: Request) {
   let user;
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const {
     name, trigger, action, kanban_label, action_config,
     schedule_time, schedule_timezone, schedule_days,
-  } = await req.json();
+  } = rawBody;
   if (!name?.trim()) return NextResponse.json({ error: "name required" }, { status: 400 });
 
   const isScheduled = trigger === "Scheduled (Daily)";
@@ -54,17 +56,7 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ workflow });
   } catch (err) {
-    const msg = (err as Error).message ?? "";
-    if (msg.includes("does not exist")) {
-      return NextResponse.json({
-        error: "Database schema out of date",
-        detail: "Run the automations migration SQL in DSQL (see aws/schema.sql comments), then try again.",
-        db_error: msg,
-      }, { status: 500 });
-    }
-    return NextResponse.json({
-      error: "Failed to create workflow",
-      detail: msg || "Database error",
-    }, { status: 503 });
+    console.error("[automations] create workflow failed:", err);
+    return NextResponse.json({ error: "Failed to create workflow" }, { status: 503 });
   }
 }

@@ -23,6 +23,24 @@ function forwardRequest(request: NextRequest, path: string) {
   return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
+/** Session-bearing pages must never be served from a shared or back/forward cache. */
+function denyCaching<T extends NextResponse>(res: T): T {
+  res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.headers.set("Pragma", "no-cache");
+  res.headers.set("Expires", "0");
+  return res;
+}
+
+/** Expire every Supabase auth cookie present on the request. */
+function clearSupabaseCookies<T extends NextResponse>(res: T, request: NextRequest): T {
+  for (const cookie of request.cookies.getAll()) {
+    if (cookie.name.startsWith("sb-")) {
+      res.cookies.set(cookie.name, "", { maxAge: 0, path: "/", sameSite: "lax" });
+    }
+  }
+  return res;
+}
+
 export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
   let response = forwardRequest(request, path);
@@ -44,11 +62,22 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user: { id: string } | null = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (err) {
+    // Treat an auth backend failure as signed-out rather than crashing the edge.
+    console.error("[middleware] supabase.auth.getUser threw:", err);
+    user = null;
+  }
 
   if (isPublicPath(path)) {
+    // Landing on /login straight after sign-out: make sure no stale sb-*
+    // cookie can resurrect the session, and never cache this response.
+    if (path === "/login" && request.nextUrl.searchParams.get("signed_out") === "1") {
+      return denyCaching(clearSupabaseCookies(forwardRequest(request, path), request));
+    }
     if (user && path === "/login") {
       const next = request.nextUrl.searchParams.get("next");
       const dest =
@@ -61,10 +90,11 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (!user) {
-    return NextResponse.redirect(
+    const redirect = NextResponse.redirect(
       publicRedirect(`/login?next=${encodeURIComponent(path)}`, request)
     );
+    return denyCaching(clearSupabaseCookies(redirect, request));
   }
 
-  return response;
+  return denyCaching(response);
 }

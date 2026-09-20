@@ -7,6 +7,7 @@ import {
   Loader2, Kanban, Info, CheckCircle2, AlertCircle, FlaskConical, CalendarClock, Plug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { timeAgo, cn } from "@/lib/utils";
 
 type Workflow = {
@@ -233,7 +234,10 @@ export default function AutomationsPage() {
       <div className="mx-auto w-full max-w-4xl space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">AI Automations</h1>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl flex items-center gap-2">
+              AI Automations
+              <InfoTooltip text="Create rules that trigger actions automatically. Example: Every Monday at 9am, run my Lead Generator agent." />
+            </h1>
             <p className="mt-1 text-sm text-muted-foreground">Daily schedules, Kanban triggers, Slack, email, and in-app alerts.</p>
           </div>
           <Button size="sm" onClick={() => setShowCreate(true)}>

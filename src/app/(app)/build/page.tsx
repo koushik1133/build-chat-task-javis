@@ -16,6 +16,7 @@ import {
 import { KernelHubMascot } from "@/components/kernelhub-mascot";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { cn, timeAgo } from "@/lib/utils";
 import {
   CATEGORIES,
@@ -207,7 +208,10 @@ export default function BuildPage() {
         {step === 0 && (
           <div className="space-y-8">
             <div className="flex items-center justify-between">
-              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Build something</h1>
+              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl flex items-center gap-2">
+                Build something
+                <InfoTooltip text="Build and deploy websites with AI. Describe what you want in plain English and watch it come to life." />
+              </h1>
               <div className="flex items-center gap-3">
                 {sites.length > 0 && (
                   <span className="text-xs text-muted-foreground">

@@ -44,6 +44,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     });
   } catch (err) {
     console.error("Failed to run agent:", err);
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[agents/run] error:", err);
+    return NextResponse.json({ error: "Agent run failed" }, { status: 500 });
   }
 }

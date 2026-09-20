@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { query, queryOne } from "@/lib/dsql";
+import { queryOne } from "@/lib/dsql";
+import { enrichLead } from "@/lib/lead-enrichment";
+import { readCappedText, sanitiseLeadPayload, rateLimit } from "@/lib/request-limits";
 
 export const runtime = "nodejs";
 
@@ -32,22 +34,46 @@ export async function POST(
       );
     }
 
-    const data = await req.json();
+    const raw = await readCappedText(req);
+    if (raw === null) {
+      return NextResponse.json({ error: "Payload too large" }, { status: 413, headers: corsHeaders });
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400, headers: corsHeaders });
+    }
+
+    const data = sanitiseLeadPayload(parsed);
+    if (!data) {
+      return NextResponse.json({ error: "Invalid payload" }, { status: 400, headers: corsHeaders });
+    }
 
     // Application-layer integrity check — verify site exists
-    const site = await queryOne("SELECT id FROM sites WHERE id = $1", [siteId]);
+    const site = await queryOne<{ id: string; user_id: string }>("SELECT id, user_id FROM sites WHERE id = $1", [siteId]);
     if (!site) {
       return NextResponse.json({ error: "Site not found" }, { status: 404, headers: corsHeaders });
     }
 
     // data is stored as TEXT in DSQL (JSON.stringify)
-    await query(
-      "INSERT INTO site_leads (site_id, data) VALUES ($1, $2)",
-      [siteId, JSON.stringify(data)]
+    const result = await queryOne<{ id: string }>(
+      "INSERT INTO site_leads (site_id, user_id, data) VALUES ($1, $2, $3) RETURNING id",
+      [siteId, site.user_id, JSON.stringify(data)]
     );
 
+    // Auto-enrich in-process (fire-and-forget). The lead is always stored;
+    // only the LLM enrichment is throttled per site.
+    if (result?.id && rateLimit(`enrich:${siteId}`, 20, 60 * 60 * 1000).allowed) {
+      void enrichLead(result.id, site.user_id).catch((err) =>
+        console.error("Auto-enrichment failed:", err)
+      );
+    }
+
     return NextResponse.json({ success: true }, { status: 200, headers: corsHeaders });
-  } catch {
+  } catch (err) {
+    console.error("Widget Lead POST error:", err);
     return NextResponse.json(
       { error: "Bad request" },
       { status: 400, headers: corsHeaders }

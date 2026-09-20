@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import type { ChannelNavItem } from "@/lib/nav/channel-nav";
 import { GlobalNotificationBell } from "@/components/global-notification-bell";
 import { KERNELHUB_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
@@ -11,9 +12,12 @@ import { ProductTour } from "@/components/product-tour";
 export function AppShell({
   userEmail,
   children,
+  channels = [],
 }: {
   userEmail: string;
   children: React.ReactNode;
+  /** Connected channels, resolved on the server for the first paint. */
+  channels?: ChannelNavItem[];
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -50,6 +54,7 @@ export function AppShell({
 
       <Sidebar
         userEmail={userEmail}
+        initialChannels={channels}
         mobileOpen={mobileOpen}
         onNavigate={() => setMobileOpen(false)}
         onClose={() => setMobileOpen(false)}

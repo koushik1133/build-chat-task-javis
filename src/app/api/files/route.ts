@@ -53,8 +53,9 @@ export async function POST(req: Request) {
   try {
     text = await extractText(file);
   } catch (e) {
+    console.error("[files] extract failed:", e);
     return NextResponse.json(
-      { error: `parse failed: ${(e as Error).message}` },
+      { error: "Could not parse that file" },
       { status: 400 }
     );
   }
@@ -115,7 +116,9 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { id } = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { id } = rawBody;
   const file = await queryOne<{ id: string; storage_path: string | null }>(
     "SELECT id, storage_path FROM files WHERE id = $1 AND user_id = $2",
     [id, user.id]

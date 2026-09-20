@@ -26,14 +26,15 @@ export async function PATCH(req: Request) {
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const { ids, all } = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { ids, all } = rawBody;
 
   if (all) {
     await query(`UPDATE notifications SET read = true WHERE user_id = $1`, [user.id]);
   } else if (Array.isArray(ids) && ids.length > 0) {
-    for (const id of ids) {
-      await query(`UPDATE notifications SET read = true WHERE id = $1 AND user_id = $2`, [id, user.id]);
-    }
+    const idList = ids.slice(0, 200).map(String);
+    await query(`UPDATE notifications SET read = true WHERE id = ANY($1) AND user_id = $2`, [idList, user.id]);
   }
 
   return NextResponse.json({ ok: true });

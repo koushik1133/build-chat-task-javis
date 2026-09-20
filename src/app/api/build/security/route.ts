@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
 import { completeJson } from "@/lib/llm";
+import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { SECURITY_REVIEW_SYS } from "@/lib/build-prompts";
 import { queryOne } from "@/lib/dsql";
 
@@ -24,7 +25,7 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const parsed = Body.safeParse(await req.json());
+  const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json({ error: "bad request" }, { status: 400 });
 
@@ -44,7 +45,9 @@ export async function POST(req: Request) {
       ],
       `{"issues":[{"severity":"low|medium|high","title":string,"explain":string,"fix":string}]}`
     );
-  } catch {
+  } catch (err) {
+    const notConfigured = llmNotConfiguredResponse(err);
+    if (notConfigured) return notConfigured;
     return NextResponse.json({ issues: [] });
   }
   return NextResponse.json({ issues: result?.issues ?? [] });

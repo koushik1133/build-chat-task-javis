@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
 import { complete } from "@/lib/llm";
+import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { SITE_REFINE_SYS } from "@/lib/build-prompts";
 import { queryOne, query } from "@/lib/dsql";
 
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const parsed = Body.safeParse(await req.json());
+  const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
@@ -43,11 +44,11 @@ export async function POST(req: Request) {
       ],
       { maxTokens: 8000 }
     );
-  } catch (e) {
-    return NextResponse.json(
-      { error: "AI call failed: " + (e as Error).message },
-      { status: 502 }
-    );
+  } catch (err) {
+    const notConfigured = llmNotConfiguredResponse(err);
+    if (notConfigured) return notConfigured;
+    console.error("[refine] LLM call failed:", err);
+    return NextResponse.json({ error: "AI call failed. Please try again." }, { status: 502 });
   }
 
   const cleaned = stripFences(updated);

@@ -58,7 +58,20 @@ export async function runAgentJob(
   if (!agent) return null;
 
   const userPrompt = buildAgentPrompt(agent, opts.prompt);
-  const system = resolveSystemPrompt(agent);
+  let system = resolveSystemPrompt(agent);
+
+  // Fetch recent corrections for this agent
+  const corrections = await query<{ original_text: string; corrected_text: string }>(
+    `SELECT original_text, corrected_text FROM agent_corrections WHERE user_id = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT 5`,
+    [userId, agentId]
+  ).catch(() => []);
+
+  if (corrections.length > 0) {
+    system += "\n\nCRITICAL FEEDBACK FROM PAST RUNS (DO NOT REPEAT THESE MISTAKES):\n";
+    corrections.forEach((c, i) => {
+      system += `[Correction ${i + 1}]\nInstead of: "${c.original_text}"\nYou MUST do: "${c.corrected_text}"\n\n`;
+    });
+  }
 
   const messages: ChatMessage[] = [
     { role: "system", content: system },

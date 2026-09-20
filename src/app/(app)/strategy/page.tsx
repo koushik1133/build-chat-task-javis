@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/markdown";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { STRATEGY_TYPES, type StrategyType } from "@/lib/strategy";
 
 type Proposal = {
@@ -258,7 +259,10 @@ export default function StrategyPage() {
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Strategy Hub</h1>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl flex items-center gap-2">
+              Strategy Hub
+              <InfoTooltip text="Fill out your Business Profile in Settings. The AI will use it as context to generate personalized, professional business strategies and roadmaps for you with one click!" />
+            </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               AI strategy documents tailored to your Business DNA — read, edit, publish, and push tasks to Production.
             </p>

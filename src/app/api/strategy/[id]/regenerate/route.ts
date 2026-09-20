@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { query, queryOne } from "@/lib/dsql";
 import { complete } from "@/lib/llm";
+import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { buildBusinessContext, getStrategyPrompt } from "@/lib/strategy";
 
 export const maxDuration = 120;
@@ -32,8 +33,11 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
       [{ role: "user", content: getStrategyPrompt(existing.type, ctx2) }],
       { maxTokens: 2000, retries: 2 }
     );
-  } catch (e) {
-    content = `# ${existing.title}\n\nRegeneration failed: ${(e as Error).message}`;
+  } catch (err) {
+    const notConfigured = llmNotConfiguredResponse(err);
+    if (notConfigured) return notConfigured;
+    console.error("[strategy/regenerate] LLM call failed:", err);
+    content = `# ${existing.title}\n\nRegeneration failed. Please try again.`;
   }
 
   await query("UPDATE strategies SET content = $1, status = 'draft' WHERE id = $2 AND user_id = $3", [content, id, user.id]);

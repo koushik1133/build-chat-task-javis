@@ -13,6 +13,9 @@ export type UserIntegrations = {
   email_pending: string | null;
   email_verify_code: string | null;
   email_verify_expires: string | null;
+  twilio_from_number: string | null;
+  messaging_auto_reply: boolean | null;
+  upload_post_profile: string | null;
 };
 
 export type IntegrationsPublic = {
@@ -26,7 +29,16 @@ export type IntegrationsPublic = {
   email_from_name: string | null;
   email_available: boolean;
   notifications_enabled: boolean;
+  twilio_from_number: string | null;
+  messaging_auto_reply: boolean;
+  upload_post_profile: string | null;
+  /** True when the platform-wide UPLOAD_POST_API_KEY is set, so publishing can actually run. */
+  publishing_available: boolean;
 };
+
+export function isPublishingAvailable(): boolean {
+  return !!process.env.UPLOAD_POST_API_KEY?.trim();
+}
 
 export function isValidSlackWebhook(url: string): boolean {
   try {
@@ -74,7 +86,8 @@ export async function getUserIntegrations(userId: string): Promise<UserIntegrati
   return queryOne<UserIntegrations>(
     `SELECT user_id, slack_webhook_url, slack_channel_name, slack_connected_at,
             email_default_to, email_from_name, email_connected_at,
-            email_verified, email_pending, email_verify_code, email_verify_expires
+            email_verified, email_pending, email_verify_code, email_verify_expires,
+            twilio_from_number, messaging_auto_reply, upload_post_profile
      FROM user_integrations WHERE user_id = $1`,
     [userId]
   ).catch(() => null);
@@ -93,6 +106,10 @@ export function toPublicView(row: UserIntegrations | null): IntegrationsPublic {
     email_from_name: row?.email_from_name ?? null,
     email_available: isPlatformEmailAvailable(),
     notifications_enabled: true,
+    twilio_from_number: row?.twilio_from_number ?? null,
+    messaging_auto_reply: !!row?.messaging_auto_reply,
+    upload_post_profile: row?.upload_post_profile?.trim() || null,
+    publishing_available: isPublishingAvailable(),
   };
 }
 
@@ -102,6 +119,9 @@ export async function upsertUserIntegrations(
     slack_webhook_url?: string | null;
     slack_channel_name?: string | null;
     email_from_name?: string | null;
+    twilio_from_number?: string | null;
+    messaging_auto_reply?: boolean;
+    upload_post_profile?: string | null;
   }
 ): Promise<UserIntegrations | null> {
   const existing = await getUserIntegrations(userId);
@@ -124,6 +144,11 @@ export async function upsertUserIntegrations(
     ? (patch.slack_channel_name?.trim() || null)
     : (existing?.slack_channel_name ?? null);
 
+  // undefined → keep what's stored; "" → clear; otherwise trim and store.
+  const uploadPostProfile = patch.upload_post_profile !== undefined
+    ? (patch.upload_post_profile?.trim() || null)
+    : (existing?.upload_post_profile ?? null);
+
   const slackConnectedAt = slackUrl && !existing?.slack_webhook_url
     ? new Date().toISOString()
     : (existing?.slack_connected_at ?? (slackUrl ? new Date().toISOString() : null));
@@ -132,17 +157,29 @@ export async function upsertUserIntegrations(
     return queryOne<UserIntegrations>(
       `UPDATE user_integrations SET
          slack_webhook_url = $2, slack_channel_name = $3, slack_connected_at = $4,
-         email_from_name = $5, updated_at = NOW()
+         email_from_name = $5, twilio_from_number = $6, messaging_auto_reply = $7,
+         upload_post_profile = $8, updated_at = NOW()
        WHERE user_id = $1 RETURNING *`,
-      [userId, slackUrl, slackChannel, slackConnectedAt, emailFromName]
+      [
+        userId, slackUrl, slackChannel, slackConnectedAt, emailFromName,
+        patch.twilio_from_number !== undefined ? patch.twilio_from_number : (existing.twilio_from_number ?? null),
+        patch.messaging_auto_reply !== undefined ? patch.messaging_auto_reply : (existing.messaging_auto_reply ?? false),
+        uploadPostProfile,
+      ]
     ).catch(() => null);
   }
 
   return queryOne<UserIntegrations>(
     `INSERT INTO user_integrations
-       (user_id, slack_webhook_url, slack_channel_name, slack_connected_at, email_from_name)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [userId, slackUrl, slackChannel, slackConnectedAt, emailFromName]
+       (user_id, slack_webhook_url, slack_channel_name, slack_connected_at, email_from_name,
+        twilio_from_number, messaging_auto_reply, upload_post_profile)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [
+      userId, slackUrl, slackChannel, slackConnectedAt, emailFromName,
+      patch.twilio_from_number ?? null,
+      patch.messaging_auto_reply ?? false,
+      uploadPostProfile,
+    ]
   ).catch(() => null);
 }
 

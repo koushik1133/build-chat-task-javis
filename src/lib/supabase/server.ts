@@ -45,9 +45,11 @@ export async function getServerSession() {
  * Service-role client — bypasses RLS. Only use in trusted server code.
  */
 export function createAdminClient() {
+  const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
+  if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
   return createSupabaseClient(
     env("NEXT_PUBLIC_SUPABASE_URL"),
-    env("SUPABASE_SERVICE_ROLE_KEY"),
+    serviceKey,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 }
@@ -61,5 +63,12 @@ export async function requireUser() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("UNAUTHORIZED");
-  return { supabase: createAdminClient(), user };
+  // Lazy getter: only the few routes that actually touch the admin client
+  // pay for (or fail on) SUPABASE_SERVICE_ROLE_KEY resolution.
+  return {
+    user,
+    get supabase() {
+      return createAdminClient();
+    },
+  };
 }

@@ -11,7 +11,9 @@ export async function POST(req: Request) {
   try { ({ user } = await requireUser()); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const { action, email, email_from_name, code } = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { action, email, email_from_name, code } = rawBody;
 
   if (action === "send-code") {
     if (!email?.trim()) {

@@ -40,7 +40,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const parsed = Patch.safeParse(await req.json());
+  const parsed = Patch.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
   const { id, done, title } = parsed.data;
 
@@ -67,7 +67,9 @@ export async function DELETE(req: Request) {
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const { id } = await req.json();
+  const rawBody = await req.json().catch(() => null);
+  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const { id } = rawBody;
   await query("DELETE FROM tasks WHERE id = $1 AND user_id = $2", [id, user.id]);
   return NextResponse.json({ ok: true });
 }
@@ -82,7 +84,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const parsed = Create.safeParse(await req.json());
+  const parsed = Create.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
 
   const task = await queryOne(

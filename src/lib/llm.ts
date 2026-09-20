@@ -9,14 +9,33 @@ export type ChatMessage = {
   content: string;
 };
 
+/**
+ * Raised when no model provider is configured. Distinct from a genuine upstream
+ * failure so routes can answer 503 with an actionable message instead of a
+ * generic 500 that looks like a bug in the app.
+ */
+export class LlmNotConfiguredError extends Error {
+  constructor() {
+    super(
+      "AI features are not configured. Set GROQ_API_KEY or GEMINI_API_KEY in your environment."
+    );
+    this.name = "LlmNotConfiguredError";
+  }
+}
+
+/** True when at least one model provider key is present. */
+export function isLlmConfigured(): boolean {
+  return Boolean(
+    process.env.GROQ_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim()
+  );
+}
+
 function client() {
   const groqKey = process.env.GROQ_API_KEY;
   const geminiKey = process.env.GEMINI_API_KEY;
 
   if (!groqKey && !geminiKey) {
-    throw new Error(
-      "Neither GROQ_API_KEY nor GEMINI_API_KEY is set. Add one to Vercel → Settings → Environment Variables."
-    );
+    throw new LlmNotConfiguredError();
   }
 
   if (groqKey) {

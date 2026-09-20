@@ -6,6 +6,7 @@ import { Send, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Markdown } from "@/components/markdown";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { KERNELHUB_TAGLINE } from "@/lib/brand";
 import {
   buildChatSuggestions,
@@ -198,8 +199,9 @@ function EmptyState({
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/30">
         <Sparkles className="h-6 w-6 text-primary" />
       </div>
-      <h1 className="text-2xl font-semibold tracking-tight">
+      <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
         <span className="gradient-text">KernelHub</span>
+        <InfoTooltip text="Ask AI anything — it remembers your conversation and can use your uploaded files as context for smarter answers." />
       </h1>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">{KERNELHUB_TAGLINE}</p>
       <p className="mt-3 text-xs text-muted-foreground/80">

@@ -1,7 +1,5 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { type NextRequest, NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
 
-type CookieToSet = { name: string; value: string; options?: CookieOptions };
 
 function env(name: string): string {
   return process.env[name]?.trim() ?? "";
