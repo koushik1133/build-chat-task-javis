@@ -42,7 +42,7 @@ export interface InboundResult {
 }
 
 const INTENTS: InboundIntent[] = ["booking", "quote", "support", "sales", "spam", "other"];
-const RECEPTIONIST_TOOLS = ["crm.search_contacts", "crm.create_contact", "tasks.create", "comms.notify"];
+const RECEPTIONIST_TOOLS = ["crm.search_contacts", "crm.create_contact", "tasks.create", "comms.notify", "calendar.propose_slots", "calendar.book", "calendar.cancel_booking"];
 const MAX_TOOL_ROUNDS = 3;
 const MAX_HISTORY = 20;
 
@@ -105,6 +105,7 @@ function systemPrompt(ctx: Awaited<ReturnType<typeof loadContext>>, channel: Inb
     `You are answering ${medium}. Be warm, concise and professional — at most 2–3 short sentences, no markdown.`,
     "If the caller wants to book, get a quote, or needs support, gather the one or two details a human would need next and reassure them someone will follow up.",
     "You may use tools to look up or create a contact and to create a follow-up task, but never invent facts about pricing or availability.",
+    "For booking requests, use calendar.propose_slots to offer real times and calendar.book to confirm one the caller picked; never make up availability.",
     `When you are done, respond ONLY with JSON: {"intent": one of ${JSON.stringify(INTENTS)}, "reply": "<the message to send>"}.`,
   ]
     .filter(Boolean)

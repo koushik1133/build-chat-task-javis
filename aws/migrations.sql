@@ -823,8 +823,260 @@ CREATE TABLE IF NOT EXISTS role_area_overrides (
 
 -- ==== PHASE 2 LANE B: audit + soft delete + outbox ====
 
+-- ── audit_log: who changed what (diff is JSON {field: [old, new]}) ──────────
+CREATE TABLE IF NOT EXISTS audit_log (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,            -- org data id (organizations.owner_user_id)
+  actor_id    TEXT,
+  actor_email TEXT,
+  action      TEXT NOT NULL,            -- create|update|delete|restore|…
+  entity      TEXT NOT NULL,
+  entity_id   TEXT,
+  diff        TEXT,                     -- JSON {field: [old, new]}
+  ip          TEXT,
+  user_agent  TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_audit_log_user_created ON audit_log (user_id, created_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_audit_log_user_entity ON audit_log (user_id, entity, entity_id);
+
+-- ── soft delete: deleted_at on the main entity tables ───────────────────────
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE production_tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- ── notification_outbox: every outbound message, live or simulated ──────────
+CREATE TABLE IF NOT EXISTS notification_outbox (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,           -- org data id
+  channel      TEXT NOT NULL,           -- email|sms|whatsapp|in_app|webhook
+  recipient    TEXT NOT NULL,
+  subject      TEXT,
+  body         TEXT,
+  data         TEXT,                    -- JSON
+  status       TEXT NOT NULL DEFAULT 'queued',  -- queued|sent|simulated|failed|read
+  attempts     INTEGER DEFAULT 0,
+  error        TEXT,
+  scheduled_at TIMESTAMPTZ DEFAULT NOW(),
+  sent_at      TIMESTAMPTZ,
+  read_at      TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_notification_outbox_due ON notification_outbox (status, scheduled_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_notification_outbox_user ON notification_outbox (user_id, channel, status);
+
 -- ==== PHASE 2 LANE C: payments, quotes, invoices ====
+
+-- ── quotes ──────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS quotes (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,            -- org data id
+  contact_id       TEXT,
+  number           TEXT NOT NULL,            -- Q-000001
+  status           TEXT NOT NULL DEFAULT 'draft', -- draft|sent|viewed|accepted|declined|expired
+  currency         TEXT NOT NULL DEFAULT 'USD',
+  subtotal_minor   BIGINT NOT NULL DEFAULT 0,
+  tax_minor        BIGINT NOT NULL DEFAULT 0,
+  total_minor      BIGINT NOT NULL DEFAULT 0,
+  valid_until      TIMESTAMPTZ,
+  terms_version    TEXT,
+  terms_text       TEXT,
+  notes            TEXT,
+  current_version  INTEGER NOT NULL DEFAULT 1,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW(),
+  sent_at          TIMESTAMPTZ,
+  accepted_at      TIMESTAMPTZ
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_quotes_user_created ON quotes (user_id, created_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_quotes_user_contact ON quotes (user_id, contact_id);
+
+-- ── quote_versions: append-only line-item snapshots ─────────────────────────
+CREATE TABLE IF NOT EXISTS quote_versions (
+  id              TEXT PRIMARY KEY,
+  quote_id        TEXT NOT NULL,
+  version         INTEGER NOT NULL,
+  items           TEXT NOT NULL DEFAULT '[]', -- JSON [{description, qty, unit_minor, tax_rate_bp}]
+  subtotal_minor  BIGINT NOT NULL DEFAULT 0,
+  tax_minor       BIGINT NOT NULL DEFAULT 0,
+  total_minor     BIGINT NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_quote_versions_quote ON quote_versions (quote_id, version);
+
+-- ── quote_acceptances: OTP + consent snapshot ───────────────────────────────
+CREATE TABLE IF NOT EXISTS quote_acceptances (
+  id                     TEXT PRIMARY KEY,
+  quote_id               TEXT NOT NULL,
+  version                INTEGER NOT NULL,
+  otp_hash               TEXT,
+  otp_expires_at         TIMESTAMPTZ,
+  otp_attempts           INTEGER NOT NULL DEFAULT 0,
+  accepted_at            TIMESTAMPTZ,
+  accepted_name          TEXT,
+  accepted_email         TEXT,
+  consent_terms_version  TEXT,
+  consent_terms_text     TEXT,
+  ip                     TEXT,
+  user_agent             TEXT,
+  created_at             TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_quote_acceptances_quote ON quote_acceptances (quote_id, created_at);
+
+-- ── invoices ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS invoices (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  contact_id      TEXT,
+  quote_id        TEXT,
+  number          TEXT NOT NULL,             -- INV-000001
+  status          TEXT NOT NULL DEFAULT 'draft', -- draft|sent|partially_paid|paid|void|overdue
+  currency        TEXT NOT NULL DEFAULT 'USD',
+  subtotal_minor  BIGINT NOT NULL DEFAULT 0,
+  tax_minor       BIGINT NOT NULL DEFAULT 0,
+  total_minor     BIGINT NOT NULL DEFAULT 0,
+  paid_minor      BIGINT NOT NULL DEFAULT 0,
+  due_at          TIMESTAMPTZ,
+  items           TEXT NOT NULL DEFAULT '[]', -- JSON
+  notes           TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW(),
+  sent_at         TIMESTAMPTZ,
+  paid_at         TIMESTAMPTZ
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_invoices_user_created ON invoices (user_id, created_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_invoices_user_status ON invoices (user_id, status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_invoices_quote ON invoices (quote_id);
+
+-- ── invoice_payments ────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS invoice_payments (
+  id            TEXT PRIMARY KEY,
+  invoice_id    TEXT NOT NULL,
+  provider      TEXT NOT NULL,
+  provider_ref  TEXT,
+  amount_minor  BIGINT NOT NULL,
+  currency      TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'succeeded', -- succeeded|failed
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments (invoice_id, created_at);
+
+-- ── payment_events: webhook idempotency ledger ──────────────────────────────
+CREATE TABLE IF NOT EXISTS payment_events (
+  id                 TEXT PRIMARY KEY,
+  provider           TEXT NOT NULL,
+  provider_event_id  TEXT NOT NULL,
+  payload            TEXT,
+  processed_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_payment_events_provider_event ON payment_events (provider, provider_event_id);
+
+-- ── doc_counters: per-org document numbering ────────────────────────────────
+CREATE TABLE IF NOT EXISTS doc_counters (
+  user_id     TEXT NOT NULL,
+  kind        TEXT NOT NULL,      -- quote|invoice
+  next_value  INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (user_id, kind)
+);
+
+-- ── share_tokens: public links for quotes / invoices / pay pages ────────────
+CREATE TABLE IF NOT EXISTS share_tokens (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  kind            TEXT NOT NULL,       -- quote|invoice|pay|portal
+  entity_id       TEXT NOT NULL,
+  token_hash      TEXT NOT NULL,       -- sha256(token)
+  expires_at      TIMESTAMPTZ,
+  revoked_at      TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  last_viewed_at  TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_share_tokens_hash ON share_tokens (token_hash);
+CREATE INDEX ASYNC IF NOT EXISTS idx_share_tokens_entity ON share_tokens (kind, entity_id);
+
 
 -- ==== PHASE 2 LANE D: calendar, booking, client portal ====
 
+-- ── calendars: one or more per org; rules are in the calendar's timezone ────
+CREATE TABLE IF NOT EXISTS calendars (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,                 -- org data id
+  name       TEXT NOT NULL,
+  timezone   TEXT NOT NULL DEFAULT 'UTC',
+  color      TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_calendars_user ON calendars (user_id);
+
+-- ── availability_rules: weekly recurring windows (minutes from local midnight)
+CREATE TABLE IF NOT EXISTS availability_rules (
+  id           TEXT PRIMARY KEY,
+  calendar_id  TEXT NOT NULL,
+  weekday      INTEGER NOT NULL,            -- 0=Sunday … 6=Saturday
+  start_minute INTEGER NOT NULL,
+  end_minute   INTEGER NOT NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_availability_rules_calendar ON availability_rules (calendar_id, weekday);
+
+-- ── booking_types: public bookable services ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS booking_types (
+  id                 TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL,
+  calendar_id        TEXT NOT NULL,
+  slug               TEXT NOT NULL,
+  name               TEXT NOT NULL,
+  description        TEXT,
+  duration_minutes   INTEGER NOT NULL DEFAULT 30,
+  buffer_before      INTEGER NOT NULL DEFAULT 0,
+  buffer_after       INTEGER NOT NULL DEFAULT 0,
+  min_notice_minutes INTEGER NOT NULL DEFAULT 60,
+  max_days_ahead     INTEGER NOT NULL DEFAULT 30,
+  price_minor        INTEGER,
+  currency           TEXT,
+  active             BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_booking_types_user_slug ON booking_types (user_id, slug);
+CREATE INDEX ASYNC IF NOT EXISTS idx_booking_types_calendar ON booking_types (calendar_id);
+
+-- ── bookings ─────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS bookings (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  calendar_id       TEXT NOT NULL,
+  booking_type_id   TEXT,
+  contact_id        TEXT,
+  name              TEXT NOT NULL,
+  email             TEXT,
+  phone             TEXT,
+  starts_at         TIMESTAMPTZ NOT NULL,
+  ends_at           TIMESTAMPTZ NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'confirmed',  -- confirmed|cancelled|completed|no_show
+  notes             TEXT,
+  source            TEXT NOT NULL DEFAULT 'manual',     -- manual|public|agent|portal
+  cancel_token_hash TEXT,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_bookings_calendar_starts ON bookings (calendar_id, starts_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_bookings_user_starts ON bookings (user_id, starts_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_bookings_contact ON bookings (contact_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_bookings_cancel_token ON bookings (cancel_token_hash);
+
+-- ── calendar_blocks: ad-hoc unavailability ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS calendar_blocks (
+  id          TEXT PRIMARY KEY,
+  calendar_id TEXT NOT NULL,
+  starts_at   TIMESTAMPTZ NOT NULL,
+  ends_at     TIMESTAMPTZ NOT NULL,
+  reason      TEXT
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_calendar_blocks_calendar_starts ON calendar_blocks (calendar_id, starts_at);
+
 -- ==== PHASE 2 LANE E: security ====
+-- Per-site CORS allow-list for the public lead/widget endpoints.
+-- JSON array or comma-separated origins, e.g. '["https://acme.com"]'. NULL = use PUBLIC_WIDGET_ORIGINS env.
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS allowed_origins TEXT;

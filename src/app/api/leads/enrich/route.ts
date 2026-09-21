@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { enrichLead } from "@/lib/lead-enrichment";
 
 export const runtime = "nodejs";
@@ -9,11 +9,11 @@ export const runtime = "nodejs";
  * The lead owner is always the session user — never a client-supplied id.
  */
 export async function POST(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "leads", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   let body: unknown;
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await enrichLead(leadId, user.id);
+    const result = await enrichLead(leadId, scope.dataId);
     if (!result) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }

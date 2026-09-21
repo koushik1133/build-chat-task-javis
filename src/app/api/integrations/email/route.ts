@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import {
   confirmEmailVerification,
   startEmailVerification,
@@ -7,9 +7,9 @@ import {
 } from "@/lib/user-integrations";
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "settings", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     if (!email?.trim()) {
       return NextResponse.json({ error: "Email required" }, { status: 400 });
     }
-    const result = await startEmailVerification(user.id, email, email_from_name);
+    const result = await startEmailVerification(scope.dataId, email, email_from_name);
     if (!result.ok) {
       return NextResponse.json({ success: false, message: result.error }, { status: 400 });
     }
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     if (!code?.trim()) {
       return NextResponse.json({ error: "Code required" }, { status: 400 });
     }
-    const result = await confirmEmailVerification(user.id, code);
+    const result = await confirmEmailVerification(scope.dataId, code);
     if (!result.ok) {
       return NextResponse.json({ success: false, message: result.error }, { status: 400 });
     }

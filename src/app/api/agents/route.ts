@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { getAgentTemplate, getDefaultSystemPrompt } from "@/lib/agent-templates";
 import { RUN_LIMITS } from "@/lib/agents/types";
@@ -25,20 +25,20 @@ function formatZodError(err: z.ZodError): string {
 }
 
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const agents = await query(
     "SELECT * FROM agents WHERE user_id = $1 ORDER BY created_at DESC",
-    [user.id]
+    [scope.dataId]
   ).catch(() => []);
   return NextResponse.json({ agents });
 }
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     `INSERT INTO agents (user_id, name, role, system_prompt, template_id, status, tasks_completed, tools, model, autonomy_level, max_steps)
      VALUES ($1, $2, $3, $4, $5, 'idle', 0, $6, $7, $8, $9) RETURNING *`,
     [
-      user.id,
+      scope.dataId,
       body.name,
       resolvedRole,
       resolvedPrompt,
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
     queryOne(
       `INSERT INTO agents (user_id, name, role, system_prompt, template_id, status, tasks_completed)
        VALUES ($1, $2, $3, $4, $5, 'idle', 0) RETURNING *`,
-      [user.id, body.name, resolvedRole, resolvedPrompt, body.template_id ?? null]
+      [scope.dataId, body.name, resolvedRole, resolvedPrompt, body.template_id ?? null]
     )
   );
   if (!agent) return NextResponse.json({ error: "failed to create agent" }, { status: 500 });

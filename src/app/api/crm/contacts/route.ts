@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/dsql";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { emitEvent } from "@/lib/events/bus";
 
 /**
@@ -30,9 +30,12 @@ function normaliseTags(value: unknown): string[] {
 // GET /api/crm/contacts
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "crm", edit: false });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
     const { searchParams } = new URL(req.url);
     const domain = searchParams.get("domain");
@@ -40,7 +43,7 @@ export async function GET(req: NextRequest) {
     const search = searchParams.get("q");
 
     let sql = `SELECT * FROM crm_contacts WHERE user_id = $1`;
-    const params: unknown[] = [user.id];
+    const params: unknown[] = [scope.dataId];
 
     if (domain) { sql += ` AND domain = $${params.length + 1}`; params.push(domain); }
     if (lifecycle) { sql += ` AND lifecycle = $${params.length + 1}`; params.push(lifecycle); }
@@ -63,9 +66,12 @@ export async function GET(req: NextRequest) {
 // POST /api/crm/contacts
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "crm", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
     const body = await req.json();
     const {
@@ -79,9 +85,9 @@ export async function POST(req: NextRequest) {
       `INSERT INTO crm_contacts (user_id, domain, full_name, email, phone, company, role, tags, lifecycle, notes, deal_value)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING *`,
-      [user.id, domain, full_name.trim(), email, phone, company, role, JSON.stringify(normaliseTags(tags)), lifecycle, notes, deal_value]
+      [scope.dataId, domain, full_name.trim(), email, phone, company, role, JSON.stringify(normaliseTags(tags)), lifecycle, notes, deal_value]
     );
-    if (rows[0]) void emitEvent(user.id, { type: "crm.contact.created", entity: "crm_contact", entityId: String((rows[0] as { id: string }).id), data: { lifecycle } });
+    if (rows[0]) void emitEvent(scope.dataId, { type: "crm.contact.created", entity: "crm_contact", entityId: String((rows[0] as { id: string }).id), data: { lifecycle } });
     return NextResponse.json({ contact: rows[0] }, { status: 201 });
   } catch (err: unknown) {
     console.error("[crm/contacts] error:", err);
@@ -92,9 +98,12 @@ export async function POST(req: NextRequest) {
 // PATCH /api/crm/contacts — update a contact
 export async function PATCH(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "crm", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
     const body = await req.json();
     const { id, ...updates } = body;
@@ -114,15 +123,15 @@ export async function PATCH(req: NextRequest) {
     if (!fields.length) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
 
     const prevLifecycle = typeof updates.lifecycle === "string"
-      ? (await queryOne<{ lifecycle: string }>(`SELECT lifecycle FROM crm_contacts WHERE id = $1 AND user_id = $2`, [id, user.id]).catch(() => null))?.lifecycle ?? null
+      ? (await queryOne<{ lifecycle: string }>(`SELECT lifecycle FROM crm_contacts WHERE id = $1 AND user_id = $2`, [id, scope.dataId]).catch(() => null))?.lifecycle ?? null
       : null;
 
     fields.push(`updated_at = now()`);
-    values.push(id, user.id);
+    values.push(id, scope.dataId);
 
     const sql = `UPDATE crm_contacts SET ${fields.join(", ")} WHERE id = $${values.length - 1} AND user_id = $${values.length} RETURNING *`;
     const rows = await query(sql, values);
-    if (rows[0] && prevLifecycle !== null && prevLifecycle !== updates.lifecycle) void emitEvent(user.id, { type: "crm.contact.stage_changed", entity: "crm_contact", entityId: String(id), data: { from: prevLifecycle, to: updates.lifecycle } });
+    if (rows[0] && prevLifecycle !== null && prevLifecycle !== updates.lifecycle) void emitEvent(scope.dataId, { type: "crm.contact.stage_changed", entity: "crm_contact", entityId: String(id), data: { from: prevLifecycle, to: updates.lifecycle } });
     return NextResponse.json({ contact: rows[0] });
   } catch (err: unknown) {
     console.error("[crm/contacts] error:", err);
@@ -133,14 +142,17 @@ export async function PATCH(req: NextRequest) {
 // DELETE /api/crm/contacts?id=xxx
 export async function DELETE(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "crm", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
     const id = new URL(req.url).searchParams.get("id");
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-    await query(`DELETE FROM crm_contacts WHERE id = $1 AND user_id = $2`, [id, user.id]);
+    await query(`DELETE FROM crm_contacts WHERE id = $1 AND user_id = $2`, [id, scope.dataId]);
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     console.error("[crm/contacts] error:", err);

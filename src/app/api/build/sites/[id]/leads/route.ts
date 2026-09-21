@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 
 export const runtime = "nodejs";
@@ -8,17 +8,17 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "sites", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
 
   // Application-layer ownership check
-  const site = await queryOne("SELECT id FROM sites WHERE id = $1 AND user_id = $2", [id, user.id]);
+  const site = await queryOne("SELECT id FROM sites WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
   if (!site) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const rows = await query(

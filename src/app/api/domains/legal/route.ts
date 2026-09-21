@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/dsql";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { complete } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { parseModelJson } from "@/lib/model-json";
 
 export async function GET(req: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let scope;
+  try {
+    scope = await requireScope({ area: "knowledge", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     try {
       const cases = await query(
         `SELECT * FROM legal_cases WHERE user_id = $1 ORDER BY created_at DESC`,
-        [user.id]
+        [scope.dataId]
       );
       return NextResponse.json({ cases });
     } catch (e) {
@@ -33,11 +33,11 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let scope;
+  try {
+    scope = await requireScope({ area: "knowledge", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const rawBody = await req.json().catch(() => null);
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
       const newCase = await query(
         `INSERT INTO legal_cases (user_id, case_name, client_name, case_type) VALUES ($1, $2, $3, $4) RETURNING *`,
-        [user.id, case_name, client_name, case_type]
+        [scope.dataId, case_name, client_name, case_type]
       );
       return NextResponse.json({ case: newCase[0] });
     }
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
       
       const currentCaseResult = await query(
         `SELECT billing_log FROM legal_cases WHERE id = $1 AND user_id = $2`,
-        [case_id, user.id]
+        [case_id, scope.dataId]
       );
       
       if (!currentCaseResult.length) {
@@ -118,7 +118,7 @@ export async function POST(req: Request) {
       
       const updatedCaseResult = await query(
         `UPDATE legal_cases SET billing_log = $1 WHERE id = $2 AND user_id = $3 RETURNING *`,
-        [JSON.stringify(billingLog), case_id, user.id]
+        [JSON.stringify(billingLog), case_id, scope.dataId]
       );
       
       return NextResponse.json({ updated_case: updatedCaseResult[0] });

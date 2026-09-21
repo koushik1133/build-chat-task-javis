@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { queryOne } from "@/lib/dsql";
 import { parseProductionTasks } from "@/lib/strategy";
 import { getUserBoardColumns, logProductionActivity } from "@/lib/production-server";
 import { colById } from "@/lib/production-board";
 
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "knowledge", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const { id } = await ctx.params;
   const strategy = await queryOne<{ title: string; content: string }>(
     "SELECT title, content FROM strategies WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   ).catch(() => null);
 
   if (!strategy) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -23,7 +23,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json({ error: "No suggested production tasks found in this strategy." }, { status: 400 });
   }
 
-  const cols = await getUserBoardColumns(user.id);
+  const cols = await getUserBoardColumns(scope.dataId);
   const hitlCol = cols.find(c => c.hitl);
   const status = hitlCol?.id ?? cols[0]?.id ?? "todo";
 
@@ -33,7 +33,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
       `INSERT INTO production_tasks (user_id, title, status, priority, description, tags, automation)
        VALUES ($1, $2, $3, 'medium', $4, $5, $6) RETURNING *`,
       [
-        user.id,
+        scope.dataId,
         title,
         status,
         `From strategy: ${strategy.title}`,
@@ -45,7 +45,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     if (task) {
       created.push(task);
       const col = colById(cols, status);
-      await logProductionActivity(user.id, (task as { id: string }).id, "created", {
+      await logProductionActivity(scope.dataId, (task as { id: string }).id, "created", {
         column: col?.label ?? status,
         source: "strategy",
         strategy_id: id,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { complete } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import {
@@ -25,11 +25,11 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "sites", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = Body.safeParse(await req.json().catch(() => null));
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
   if (!resolvedProfile) {
     const dbProfile = await queryOne(
       "SELECT * FROM business_profile WHERE user_id = $1",
-      [user.id]
+      [scope.dataId]
     ).catch(() => null);
     if (dbProfile) resolvedProfile = dbProfile as Record<string, unknown>;
   }
@@ -109,7 +109,7 @@ export async function POST(req: Request) {
     `INSERT INTO sites (id, user_id, title, persona, plan, html)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
-    [siteId, user.id, title, categoryId, JSON.stringify(plan), finalHtml]
+    [siteId, scope.dataId, title, categoryId, JSON.stringify(plan), finalHtml]
   ).catch((e) => {
     console.error("[generate] DSQL site insert error:", e);
     return null;
@@ -119,7 +119,7 @@ export async function POST(req: Request) {
   await query(
     `INSERT INTO site_revisions (site_id, user_id, source, prompt, html)
      VALUES ($1, $2, 'initial', $3, $4)`,
-    [siteId, user.id, brief, finalHtml]
+    [siteId, scope.dataId, brief, finalHtml]
   ).catch((e) => {
     console.error("[generate] DSQL site_revision insert error:", e);
   });

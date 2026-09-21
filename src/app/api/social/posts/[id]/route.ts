@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: Request, { params }: Params) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const userId = user.id;
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const userId = scope.dataId;
   const { id } = await params;
 
   const rawBody = await req.json().catch(() => null);
@@ -41,10 +41,10 @@ export async function PATCH(req: Request, { params }: Params) {
 }
 
 export async function DELETE(_req: Request, { params }: Params) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const userId = user.id;
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const userId = scope.dataId;
   const { id } = await params;
 
   await query("DELETE FROM social_posts WHERE id = $1 AND user_id = $2", [id, userId]);

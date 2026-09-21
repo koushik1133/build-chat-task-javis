@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 
 export const runtime = "nodejs";
@@ -8,16 +8,16 @@ const STATUSES = new Set(["queued", "running", "awaiting_approval", "done", "fai
 
 /** GET /api/agents/runs?status=done&agentId=… — latest 50 runs for this user. */
 export async function GET(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const agentId = url.searchParams.get("agentId");
   if (status && !STATUSES.has(status)) return NextResponse.json({ error: "invalid status" }, { status: 400 });
 
-  const params: unknown[] = [user.id];
+  const params: unknown[] = [scope.dataId];
   let where = "r.user_id = $1";
   if (status) {
     params.push(status);

@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/dsql";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 
 export async function GET() {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "agents", edit: false });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const swarms = await query(
       `SELECT id, name, description, nodes, created_at FROM agent_swarms WHERE user_id = $1 ORDER BY created_at DESC`,
-      [user.id]
+      [scope.dataId]
     );
 
     return NextResponse.json({ swarms }, { status: 200 });
@@ -25,11 +25,11 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "agents", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const rawBody = await req.json().catch(() => null);
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
          SET name = $1, description = $2, nodes = $3, updated_at = NOW() 
          WHERE id = $4 AND user_id = $5 
          RETURNING id, name, description, nodes, created_at`,
-        [name, description || "", JSON.stringify(nodes), existingId, user.id]
+        [name, description || "", JSON.stringify(nodes), existingId, scope.dataId]
       );
     }
 
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
         `INSERT INTO agent_swarms (id, user_id, name, description, nodes, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
          RETURNING id, name, description, nodes, created_at`,
-        [id, user.id, name, description || "", JSON.stringify(nodes)]
+        [id, scope.dataId, name, description || "", JSON.stringify(nodes)]
       );
     }
 
@@ -70,11 +70,11 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "agents", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const rawBody = await req.json().catch(() => null);
@@ -84,7 +84,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Missing id" }, { status: 400 });
     }
 
-    await query("DELETE FROM agent_swarms WHERE id = $1 AND user_id = $2", [id, user.id]);
+    await query("DELETE FROM agent_swarms WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
     console.error("Delete Swarm Error:", err);

@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/dsql";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 
 export async function GET() {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "leads", edit: false });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const leads = await query(
@@ -16,7 +16,7 @@ export async function GET() {
        FROM site_leads 
        WHERE user_id = $1 
        ORDER BY created_at DESC`,
-      [user.id]
+      [scope.dataId]
     );
 
     return NextResponse.json({ leads }, { status: 200 });

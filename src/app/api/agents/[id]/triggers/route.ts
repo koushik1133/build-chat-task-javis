@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { isValidCron } from "@/lib/cron-expr";
 import { EVENT_TYPES } from "@/lib/events/bus";
@@ -65,25 +65,25 @@ async function ownsAgent(userId: string, agentId: string): Promise<boolean> {
 }
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
-  if (!(await ownsAgent(user.id, id))) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await ownsAgent(scope.dataId, id))) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const triggers = await query<TriggerRow>(
     `SELECT * FROM agent_triggers WHERE user_id = $1 AND agent_id = $2 ORDER BY created_at DESC`,
-    [user.id, id]
+    [scope.dataId, id]
   ).catch(() => []);
   return NextResponse.json({ triggers: triggers.map(publicTrigger) });
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
-  if (!(await ownsAgent(user.id, id))) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await ownsAgent(scope.dataId, id))) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -118,10 +118,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   await query(
     `INSERT INTO agent_triggers (id, user_id, agent_id, kind, cron_expr, timezone, event_type, secret_hash, config, enabled, next_run_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [triggerId, user.id, id, body.kind, cronExpr, timezone, eventType, secretHash, config, enabled, nextRunAt]
+    [triggerId, scope.dataId, id, body.kind, cronExpr, timezone, eventType, secretHash, config, enabled, nextRunAt]
   );
 
-  const trigger = await queryOne<TriggerRow>(`SELECT * FROM agent_triggers WHERE id = $1 AND user_id = $2`, [triggerId, user.id]);
+  const trigger = await queryOne<TriggerRow>(`SELECT * FROM agent_triggers WHERE id = $1 AND user_id = $2`, [triggerId, scope.dataId]);
   if (!trigger) return NextResponse.json({ error: "failed to create trigger" }, { status: 500 });
 
   // The webhook token is shown exactly once; only its hash is stored.
@@ -135,9 +135,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
 
   const rawBody = await req.json().catch(() => null);
@@ -148,7 +148,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   const existing = await queryOne<TriggerRow>(
     `SELECT * FROM agent_triggers WHERE id = $1 AND user_id = $2 AND agent_id = $3`,
-    [body.id, user.id, id]
+    [body.id, scope.dataId, id]
   ).catch(() => null);
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
 
@@ -173,17 +173,17 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     `UPDATE agent_triggers
      SET cron_expr = $3, timezone = $4, event_type = $5, config = $6, enabled = $7, next_run_at = $8
      WHERE id = $1 AND user_id = $2`,
-    [existing.id, user.id, cronExpr, timezone, eventType, config, enabled, nextRunAt]
+    [existing.id, scope.dataId, cronExpr, timezone, eventType, config, enabled, nextRunAt]
   );
 
-  const trigger = await queryOne<TriggerRow>(`SELECT * FROM agent_triggers WHERE id = $1 AND user_id = $2`, [existing.id, user.id]);
+  const trigger = await queryOne<TriggerRow>(`SELECT * FROM agent_triggers WHERE id = $1 AND user_id = $2`, [existing.id, scope.dataId]);
   return NextResponse.json({ ok: true, trigger: trigger ? publicTrigger(trigger) : null });
 }
 
 export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
 
   const url = new URL(req.url);
@@ -198,7 +198,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   const row = await queryOne<{ id: string }>(
     `DELETE FROM agent_triggers WHERE id = $1 AND user_id = $2 AND agent_id = $3 RETURNING id`,
-    [triggerId, user.id, id]
+    [triggerId, scope.dataId, id]
   ).catch(() => null);
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ ok: true });

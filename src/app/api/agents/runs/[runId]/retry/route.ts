@@ -1,21 +1,21 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { AgentNotFoundError, getRun, startRun } from "@/lib/agents/runner";
 
 export const runtime = "nodejs";
 
 /** POST /api/agents/runs/:runId/retry — queue a fresh run with the same prompt. */
 export async function POST(_req: Request, ctx: { params: Promise<{ runId: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { runId } = await ctx.params;
 
-  const run = await getRun(runId, user.id);
+  const run = await getRun(runId, scope.dataId);
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   try {
-    const newRunId = await startRun(user.id, run.agent_id, {
+    const newRunId = await startRun(scope.dataId, run.agent_id, {
       prompt: run.prompt,
       triggerKind: "manual",
       triggerRef: run.id,

@@ -4,29 +4,30 @@ import { queryOne } from "@/lib/dsql";
 import { enrichLead } from "@/lib/lead-enrichment";
 import { emitEvent } from "@/lib/events/bus";
 import { readCappedText, sanitiseLeadPayload, rateLimit } from "@/lib/request-limits";
+import { corsHeadersFor, corsPreflight, siteAllowedOrigins } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+type Ctx = { params: Promise<{ siteId: string }> };
 
-export async function OPTIONS() {
-  return NextResponse.json({}, { status: 200, headers: corsHeaders });
+async function corsFor(siteId: string) {
+  const allowedOrigins = z.string().uuid().safeParse(siteId).success ? await siteAllowedOrigins(siteId) : [];
+  return { allowedOrigins };
+}
+
+export async function OPTIONS(req: Request, { params }: Ctx) {
+  const { siteId } = await params;
+  return corsPreflight(req, await corsFor(siteId));
 }
 
 /**
  * Public lead-capture endpoint — called by contact forms inside generated sites.
  * Stores form data as JSON text in Aurora DSQL site_leads table.
  */
-export async function POST(
-  req: Request,
-  { params }: { params: Promise<{ siteId: string }> }
-) {
+export async function POST(req: Request, { params }: Ctx) {
+  const { siteId } = await params;
+  const corsHeaders = corsHeadersFor(req, await corsFor(siteId));
   try {
-    const { siteId } = await params;
 
     if (!z.string().uuid().safeParse(siteId).success) {
       return NextResponse.json(

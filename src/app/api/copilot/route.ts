@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { llmErrorResponse } from "@/lib/llm-response";
 import { runCopilot } from "@/lib/copilot/copilot";
 import { COPILOT_MODULES } from "@/lib/copilot/context-builders";
@@ -20,11 +20,11 @@ const Body = z.object({
 
 /** POST /api/copilot — one copilot turn for the current page. */
 export async function POST(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "knowledge", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = Body.safeParse(await req.json().catch(() => null));
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await runCopilot(user.id, parsed.data);
+    const result = await runCopilot(scope.dataId, parsed.data);
     return NextResponse.json(result);
   } catch (err) {
     const mapped = llmErrorResponse(err);

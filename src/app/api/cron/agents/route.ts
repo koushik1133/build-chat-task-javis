@@ -4,6 +4,7 @@ import { claimJobs, completeJob, failJob, parsePayload } from "@/lib/agents/queu
 import { executeRun, resumeRun } from "@/lib/agents/runner";
 import { promoteDueTriggers } from "@/lib/agents/triggers";
 import { ensureToolsLoaded } from "@/lib/agents/tools";
+import { drainOutbox } from "@/lib/notifications/outbox";
 import type { JobRow } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -69,7 +70,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -108,6 +109,8 @@ async function handleTick(req: Request) {
       if (Date.now() - tickStart >= DRAIN_BUDGET_MS) break;
     }
   }
+
+  counts.outbox = (await drainOutbox(50)).claimed;
 
   counts.ms = Date.now() - tickStart;
   return NextResponse.json({ ok: true, worker: workerId, ...counts, server_time: new Date().toISOString() });

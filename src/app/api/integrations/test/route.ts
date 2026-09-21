@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { sendEmailUnified } from "@/lib/email-sender";
 import { queryOne } from "@/lib/dsql";
 import {
@@ -12,20 +12,20 @@ import {
 } from "@/lib/user-integrations";
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "settings", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const body = rawBody;
   const { type } = body;
-  let integrations = await getUserIntegrations(user.id);
+  let integrations = await getUserIntegrations(scope.dataId);
 
   if (type === "slack") {
     const incoming = body.slack_webhook_url?.trim();
     if (incoming && !incoming.includes("***") && isValidSlackWebhook(incoming)) {
-      const saved = await upsertUserIntegrations(user.id, {
+      const saved = await upsertUserIntegrations(scope.dataId, {
         slack_webhook_url: incoming,
         slack_channel_name: body.slack_channel_name,
       });
@@ -119,7 +119,7 @@ export async function POST(req: Request) {
     const row = await queryOne<{ id: string; title: string; body: string | null; read: boolean; created_at: string }>(
       `INSERT INTO notifications (user_id, title, body) VALUES ($1, $2, $3)
        RETURNING id, title, body, read, created_at`,
-      [user.id, "KernelHub connection test", "Website notifications are working — check the bell icon."]
+      [scope.dataId, "KernelHub connection test", "Website notifications are working — check the bell icon."]
     ).catch(() => null);
     if (!row) {
       return NextResponse.json({ success: false, message: "Failed to create notification" });

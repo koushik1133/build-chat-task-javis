@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { completeJson } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { RESUME_ANALYSIS_SYS } from "@/lib/build-prompts";
@@ -22,9 +22,9 @@ type ResumeProfile = {
 
 export async function POST(req: Request) {
   try {
-    await requireUser();
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    await requireScope({ area: "sites", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   let form: FormData;

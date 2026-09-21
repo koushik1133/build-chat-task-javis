@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/dsql";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "agents", edit: false });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
     const agentId = searchParams.get('agentId');
 
     let sql = `SELECT id, agent_id, original_text, corrected_text, context, created_at FROM agent_corrections WHERE user_id = $1`;
-    const params = [user.id];
+    const params = [scope.dataId];
 
     if (agentId) {
       sql += ` AND agent_id = $2`;
@@ -34,11 +34,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "agents", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const rawBody = await req.json().catch(() => null);
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       `INSERT INTO agent_corrections (id, user_id, agent_id, original_text, corrected_text, context, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
        RETURNING id`,
-      [id, user.id, agentId, originalText, correctedText, context || ""]
+      [id, scope.dataId, agentId, originalText, correctedText, context || ""]
     );
 
     return NextResponse.json({ success: true, id: result?.id }, { status: 200 });

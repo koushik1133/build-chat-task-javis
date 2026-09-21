@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/secure-store";
 
@@ -13,13 +13,13 @@ const SAFE_COLUMNS = `id, platform, account_id, account_name, login_customer_id,
   (access_token_enc IS NOT NULL) AS has_token`;
 
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "ads", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const accounts = await query(
     `SELECT ${SAFE_COLUMNS} FROM ad_accounts WHERE user_id = $1 ORDER BY created_at DESC`,
-    [user.id]
+    [scope.dataId]
   ).catch(() => []);
 
   return NextResponse.json({ accounts, encryptionReady: isEncryptionConfigured() });
@@ -35,9 +35,9 @@ const CreateSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "ads", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   if (!isEncryptionConfigured()) {
     return NextResponse.json(
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
   // One row per (user, platform, account) — reconnecting replaces credentials.
   const existing = await queryOne<{ id: string }>(
     `SELECT id FROM ad_accounts WHERE user_id = $1 AND platform = $2 AND account_id = $3`,
-    [user.id, input.platform, input.account_id]
+    [scope.dataId, input.platform, input.account_id]
   );
 
   const accessEnc = encryptSecret(input.access_token);
@@ -81,7 +81,7 @@ export async function POST(req: Request) {
        SET account_name = $3, access_token_enc = $4, developer_token_enc = $5,
            login_customer_id = $6, connected = TRUE, last_sync_error = NULL, updated_at = NOW()
        WHERE id = $1 AND user_id = $2`,
-      [existing.id, user.id, input.account_name ?? null, accessEnc, devEnc, input.login_customer_id ?? null]
+      [existing.id, scope.dataId, input.account_name ?? null, accessEnc, devEnc, input.login_customer_id ?? null]
     );
   } else {
     await query(
@@ -90,7 +90,7 @@ export async function POST(req: Request) {
           developer_token_enc, login_customer_id, connected)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE)`,
       [
-        randomUUID(), user.id, input.platform, input.account_id,
+        randomUUID(), scope.dataId, input.platform, input.account_id,
         input.account_name ?? null, accessEnc, devEnc, input.login_customer_id ?? null,
       ]
     );
@@ -98,22 +98,22 @@ export async function POST(req: Request) {
 
   const accounts = await query(
     `SELECT ${SAFE_COLUMNS} FROM ad_accounts WHERE user_id = $1 ORDER BY created_at DESC`,
-    [user.id]
+    [scope.dataId]
   );
   return NextResponse.json({ accounts });
 }
 
 export async function DELETE(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "ads", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
   // Both statements are user-scoped, so one tenant can never delete another's rows.
-  await query(`DELETE FROM ad_stats WHERE user_id = $1 AND ad_account_id = $2`, [user.id, id]);
-  await query(`DELETE FROM ad_accounts WHERE user_id = $1 AND id = $2`, [user.id, id]);
+  await query(`DELETE FROM ad_stats WHERE user_id = $1 AND ad_account_id = $2`, [scope.dataId, id]);
+  await query(`DELETE FROM ad_accounts WHERE user_id = $1 AND id = $2`, [scope.dataId, id]);
 
   return NextResponse.json({ success: true });
 }

@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { getAutomationById, runAutomation } from "@/lib/automation-runner";
 
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const { id } = await ctx.params;
-  const row = await getAutomationById(user.id, id);
+  const row = await getAutomationById(scope.dataId, id);
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const result = await runAutomation(user.id, row, {
+  const result = await runAutomation(scope.dataId, row, {
     task_title: row.trigger_event === "Scheduled (Daily)"
       ? "Test scheduled run"
       : "Test card (manual run)",

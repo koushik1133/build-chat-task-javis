@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 
 export async function GET(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const userId = user.id;
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const userId = scope.dataId;
 
   const { searchParams } = new URL(req.url);
   const from = searchParams.get("from"); // YYYY-MM-DD

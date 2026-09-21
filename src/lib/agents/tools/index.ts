@@ -18,6 +18,8 @@ import "./tasks";
 import "./agents";
 import "./strategy";
 import "./social";
+import "./calendar";
+import "./billing";
 // END tool-module imports
 // ─────────────────────────────────────────────────────────────────────────────
 

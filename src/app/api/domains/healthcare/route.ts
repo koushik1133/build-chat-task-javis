@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/dsql";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { complete } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { parseModelJson } from "@/lib/model-json";
@@ -9,9 +9,12 @@ import { parseModelJson } from "@/lib/model-json";
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "knowledge", edit: false });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action") ?? "patients";
@@ -19,7 +22,7 @@ export async function GET(req: NextRequest) {
     if (action === "patients") {
       const rows = await query(
         `SELECT * FROM healthcare_patients WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`,
-        [user.id]
+        [scope.dataId]
       );
       return NextResponse.json({ patients: rows });
     }
@@ -33,9 +36,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "knowledge", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
     const rawBody = await req.json().catch(() => null);
     if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -70,7 +76,7 @@ Generate ONLY the summary, no additional formatting.` }
       const rows = await query(
         `INSERT INTO healthcare_patients (user_id, full_name, dob, contact_email, contact_phone, chief_complaint, medical_history, medications, allergies, hipaa_consent, ai_summary)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-        [user.id, full_name.trim(), dob ?? null, contact_email ?? null, contact_phone ?? null, chief_complaint.trim(), medical_history ?? null, medications ?? null, allergies ?? null, !!hipaa_consent, ai_summary]
+        [scope.dataId, full_name.trim(), dob ?? null, contact_email ?? null, contact_phone ?? null, chief_complaint.trim(), medical_history ?? null, medications ?? null, allergies ?? null, !!hipaa_consent, ai_summary]
       );
       return NextResponse.json({ patient: rows[0] }, { status: 201 });
     }
@@ -114,7 +120,7 @@ Output a JSON object with: { "violations": [string], "phi_found": [string], "rec
     if (action === "health_insights") {
       const patients = await query(
         `SELECT chief_complaint, medical_history FROM healthcare_patients WHERE user_id = $1 LIMIT 50`,
-        [user.id]
+        [scope.dataId]
       );
       
       if (patients.length === 0) {

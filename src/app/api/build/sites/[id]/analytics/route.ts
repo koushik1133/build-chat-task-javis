@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { getPageViews } from "@/lib/dynamodb";
 
 export const runtime = "nodejs";
@@ -8,12 +9,13 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let supabase, user;
+  let scope;
   try {
-    ({ supabase, user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "sites", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const supabase = createAdminClient();
 
   const { id } = await params;
 
@@ -22,7 +24,7 @@ export async function GET(
     .from("sites")
     .select("id")
     .eq("id", id)
-    .eq("user_id", user.id)
+    .eq("user_id", scope.dataId)
     .single();
   if (!site) return NextResponse.json({ error: "not found" }, { status: 404 });
 

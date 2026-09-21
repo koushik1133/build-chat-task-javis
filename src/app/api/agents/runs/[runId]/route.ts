@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { CHECKPOINT_STEP_NAME } from "@/lib/agents/loop";
 import { cancelRun } from "@/lib/agents/runner";
@@ -19,9 +19,9 @@ type StepRow = {
 };
 
 export async function GET(_req: Request, ctx: { params: Promise<{ runId: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { runId } = await ctx.params;
 
   const run = await queryOne(
@@ -31,14 +31,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ runId: string 
      FROM agent_runs r
      LEFT JOIN agents a ON a.id = r.agent_id
      WHERE r.id = $1 AND r.user_id = $2`,
-    [runId, user.id]
+    [runId, scope.dataId]
   ).catch(() => null);
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const rows = await query<StepRow>(
     `SELECT id, idx, kind, name, input, output, tokens, ms, created_at
      FROM agent_run_steps WHERE run_id = $1 AND user_id = $2 ORDER BY idx ASC`,
-    [runId, user.id]
+    [runId, scope.dataId]
   ).catch(() => []);
 
   // Checkpoints carry the full model transcript; never hand that to the client.
@@ -48,7 +48,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ runId: string 
 
   const approvals = await query(
     `SELECT id, tool_name, preview, status, created_at, decided_at FROM approvals WHERE run_id = $1 AND user_id = $2 ORDER BY created_at ASC`,
-    [runId, user.id]
+    [runId, scope.dataId]
   ).catch(() => []);
 
   return NextResponse.json({ run, steps, approvals });
@@ -56,11 +56,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ runId: string 
 
 /** DELETE /api/agents/runs/:runId — cancel a queued / running / paused run. */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ runId: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { runId } = await ctx.params;
-  const ok = await cancelRun(user.id, runId);
+  const ok = await cancelRun(scope.dataId, runId);
   if (!ok) return NextResponse.json({ error: "run not found or already finished" }, { status: 404 });
   return NextResponse.json({ ok: true, status: "cancelled" });
 }

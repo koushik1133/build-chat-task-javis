@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { complete } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
@@ -9,21 +9,21 @@ export const maxDuration = 120;
 export const runtime = "nodejs";
 
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "knowledge", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const { id } = await ctx.params;
   const existing = await queryOne<{ type: string; title: string }>(
     "SELECT type, title FROM strategies WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   ).catch(() => null);
 
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const profile = await queryOne(
     "SELECT company_name, industry, product_desc, target_market, stage, geography, challenge, revenue_range FROM business_profile WHERE user_id = $1",
-    [user.id]
+    [scope.dataId]
   ).catch(() => null);
 
   const ctx2 = buildBusinessContext(profile);
@@ -40,12 +40,12 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     content = `# ${existing.title}\n\nRegeneration failed. Please try again.`;
   }
 
-  await query("UPDATE strategies SET content = $1, status = 'draft' WHERE id = $2 AND user_id = $3", [content, id, user.id]);
+  await query("UPDATE strategies SET content = $1, status = 'draft' WHERE id = $2 AND user_id = $3", [content, id, scope.dataId]);
   await query(
     "INSERT INTO strategy_versions (strategy_id, user_id, content) VALUES ($1, $2, $3)",
-    [id, user.id, content]
+    [id, scope.dataId, content]
   ).catch(() => {});
 
-  const proposal = await queryOne("SELECT * FROM strategies WHERE id = $1 AND user_id = $2", [id, user.id]);
+  const proposal = await queryOne("SELECT * FROM strategies WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
   return NextResponse.json({ proposal });
 }

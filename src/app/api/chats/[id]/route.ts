@@ -1,21 +1,21 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { queryOne, query } from "@/lib/dsql";
 import { getMessages, deleteMessages } from "@/lib/dynamodb";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "knowledge", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
 
   // Verify ownership in Aurora DSQL
   const chat = await queryOne(
     "SELECT id, title FROM chats WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   );
   if (!chat) return NextResponse.json({ error: "not found" }, { status: 404 });
 
@@ -32,16 +32,16 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "knowledge", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
 
   await Promise.all([
-    query("DELETE FROM chats WHERE id = $1 AND user_id = $2", [id, user.id]),
+    query("DELETE FROM chats WHERE id = $1 AND user_id = $2", [id, scope.dataId]),
     deleteMessages(id).catch(() => {}),
   ]);
 

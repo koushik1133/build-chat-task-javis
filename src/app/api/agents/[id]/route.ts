@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { RUN_LIMITS } from "@/lib/agents/types";
 
@@ -24,19 +24,19 @@ function formatZodError(err: z.ZodError): string {
 }
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
-  const agent = await queryOne("SELECT * FROM agents WHERE id = $1 AND user_id = $2", [id, user.id]).catch(() => null);
+  const agent = await queryOne("SELECT * FROM agents WHERE id = $1 AND user_id = $2", [id, scope.dataId]).catch(() => null);
   if (!agent) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ agent });
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -58,22 +58,22 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (body.max_steps !== undefined) updates.push(["max_steps", body.max_steps]);
 
   for (const [column, value] of updates) {
-    await query(`UPDATE agents SET ${column} = $1 WHERE id = $2 AND user_id = $3`, [value, id, user.id]).catch((err) => {
+    await query(`UPDATE agents SET ${column} = $1 WHERE id = $2 AND user_id = $3`, [value, id, scope.dataId]).catch((err) => {
       console.error(`[agents] failed to update ${column}:`, err);
     });
   }
 
-  const agent = await queryOne("SELECT * FROM agents WHERE id = $1 AND user_id = $2", [id, user.id]).catch(() => null);
+  const agent = await queryOne("SELECT * FROM agents WHERE id = $1 AND user_id = $2", [id, scope.dataId]).catch(() => null);
   if (!agent) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ ok: true, agent });
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
-  await query("DELETE FROM agent_triggers WHERE agent_id = $1 AND user_id = $2", [id, user.id]).catch(() => {});
-  await query("DELETE FROM agents WHERE id = $1 AND user_id = $2", [id, user.id]);
+  await query("DELETE FROM agent_triggers WHERE agent_id = $1 AND user_id = $2", [id, scope.dataId]).catch(() => {});
+  await query("DELETE FROM agents WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
   return NextResponse.json({ ok: true });
 }

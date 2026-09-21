@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { queryOne } from "@/lib/dsql";
 import PptxGenJS from "pptxgenjs";
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "knowledge", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
 
   const strategy = await queryOne(
     "SELECT * FROM strategies WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   ).catch(() => null);
 
   if (!strategy) return NextResponse.json({ error: "not found" }, { status: 404 });

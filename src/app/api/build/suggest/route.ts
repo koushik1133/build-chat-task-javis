@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { completeJson } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { NICHE_FEATURES_SYS, FEATURE_SUGGESTIONS_SYS } from "@/lib/build-prompts";
@@ -21,11 +21,11 @@ type Plan = {
 };
 
 export async function POST(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "sites", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = Body.safeParse(await req.json().catch(() => null));
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
 
   const site = await queryOne<{ plan: string | null; title: string; persona: string | null }>(
     "SELECT plan, title, persona FROM sites WHERE id = $1 AND user_id = $2",
-    [parsed.data.siteId, user.id]
+    [parsed.data.siteId, scope.dataId]
   );
   if (!site) return NextResponse.json({ error: "site not found" }, { status: 404 });
 

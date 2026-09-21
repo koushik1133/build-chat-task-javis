@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/dsql";
 import { sendEmailUnified } from "@/lib/email-sender";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -11,11 +11,11 @@ function wrapHtml(text: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "leads", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const { leadId, subject, body } = await req.json();
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
     const lead = await queryOne<{ data: string; draft_email_subject: string; draft_email_body: string }>(
       `SELECT data, draft_email_subject, draft_email_body FROM site_leads WHERE id = $1 AND user_id = $2`,
-      [leadId, user.id]
+      [leadId, scope.dataId]
     );
 
     if (!lead) {
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     if (result.success) {
       await query(
         `UPDATE site_leads SET status = 'sent', sent_at = NOW() WHERE id = $1 AND user_id = $2`,
-        [leadId, user.id]
+        [leadId, scope.dataId]
       );
       return NextResponse.json({ success: true, message: "Email sent" }, { status: 200 });
     } else {

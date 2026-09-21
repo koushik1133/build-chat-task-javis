@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 import { derive, isAdPlatform, type AdPlatformId } from "@/lib/ads/types";
 import { defaultRange } from "@/lib/ads/sync";
@@ -54,9 +54,9 @@ function accumulate(into: Totals, r: StatRow) {
  * share one report rather than sitting in two panels.
  */
 export async function GET(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "ads", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const params = new URL(req.url).searchParams;
 
@@ -75,8 +75,8 @@ export async function GET(req: Request) {
                ${platform ? "AND platform = $4" : ""}
                ORDER BY stat_date ASC`;
   const args: (string | number)[] = platform
-    ? [user.id, since, until, platform]
-    : [user.id, since, until];
+    ? [scope.dataId, since, until, platform]
+    : [scope.dataId, since, until];
 
   const rows = await query<StatRow>(sql, args).catch(() => [] as StatRow[]);
 

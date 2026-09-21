@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { searchChunks } from "@/lib/pinecone";
 import { streamChat, completeJson, type ChatMessage } from "@/lib/llm";
 import { SYSTEM_BASE, buildBusinessDnaBlock, buildContextBlock, TASK_EXTRACTOR_SYS } from "@/lib/prompts";
@@ -17,11 +17,11 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "knowledge", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = Body.safeParse(await req.json());
@@ -35,14 +35,14 @@ export async function POST(req: Request) {
   if (chatId) {
     const owned = await queryOne<{ id: string }>(
       "SELECT id FROM chats WHERE id = $1 AND user_id = $2",
-      [chatId, user.id]
+      [chatId, scope.dataId]
     ).catch(() => null);
     if (!owned) return NextResponse.json({ error: "chat not found" }, { status: 404 });
   } else {
     const title = message.slice(0, 60).replace(/\s+/g, " ").trim() || "New chat";
     const row = await queryOne<{ id: string }>(
       "INSERT INTO chats (user_id, title) VALUES ($1, $2) RETURNING id",
-      [user.id, title]
+      [scope.dataId, title]
     ).catch((e) => {
       console.error("[chat] DSQL chat insert error:", e);
       return null;
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
   await putMessage({
     msgId: userMsgId,
     chatId: resolvedChatId,
-    userId: user.id,
+    userId: scope.dataId,
     role: "user",
     content: message,
     createdAt: now,
@@ -71,10 +71,10 @@ export async function POST(req: Request) {
   // 3. Pull history, RAG hits, and Business DNA in parallel.
   const [history, chunks, profile] = await Promise.all([
     getMessages(resolvedChatId, 10).catch(() => []),
-    searchChunks(user.id, message, 5).catch(() => []),
+    searchChunks(scope.dataId, message, 5).catch(() => []),
     queryOne<BusinessContext>(
       "SELECT company_name, industry, product_desc, target_market, stage, geography, challenge, revenue_range FROM business_profile WHERE user_id = $1",
-      [user.id]
+      [scope.dataId]
     ).catch(() => null),
   ]);
 
@@ -121,13 +121,13 @@ export async function POST(req: Request) {
           await putMessage({
             msgId: assistantMsgId,
             chatId: finalChatId,
-            userId: user.id,
+            userId: scope.dataId,
             role: "assistant",
             content: full,
             createdAt: assistantAt,
           });
           // Update chat updated_at in Aurora DSQL
-          await query("UPDATE chats SET updated_at = $1 WHERE id = $2 AND user_id = $3", [assistantAt, finalChatId, user.id]);
+          await query("UPDATE chats SET updated_at = $1 WHERE id = $2 AND user_id = $3", [assistantAt, finalChatId, scope.dataId]);
         }
         controller.close();
 
@@ -146,7 +146,7 @@ export async function POST(req: Request) {
             for (const title of tasks) {
               await query(
                 "INSERT INTO tasks (user_id, chat_id, title) VALUES ($1, $2, $3)",
-                [user.id, finalChatId, title]
+                [scope.dataId, finalChatId, title]
               );
             }
           })

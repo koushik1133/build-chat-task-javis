@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { queryOne } from "@/lib/dsql";
 import { completeJson } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
@@ -10,9 +10,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 
   const profile = await queryOne<{ company_name: string; industry: string; product_desc: string }>(
     `SELECT company_name, industry, product_desc FROM business_profile WHERE user_id = $1`,
-    [user.id]
+    [scope.dataId]
   ).catch(() => null);
 
   const biz = profile

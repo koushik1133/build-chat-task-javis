@@ -28,6 +28,10 @@ import {
   CheckSquare,
   Gauge,
   KeyRound,
+  ScrollText,
+  Inbox,
+  CalendarDays,
+  Receipt,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -71,6 +75,7 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/messaging", label: "Messages", icon: MessageSquare },
       { href: "/leads", label: "Lead Inbox", icon: Users },
       { href: "/crm", label: "CRM", icon: Globe },
+      { href: "/calendar", label: "Calendar", icon: CalendarDays },
     ],
   },
   {
@@ -87,6 +92,7 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/agency", label: "Agency Command", icon: Building2 },
       { href: "/production", label: "Production", icon: Kanban },
       { href: "/tasks", label: "Tasks", icon: ListTodo },
+      { href: "/billing", label: "Billing", icon: Receipt },
     ],
   },
   {
@@ -97,6 +103,9 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/automations", label: "Automations", icon: Zap },
       { href: "/approvals", label: "Approvals", icon: CheckSquare },
       { href: "/settings/ai", label: "AI Settings", icon: Gauge },
+      { href: "/settings/team", label: "Team", icon: Users },
+      { href: "/settings/audit", label: "Audit Log", icon: ScrollText },
+      { href: "/settings/outbox", label: "Outbox", icon: Inbox },
       { href: "/settings/api-keys", label: "API Keys", icon: KeyRound },
     ],
   },

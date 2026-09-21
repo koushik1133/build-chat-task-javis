@@ -8,16 +8,21 @@ import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 import { cn } from "@/lib/utils";
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
+import { TurnstileWidget } from "@/components/auth/turnstile-widget";
 
-type Tab = "magic" | "signin" | "signup";
+type Tab = "magic" | "signin" | "signup" | "reset";
 
-const PASSWORD_MIN_LENGTH = 8;
-
-function passwordRules(password: string) {
+function passwordRules(password: string, email: string) {
+  const e = email.trim().toLowerCase();
   return [
     {
       label: `At least ${PASSWORD_MIN_LENGTH} characters`,
       ok: password.length >= PASSWORD_MIN_LENGTH,
+    },
+    {
+      label: "Not your email address",
+      ok: !e || (password.toLowerCase() !== e && password.toLowerCase() !== e.split("@")[0]),
     },
     { label: "One uppercase letter", ok: /[A-Z]/.test(password) },
     { label: "One lowercase letter", ok: /[a-z]/.test(password) },
@@ -51,7 +56,9 @@ function LoginForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
-  const rules = passwordRules(password);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
+  const rules = passwordRules(password, email);
   const passwordValid = rules.every((rule) => rule.ok);
 
   async function serverHasSession(retries = 0): Promise<boolean> {
@@ -135,17 +142,45 @@ function LoginForm() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const supabase = createClient();
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      setBusy(false);
-      setError(
-        error.message.toLowerCase().includes("invalid login credentials")
-          ? "Wrong email or password."
-          : error.message
-      );
-    } else if (data.session) {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBusy(false);
+        setError(body.error || "Wrong email or password.");
+        return;
+      }
       router.replace(next);
+    } catch {
+      setBusy(false);
+      setError("Sign in failed. Please try again.");
+    }
+  }
+
+  async function requestReset(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const body = await res.json().catch(() => ({}));
+      setBusy(false);
+      if (!res.ok) {
+        setError(body.error || "Could not send reset email.");
+        return;
+      }
+      setSent(true);
+    } catch {
+      setBusy(false);
+      setError("Could not send reset email.");
     }
   }
 
@@ -155,6 +190,10 @@ function LoginForm() {
       setError("Please meet all password requirements before creating an account.");
       return;
     }
+    if (turnstileSiteKey && !turnstileToken) {
+      setError("Please complete the verification challenge.");
+      return;
+    }
     setBusy(true);
     setError(null);
 
@@ -162,35 +201,17 @@ function LoginForm() {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, turnstileToken: turnstileToken ?? undefined, next }),
       });
-      const resData = await res.json();
+      const resData = await res.json().catch(() => ({}));
+      setBusy(false);
       if (!res.ok) {
-        setBusy(false);
-        setError(
-          resData.error?.toLowerCase().includes("already registered") || resData.error?.toLowerCase().includes("user_already_exists")
-            ? "Account already exists — switch to Sign in."
-            : resData.error || "Sign up failed."
-        );
+        setError(resData.error || "Sign up failed.");
+        setTurnstileToken(null);
         return;
       }
-
-      // Automatically sign in the user now that they are created & auto-confirmed
-      const supabase = createClient();
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (authError) {
-        setBusy(false);
-        setError(`Account created, but sign-in failed: ${authError.message}`);
-        return;
-      }
-
-      if (authData.session) {
-        router.replace(next);
-      }
+      // Email confirmation is required; the callback signs the user in.
+      setSent(true);
     } catch (err) {
       setBusy(false);
       setError(err instanceof Error ? err.message : "An error occurred during sign up.");
@@ -271,6 +292,8 @@ function LoginForm() {
                   <p><strong>{email}</strong> — check your inbox for a sign-in link.</p>
                   <p className="text-xs opacity-80">Check spam if it doesn&apos;t arrive within a minute.</p>
                 </>
+              ) : tab === "reset" ? (
+                <p>If an account exists for <strong>{email}</strong>, a reset link is on its way.</p>
               ) : (
                 <>
                   <p><strong>{email}</strong> — check your inbox to confirm your account.</p>
@@ -304,6 +327,23 @@ function LoginForm() {
                 No account?{" "}
                 <button type="button" onClick={() => { setTab("signup"); resetForm(); }}
                   className="underline underline-offset-2 hover:text-foreground">Create one</button>
+                {" · "}
+                <button type="button" onClick={() => { setTab("reset"); resetForm(); }}
+                  className="underline underline-offset-2 hover:text-foreground">Forgot password?</button>
+              </p>
+            </form>
+
+          ) : tab === "reset" ? (
+            <form onSubmit={requestReset} className="space-y-3">
+              <Input id="reset-email" name="email" type="email" required autoFocus
+                autoComplete="email" placeholder="you@domain.com"
+                value={email} onChange={e => setEmail(e.target.value)} />
+              <Button type="submit" className="w-full" disabled={busy || !email}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send reset link"}
+              </Button>
+              <p className="text-center text-[11px] text-muted-foreground">
+                <button type="button" onClick={() => { setTab("signin"); resetForm(); }}
+                  className="underline underline-offset-2 hover:text-foreground">Back to sign in</button>
               </p>
             </form>
 
@@ -334,7 +374,11 @@ function LoginForm() {
                   ))}
                 </div>
               </div>
-              <Button type="submit" className="w-full" disabled={busy || !email || !passwordValid}>
+              {turnstileSiteKey && (
+                <TurnstileWidget siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+              )}
+              <Button type="submit" className="w-full"
+                disabled={busy || !email || !passwordValid || (!!turnstileSiteKey && !turnstileToken)}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account"}
               </Button>
               <p className="text-center text-[11px] text-muted-foreground">

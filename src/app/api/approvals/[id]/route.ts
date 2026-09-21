@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { enqueueJob } from "@/lib/agents/queue";
 import { getTool } from "@/lib/agents/registry";
@@ -38,9 +38,9 @@ async function executeDirectly(userId: string, row: ApprovalRow): Promise<string
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const { id } = await ctx.params;
   const parsed = Body.safeParse(await req.json().catch(() => null));
@@ -51,11 +51,11 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     `UPDATE approvals SET status = $1, decided_by = $2, decided_at = NOW()
      WHERE id = $3 AND user_id = $2 AND status = 'pending'
      RETURNING ${COLUMNS}`,
-    [decision, user.id, id]
+    [decision, scope.dataId, id]
   ).catch(() => null);
   if (!row) {
     const exists = await queryOne<{ status: string }>(
-      `SELECT status FROM approvals WHERE id = $1 AND user_id = $2`, [id, user.id]
+      `SELECT status FROM approvals WHERE id = $1 AND user_id = $2`, [id, scope.dataId]
     ).catch(() => null);
     if (!exists) return NextResponse.json({ error: "not found" }, { status: 404 });
     return NextResponse.json({ error: `already ${exists.status}` }, { status: 409 });
@@ -63,31 +63,31 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   let updated: ApprovalRow = row;
   if (row.run_id) {
-    await enqueueJob(user.id, { kind: "resume", runId: row.run_id, approvalId: row.id }).catch((err) =>
+    await enqueueJob(scope.dataId, { kind: "resume", runId: row.run_id, approvalId: row.id }).catch((err) =>
       console.error("[approvals] failed to enqueue resume", err)
     );
   } else if (decision === "approved") {
-    const outcome = await executeDirectly(user.id, row);
+    const outcome = await executeDirectly(scope.dataId, row);
     const preview = `${row.preview ?? row.tool_name} — ${outcome}`.slice(0, 1000);
     updated = (await queryOne<ApprovalRow>(
       `UPDATE approvals SET preview = $1 WHERE id = $2 AND user_id = $3 RETURNING ${COLUMNS}`,
-      [preview, row.id, user.id]
+      [preview, row.id, scope.dataId]
     ).catch(() => null)) ?? { ...row, preview };
   }
 
   const agent = updated.agent_id
-    ? await queryOne<{ name: string }>(`SELECT name FROM agents WHERE id::text = $1 AND user_id = $2`, [updated.agent_id, user.id]).catch(() => null)
+    ? await queryOne<{ name: string }>(`SELECT name FROM agents WHERE id::text = $1 AND user_id = $2`, [updated.agent_id, scope.dataId]).catch(() => null)
     : null;
   return NextResponse.json({ approval: { ...updated, agent_name: agent?.name ?? null } });
 }
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
   const rows = await query<ApprovalRow>(
-    `SELECT ${COLUMNS} FROM approvals WHERE id = $1 AND user_id = $2`, [id, user.id]
+    `SELECT ${COLUMNS} FROM approvals WHERE id = $1 AND user_id = $2`, [id, scope.dataId]
   ).catch(() => []);
   if (rows.length === 0) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ approval: rows[0] });

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import {
   getRepoMeta,
   getFileTree,
@@ -19,9 +19,9 @@ const Body = z.object({ repoUrl: z.string().min(5) });
 
 export async function POST(req: Request) {
   try {
-    await requireUser();
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    await requireScope({ area: "agents", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });

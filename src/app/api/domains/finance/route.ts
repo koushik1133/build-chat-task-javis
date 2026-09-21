@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from '@/lib/dsql';
 import { complete } from '@/lib/llm';
 import { llmNotConfiguredResponse } from '@/lib/llm-response';
 import { parseModelJson } from '@/lib/model-json';
 
 export async function POST(req: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  let scope;
+  try {
+    scope = await requireScope({ area: "knowledge", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   try {
@@ -31,12 +31,12 @@ export async function POST(req: Request) {
           INSERT INTO finance_portfolios (id, user_id, name, asset_type, ticker, quantity, buy_price, current_price, notes)
           VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8)
           RETURNING *
-        `, [user.id, name, asset_type, ticker || null, quantity, buy_price, current_price, notes || null]);
+        `, [scope.dataId, name, asset_type, ticker || null, quantity, buy_price, current_price, notes || null]);
 
         return NextResponse.json({ item: result[0] });
       }
       case 'analyze_portfolio': {
-        const items = await query('SELECT * FROM finance_portfolios WHERE user_id = $1', [user.id]);
+        const items = await query('SELECT * FROM finance_portfolios WHERE user_id = $1', [scope.dataId]);
         
         const prompt = `Analyze this financial portfolio and provide a diversification analysis, a risk score from 0 to 100, and a list of recommendations.
         Portfolio: ${JSON.stringify(items)}
@@ -117,11 +117,11 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  let scope;
+  try {
+    scope = await requireScope({ area: "knowledge", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -129,7 +129,7 @@ export async function GET(req: Request) {
 
   if (action === 'portfolio') {
     try {
-      const items = await query('SELECT * FROM finance_portfolios WHERE user_id = $1 ORDER BY created_at DESC', [user.id]);
+      const items = await query('SELECT * FROM finance_portfolios WHERE user_id = $1 ORDER BY created_at DESC', [scope.dataId]);
       return NextResponse.json({ items });
     } catch (err) {
       console.error("[domains/finance] GET error:", err);

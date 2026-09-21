@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 
 export const runtime = "nodejs";
 
@@ -12,9 +12,9 @@ export const runtime = "nodejs";
  * is not something other users need to see.
  */
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "tasks", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   try {
     const rows = await query(
@@ -28,7 +28,7 @@ export async function GET() {
        FROM domain_feature_requests r
        ORDER BY r.upvotes DESC, r.created_at DESC
        LIMIT 100`,
-      [user.id]
+      [scope.dataId]
     );
     return NextResponse.json({ requests: rows });
   } catch (err) {
@@ -45,9 +45,9 @@ const CreateSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "tasks", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   let raw: unknown;
   try { raw = await req.json(); }
@@ -68,7 +68,7 @@ export async function POST(req: Request) {
          (id, user_id, domain, title, description, category, status, upvotes)
        VALUES ($1, $2, $3, $4, $5, $6, 'open', 0)
        RETURNING id, domain, title, description, category, status, upvotes, created_at`,
-      [randomUUID(), user.id, domain, title, description, category]
+      [randomUUID(), scope.dataId, domain, title, description, category]
     );
     return NextResponse.json({ request }, { status: 201 });
   } catch (err) {
@@ -82,9 +82,9 @@ export async function POST(req: Request) {
  * vote per request no matter how many times the button is pressed.
  */
 export async function PATCH(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "tasks", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   let raw: unknown;
   try { raw = await req.json(); }
@@ -104,13 +104,13 @@ export async function PATCH(req: Request) {
 
     const already = await queryOne<{ id: string }>(
       `SELECT id FROM domain_feature_request_votes WHERE request_id = $1 AND user_id = $2`,
-      [id, user.id]
+      [id, scope.dataId]
     );
 
     if (!already) {
       await query(
         `INSERT INTO domain_feature_request_votes (id, request_id, user_id) VALUES ($1, $2, $3)`,
-        [randomUUID(), id, user.id]
+        [randomUUID(), id, scope.dataId]
       );
       await query(
         `UPDATE domain_feature_requests SET upvotes = upvotes + 1 WHERE id = $1`,

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { queryOne } from "@/lib/dsql";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { runAgentJob } from "@/lib/agent-runner";
 
 export async function POST(
@@ -8,11 +8,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "agents", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
     }
 
     const { id } = await params;
@@ -22,7 +22,7 @@ export async function POST(
 
     const swarm = await queryOne<{ nodes: string }>(
       `SELECT nodes FROM agent_swarms WHERE id = $1 AND user_id = $2`,
-      [id, user.id]
+      [id, scope.dataId]
     );
 
     if (!swarm) {
@@ -47,7 +47,7 @@ export async function POST(
           const runId = crypto.randomUUID();
           await queryOne(
             `INSERT INTO agent_swarm_runs (id, swarm_id, user_id, status, started_at) VALUES ($1, $2, $3, 'running', NOW()) RETURNING id`,
-            [runId, id, user.id]
+            [runId, id, scope.dataId]
           );
 
           for (let i = 0; i < nodes.length; i++) {
@@ -56,7 +56,7 @@ export async function POST(
             // Get agent
             const agent = await queryOne<{ id: string; name: string; template_id: string }>(
               `SELECT id, name, template_id FROM agents WHERE id = $1 AND user_id = $2`,
-              [node.agentId, user.id]
+              [node.agentId, scope.dataId]
             );
 
             if (!agent) {
@@ -71,7 +71,7 @@ export async function POST(
             const taskPrompt = `Previous context / input: ${currentContext}${customPrompt}`;
             
             const result = await runAgentJob(
-              user.id,
+              scope.dataId,
               agent.id,
               {
                 prompt: taskPrompt,

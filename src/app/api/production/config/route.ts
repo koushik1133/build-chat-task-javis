@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { queryOne } from "@/lib/dsql";
 
 const DEFAULT_COLUMNS = JSON.stringify([
@@ -10,13 +10,13 @@ const DEFAULT_COLUMNS = JSON.stringify([
 const DEFAULT_FIELDS = JSON.stringify(["priority", "due_date", "tags"]);
 
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "production", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   let config = await queryOne(
     "SELECT * FROM board_configs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-    [user.id]
+    [scope.dataId]
   ).catch(() => null);
 
   if (!config) {
@@ -24,7 +24,7 @@ export async function GET() {
     config = await queryOne(
       `INSERT INTO board_configs (user_id, name, template, columns, card_fields)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [user.id, "My Board", "default", DEFAULT_COLUMNS, DEFAULT_FIELDS]
+      [scope.dataId, "My Board", "default", DEFAULT_COLUMNS, DEFAULT_FIELDS]
     ).catch(() => null);
   }
 
@@ -32,9 +32,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "production", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   // Upsert: try update first
   const existing = await queryOne(
     "SELECT id FROM board_configs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-    [user.id]
+    [scope.dataId]
   ).catch(() => null);
 
   let config;
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     config = await queryOne(
       `INSERT INTO board_configs (user_id, name, template, columns, card_fields)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [user.id, name ?? "My Board", template ?? "default", columns ?? DEFAULT_COLUMNS, card_fields ?? DEFAULT_FIELDS]
+      [scope.dataId, name ?? "My Board", template ?? "default", columns ?? DEFAULT_COLUMNS, card_fields ?? DEFAULT_FIELDS]
     ).catch(() => null);
   }
 

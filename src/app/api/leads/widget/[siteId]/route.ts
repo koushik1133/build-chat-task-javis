@@ -4,31 +4,40 @@ import { queryOne } from "@/lib/dsql";
 import { enrichLead } from "@/lib/lead-enrichment";
 import { emitEvent } from "@/lib/events/bus";
 import { readCappedText, sanitiseLeadPayload, rateLimit } from "@/lib/request-limits";
+import { corsHeadersFor, corsPreflight, siteAllowedOrigins } from "@/lib/cors";
 
 export const runtime = "nodejs";
 
-function corsResponse(res: NextResponse) {
-  res.headers.set("Access-Control-Allow-Origin", "*");
-  res.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+type Ctx = { params: Promise<{ siteId: string }> };
+const CORS = { methods: "GET, POST, OPTIONS", headers: "Content-Type" };
+
+async function corsFor(req: Request, siteId: string) {
+  const allowedOrigins = z.string().uuid().safeParse(siteId).success ? await siteAllowedOrigins(siteId) : [];
+  return { allowedOrigins, ...CORS };
+}
+
+function withCors(res: NextResponse, headers: Record<string, string>) {
+  for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
   return res;
 }
 
-export async function OPTIONS() {
-  return corsResponse(NextResponse.json({}, { status: 200 }));
+export async function OPTIONS(req: NextRequest, { params }: Ctx) {
+  const { siteId } = await params;
+  return corsPreflight(req, await corsFor(req, siteId));
 }
 
-export async function GET() {
-  return corsResponse(NextResponse.json({ status: "ok" }, { status: 200 }));
+export async function GET(req: NextRequest, { params }: Ctx) {
+  const { siteId } = await params;
+  const cors = corsHeadersFor(req, await corsFor(req, siteId));
+  return withCors(NextResponse.json({ status: "ok" }, { status: 200 }), cors);
 }
 
 /** Public lead capture for the embeddable chat widget. */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ siteId: string }> }
-) {
+export async function POST(req: NextRequest, { params }: Ctx) {
+  const { siteId } = await params;
+  const cors = corsHeadersFor(req, await corsFor(req, siteId));
+  const corsResponse = (res: NextResponse) => withCors(res, cors);
   try {
-    const { siteId } = await params;
 
     if (!z.string().uuid().safeParse(siteId).success) {
       return corsResponse(NextResponse.json({ error: "Invalid site ID format" }, { status: 400 }));

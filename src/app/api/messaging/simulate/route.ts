@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { processInbound } from "@/lib/twilio-webhook";
 import { rateLimit } from "@/lib/request-limits";
 
@@ -15,14 +15,14 @@ const bodySchema = z.object({
  * without Twilio, so the messaging inbox can be demoed end to end.
  */
 export async function POST(req: NextRequest) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "messaging", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  if (!rateLimit(`msg-sim:${user.id}`, 30, 60_000).allowed) {
+  if (!rateLimit(`msg-sim:${scope.dataId}`, 30, 60_000).allowed) {
     return NextResponse.json({ error: "Too many simulated messages — slow down." }, { status: 429 });
   }
 
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const out = await processInbound({
-      userId: user.id,
+      userId: scope.dataId,
       channel: parsed.data.channel,
       fromNumber: parsed.data.fromNumber,
       text: parsed.data.text,

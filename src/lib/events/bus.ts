@@ -67,6 +67,8 @@ export const EVENT_TYPES = [
   "social.post.failed",
   "task.created",
   "invoice.paid",
+  "booking.created",
+  "booking.cancelled",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

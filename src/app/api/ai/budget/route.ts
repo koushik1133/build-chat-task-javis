@@ -1,20 +1,20 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { getBudget, setBudget } from "@/lib/llm/budgets";
 import { usdToMicros } from "@/lib/llm/pricing";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "settings", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
-    return NextResponse.json({ budget: await getBudget(user.id) });
+    return NextResponse.json({ budget: await getBudget(scope.dataId) });
   } catch (err) {
     console.error("[ai/budget] get failed:", err);
     return NextResponse.json({ error: "Could not load AI budget." }, { status: 500 });
@@ -28,11 +28,11 @@ const Patch = z.object({
 });
 
 export async function PATCH(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "settings", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = Patch.safeParse(await req.json().catch(() => null));
@@ -40,12 +40,12 @@ export async function PATCH(req: Request) {
   const { capUsd, hardStop, allowlist } = parsed.data;
 
   try {
-    await setBudget(user.id, {
+    await setBudget(scope.dataId, {
       ...(capUsd !== undefined ? { capMicros: capUsd === null ? null : usdToMicros(capUsd) } : {}),
       ...(hardStop !== undefined ? { hardStop } : {}),
       ...(allowlist !== undefined ? { allowlist: allowlist === null ? null : allowlist } : {}),
     });
-    return NextResponse.json({ budget: await getBudget(user.id) });
+    return NextResponse.json({ budget: await getBudget(scope.dataId) });
   } catch (err) {
     console.error("[ai/budget] patch failed:", err);
     return NextResponse.json({ error: "Could not save AI budget." }, { status: 500 });

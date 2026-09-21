@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/dsql";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { complete } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
 
@@ -8,16 +8,19 @@ import { llmNotConfiguredResponse } from "@/lib/llm-response";
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "knowledge", edit: false });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
     const action = new URL(req.url).searchParams.get("action") ?? "investors";
 
     if (action === "investors") {
       const rows = await query(
         `SELECT * FROM business_investors WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`,
-        [user.id]
+        [scope.dataId]
       );
       return NextResponse.json({ investors: rows });
     }
@@ -30,9 +33,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "knowledge", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
     const rawBody = await req.json().catch(() => null);
     if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -47,7 +53,7 @@ export async function POST(req: NextRequest) {
       const rows = await query(
         `INSERT INTO business_investors (user_id, investor_name, firm, email, check_size, focus_areas, stage, notes)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-        [user.id, investor_name.trim(), firm ?? null, email ?? null, check_size ?? null, focus_areas ?? null, stage, notes ?? null]
+        [scope.dataId, investor_name.trim(), firm ?? null, email ?? null, check_size ?? null, focus_areas ?? null, stage, notes ?? null]
       );
       return NextResponse.json({ investor: rows[0] }, { status: 201 });
     }
@@ -58,7 +64,7 @@ export async function POST(req: NextRequest) {
       if (!id || !stage) return NextResponse.json({ error: "id and stage required" }, { status: 400 });
       const rows = await query(
         `UPDATE business_investors SET stage = $1 WHERE id = $2 AND user_id = $3 RETURNING *`,
-        [stage, id, user.id]
+        [stage, id, scope.dataId]
       );
       return NextResponse.json({ investor: rows[0] });
     }

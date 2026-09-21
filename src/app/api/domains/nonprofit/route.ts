@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from '@/lib/dsql';
 import { complete } from '@/lib/llm';
 import { llmNotConfiguredResponse } from '@/lib/llm-response';
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "knowledge", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const rawBody = await req.json().catch(() => null);
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
         const result = await query(
           `INSERT INTO nonprofit_donors (user_id, full_name, email, phone, total_donated, cause_tags) 
            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-          [user.id, full_name, email, phone, total_donated, cause_tags]
+          [scope.dataId, full_name, email, phone, total_donated, cause_tags]
         );
         return NextResponse.json({ donor: result[0] });
       }
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
         // Mocking the query logic as we don't know if the table exists or if data matches
         let at_risk_count = 0;
         try {
-            const result = await query(`SELECT COUNT(*) FROM nonprofit_donors WHERE user_id = $1 AND last_donation < NOW() - INTERVAL '6 months'`, [user.id]);
+            const result = await query(`SELECT COUNT(*) FROM nonprofit_donors WHERE user_id = $1 AND last_donation < NOW() - INTERVAL '6 months'`, [scope.dataId]);
             at_risk_count = parseInt(String(result[0]?.count ?? "0"), 10) || 0;
         } catch (e) {
             console.error("[domains/nonprofit] at-risk donor count failed:", e);
@@ -92,11 +92,11 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "knowledge", edit: false });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -106,7 +106,7 @@ export async function GET(req: Request) {
       try {
         const donors = await query(
           'SELECT * FROM nonprofit_donors WHERE user_id = $1 ORDER BY total_donated DESC',
-          [user.id]
+          [scope.dataId]
         );
         return NextResponse.json({ donors });
       } catch (e) {

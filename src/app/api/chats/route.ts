@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 
 export async function GET() {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "knowledge", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const chats = await query(
@@ -16,7 +16,7 @@ export async function GET() {
      WHERE user_id = $1
      ORDER BY updated_at DESC
      LIMIT 50`,
-    [user.id]
+    [scope.dataId]
   ).catch((err) => {
     console.error("[chats] list failed:", err);
     return [];

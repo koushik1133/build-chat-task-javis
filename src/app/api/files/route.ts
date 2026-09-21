@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { requireUser, createAdminClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { extractText, chunkText } from "@/lib/chunk";
 import { upsertChunks, deleteFile as deleteFromVector } from "@/lib/pinecone";
@@ -10,11 +11,11 @@ export const maxDuration = 120;
 const MAX_BYTES = 15 * 1024 * 1024;
 
 export async function GET() {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "knowledge", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const files = await query(
@@ -22,7 +23,7 @@ export async function GET() {
      FROM files
      WHERE user_id = $1
      ORDER BY created_at DESC`,
-    [user.id]
+    [scope.dataId]
   ).catch((err) => {
     console.error("[files] list failed:", err);
     return [];
@@ -32,12 +33,13 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let supabase, user;
+  let scope;
   try {
-    ({ supabase, user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "knowledge", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const supabase = createAdminClient();
 
   const form = await req.formData();
   const file = form.get("file");
@@ -65,7 +67,7 @@ export async function POST(req: Request) {
   }
 
   // 2. Upload raw file to Supabase Storage (blob storage, not a database).
-  const storagePath = `${user.id}/${Date.now()}-${file.name}`;
+  const storagePath = `${scope.dataId}/${Date.now()}-${file.name}`;
   const buf = Buffer.from(await file.arrayBuffer());
 
   // Ensure files bucket exists
@@ -89,19 +91,19 @@ export async function POST(req: Request) {
     `INSERT INTO files (user_id, name, mime, size_bytes, storage_path, chunk_count)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
-    [user.id, file.name, file.type || null, file.size, storagePath, chunks.length]
+    [scope.dataId, file.name, file.type || null, file.size, storagePath, chunks.length]
   );
   if (!row) return NextResponse.json({ error: "insert failed" }, { status: 500 });
 
   // 4. Upsert vectors into Pinecone.
   await upsertChunks(
-    user.id,
+    scope.dataId,
     chunks.map((chunk_text, i) => ({
       id: `${row.id}:${i}`,
       chunk_text,
       file_id: row.id,
       file_name: file.name,
-      user_id: user.id,
+      user_id: scope.dataId,
     }))
   );
 
@@ -109,27 +111,28 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  let supabase, user;
+  let scope;
   try {
-    ({ supabase, user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "knowledge", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const supabase = createAdminClient();
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const { id } = rawBody;
   const file = await queryOne<{ id: string; storage_path: string | null }>(
     "SELECT id, storage_path FROM files WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   );
   if (!file) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  await deleteFromVector(user.id, file.id).catch(() => {});
+  await deleteFromVector(scope.dataId, file.id).catch(() => {});
   if (file.storage_path) {
     await supabase.storage.from("files").remove([file.storage_path]).catch(() => {});
   }
-  await query("DELETE FROM files WHERE id = $1 AND user_id = $2", [id, user.id]);
+  await query("DELETE FROM files WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
 
   return NextResponse.json({ ok: true });
 }

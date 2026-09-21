@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 import { PLAYBOOKS, getPlaybook, runPlaybook } from "@/lib/agents/playbooks";
 
 type RunRow = { id: string; playbook_id: string; entity_id: string | null; run_id: string | null; status: string | null; created_at: string; run_status: string | null };
 
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const settings = await query<{ playbook_id: string; enabled: boolean | null }>(
-    `SELECT playbook_id, enabled FROM playbook_settings WHERE user_id = $1`, [user.id]
+    `SELECT playbook_id, enabled FROM playbook_settings WHERE user_id = $1`, [scope.dataId]
   ).catch(() => []);
   const enabledMap = new Map(settings.map((s) => [s.playbook_id, s.enabled !== false]));
 
@@ -21,7 +21,7 @@ export async function GET() {
      FROM playbook_runs pr
      LEFT JOIN agent_runs r ON r.id::text = pr.run_id
      WHERE pr.user_id = $1 ORDER BY pr.created_at DESC LIMIT 100`,
-    [user.id]
+    [scope.dataId]
   ).catch(() => []);
 
   const playbooks = PLAYBOOKS.map((p) => ({
@@ -43,9 +43,9 @@ export async function GET() {
 const PatchBody = z.object({ id: z.string().min(1), enabled: z.boolean() });
 
 export async function PATCH(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const parsed = PatchBody.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "id and enabled required" }, { status: 400 });
   if (!getPlaybook(parsed.data.id)) return NextResponse.json({ error: "unknown playbook" }, { status: 404 });
@@ -53,7 +53,7 @@ export async function PATCH(req: Request) {
   const ok = await query(
     `INSERT INTO playbook_settings (user_id, playbook_id, enabled, updated_at) VALUES ($1, $2, $3, NOW())
      ON CONFLICT (user_id, playbook_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()`,
-    [user.id, parsed.data.id, parsed.data.enabled]
+    [scope.dataId, parsed.data.id, parsed.data.enabled]
   ).then(() => true).catch(() => false);
   if (!ok) return NextResponse.json({ error: "failed to save" }, { status: 500 });
   return NextResponse.json({ ok: true, id: parsed.data.id, enabled: parsed.data.enabled });
@@ -62,14 +62,14 @@ export async function PATCH(req: Request) {
 const PostBody = z.object({ id: z.string().min(1), entityId: z.string().min(1).optional() });
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const parsed = PostBody.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "id required" }, { status: 400 });
   if (!getPlaybook(parsed.data.id)) return NextResponse.json({ error: "unknown playbook" }, { status: 404 });
   try {
-    const result = await runPlaybook(user.id, parsed.data.id, parsed.data.entityId);
+    const result = await runPlaybook(scope.dataId, parsed.data.id, parsed.data.entityId);
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "run failed" }, { status: 500 });

@@ -2,15 +2,15 @@ import { NextRequest } from "next/server";
 import { queryOne } from "@/lib/dsql";
 import { streamChat } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
-import { createClient } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "reports", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
     }
 
     const rawBody = await req.json().catch(() => null);
@@ -22,13 +22,13 @@ export async function POST(req: NextRequest) {
 
     // Fetch key metrics
     const [leads, agents, runs, tasks, doneTasks, automations, strategies] = await Promise.all([
-      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM site_leads WHERE user_id = $1`, [user.id]),
-      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM agents WHERE user_id = $1 AND status = 'active'`, [user.id]),
-      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM agent_runs WHERE user_id = $1`, [user.id]),
-      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM tasks WHERE user_id = $1`, [user.id]),
-      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM tasks WHERE user_id = $1 AND done = true`, [user.id]),
-      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM automations WHERE user_id = $1`, [user.id]),
-      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM strategies WHERE user_id = $1`, [user.id]),
+      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM site_leads WHERE user_id = $1`, [scope.dataId]),
+      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM agents WHERE user_id = $1 AND status = 'active'`, [scope.dataId]),
+      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM agent_runs WHERE user_id = $1`, [scope.dataId]),
+      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM tasks WHERE user_id = $1`, [scope.dataId]),
+      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM tasks WHERE user_id = $1 AND done = true`, [scope.dataId]),
+      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM automations WHERE user_id = $1`, [scope.dataId]),
+      queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM strategies WHERE user_id = $1`, [scope.dataId]),
     ]);
 
     const metricsContext = `

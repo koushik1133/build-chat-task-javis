@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { queryOne, query } from "@/lib/dsql";
 
 export const runtime = "nodejs";
@@ -11,11 +11,11 @@ export async function POST(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "sites", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   let raw: unknown;
@@ -32,7 +32,7 @@ export async function POST(
   // Verify revision belongs to this site (application-layer integrity)
   const rev = await queryOne<{ html: string; site_id: string }>(
     "SELECT html, site_id FROM site_revisions WHERE id = $1 AND user_id = $2",
-    [revisionId, user.id]
+    [revisionId, scope.dataId]
   );
   if (!rev || rev.site_id !== id) {
     return NextResponse.json({ error: "revision not found" }, { status: 404 });
@@ -41,7 +41,7 @@ export async function POST(
   await query("UPDATE sites SET html = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3", [
     rev.html,
     id,
-    user.id,
+    scope.dataId,
   ]);
 
   return NextResponse.json({ ok: true, html: rev.html });

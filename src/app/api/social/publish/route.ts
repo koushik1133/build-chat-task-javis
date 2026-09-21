@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { publishPost, isPublishingConfigured } from "@/lib/social/upload-post";
 import { emitEvent } from "@/lib/events/bus";
@@ -26,9 +26,9 @@ interface DuePost {
  * reason and the rest of the queue still goes out.
  */
 export async function POST() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const due = await query<DuePost>(
     `SELECT id, platform, caption, image_url, notes
@@ -36,7 +36,7 @@ export async function POST() {
      WHERE user_id = $1 AND status = 'scheduled' AND scheduled_at <= NOW()
      ORDER BY scheduled_at ASC
      LIMIT ${MAX_PER_RUN}`,
-    [user.id]
+    [scope.dataId]
   );
 
   if (due.length === 0) {
@@ -57,7 +57,7 @@ export async function POST() {
   // Each user publishes through their own upload-post profile.
   const integration = await queryOne<{ upload_post_profile: string | null }>(
     `SELECT upload_post_profile FROM user_integrations WHERE user_id = $1`,
-    [user.id]
+    [scope.dataId]
   ).catch(() => null);
 
   const profile = integration?.upload_post_profile?.trim();
@@ -89,20 +89,20 @@ export async function POST() {
          SET status = 'published', published_at = NOW(), platform_post_id = $2,
              publish_error = NULL, updated_at = NOW()
          WHERE id = $1 AND user_id = $3`,
-        [post.id, result.postId ?? null, user.id]
+        [post.id, result.postId ?? null, scope.dataId]
       );
       published.push(post.id);
-      void emitEvent(user.id, { type: "social.post.published", entity: "social_post", entityId: post.id, data: { platform: post.platform, platformPostId: result.postId ?? null } });
+      void emitEvent(scope.dataId, { type: "social.post.published", entity: "social_post", entityId: post.id, data: { platform: post.platform, platformPostId: result.postId ?? null } });
     } else {
       const message = result.error ?? "Unknown publishing error";
       await query(
         `UPDATE social_posts
          SET status = 'failed', publish_error = $2, updated_at = NOW()
          WHERE id = $1 AND user_id = $3`,
-        [post.id, message.slice(0, 500), user.id]
+        [post.id, message.slice(0, 500), scope.dataId]
       );
       failed.push({ id: post.id, error: message });
-      void emitEvent(user.id, { type: "social.post.failed", entity: "social_post", entityId: post.id, data: { platform: post.platform, error: message.slice(0, 500) } });
+      void emitEvent(scope.dataId, { type: "social.post.failed", entity: "social_post", entityId: post.id, data: { platform: post.platform, error: message.slice(0, 500) } });
     }
   }
 
@@ -120,15 +120,15 @@ export async function POST() {
 
 /** GET /api/social/publish — posts currently due. */
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const pending = await query(
     `SELECT * FROM social_posts
      WHERE user_id = $1 AND status = 'scheduled' AND scheduled_at <= NOW()
      ORDER BY scheduled_at ASC`,
-    [user.id]
+    [scope.dataId]
   );
 
   return NextResponse.json({ pending, configured: isPublishingConfigured() });

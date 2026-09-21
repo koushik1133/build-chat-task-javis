@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { complete } from "@/lib/llm";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { SITE_REFINE_SYS } from "@/lib/build-prompts";
@@ -16,11 +16,11 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "sites", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = Body.safeParse(await req.json().catch(() => null));
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
 
   const site = await queryOne<{ id: string; html: string }>(
     "SELECT id, html FROM sites WHERE id = $1 AND user_id = $2",
-    [siteId, user.id]
+    [siteId, scope.dataId]
   );
   if (!site) return NextResponse.json({ error: "site not found" }, { status: 404 });
 
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
   await query(
     `INSERT INTO site_revisions (site_id, user_id, source, prompt, html)
      VALUES ($1, $2, $3, $4, $5)`,
-    [siteId, user.id, source, instruction, finalHtml]
+    [siteId, scope.dataId, source, instruction, finalHtml]
   );
 
   return NextResponse.json({ ok: true });

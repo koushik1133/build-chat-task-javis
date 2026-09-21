@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { toChannelId } from "@/lib/channels/registry";
 
 export async function GET(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   // Explicit column list: SELECT * previously returned access_token/refresh_token.
   const platform = toChannelId(new URL(req.url).searchParams.get("platform"));
@@ -17,16 +17,16 @@ export async function GET(req: Request) {
                 FROM social_accounts WHERE user_id = $1`;
 
   const accounts = platform
-    ? await query(`${base} AND platform = $2 ORDER BY created_at DESC`, [user.id, platform])
-    : await query(`${base} ORDER BY created_at DESC`, [user.id]);
+    ? await query(`${base} AND platform = $2 ORDER BY created_at DESC`, [scope.dataId, platform])
+    : await query(`${base} ORDER BY created_at DESC`, [scope.dataId]);
 
   return NextResponse.json({ accounts });
 }
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") {
@@ -58,15 +58,15 @@ export async function POST(req: Request) {
     `INSERT INTO social_accounts (id, user_id, brand_id, platform, handle, display_name, connected)
      VALUES ($1,$2,$3,$4,$5,$6,TRUE)
      RETURNING id, brand_id, platform, handle, display_name, avatar_url, connected, created_at`,
-    [id, user.id, brand_id ?? null, platform, handle, display_name ?? handle]
+    [id, scope.dataId, brand_id ?? null, platform, handle, display_name ?? handle]
   );
   return NextResponse.json({ account });
 }
 
 export async function DELETE(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
@@ -74,7 +74,7 @@ export async function DELETE(req: Request) {
 
   await query(
     "DELETE FROM social_accounts WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   );
   return NextResponse.json({ success: true });
 }

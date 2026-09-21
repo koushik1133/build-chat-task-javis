@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { validateMove, shouldFireAutomations, colById } from "@/lib/production-board";
@@ -10,9 +10,9 @@ import {
 } from "@/lib/production-server";
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "production", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const { id } = await ctx.params;
   const rawBody = await req.json().catch(() => null);
@@ -21,12 +21,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   const existing = await queryOne<{ id: string; title: string; status: string; automation: string | null }>(
     "SELECT id, title, status, automation FROM production_tasks WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   ).catch(() => null);
 
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const cols = await getUserBoardColumns(user.id);
+  const cols = await getUserBoardColumns(scope.dataId);
 
   if (body.status !== undefined && body.status !== existing.status) {
     const check = validateMove(cols, existing.status, body.status);
@@ -51,7 +51,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   const idIdx = setClauses.length + 1;
   const userIdIdx = setClauses.length + 2;
-  values.push(id, user.id);
+  values.push(id, scope.dataId);
 
   const task = await queryOne(
     `UPDATE production_tasks SET ${setClauses.join(", ")} WHERE id = $${idIdx} AND user_id = $${userIdIdx} RETURNING *`,
@@ -66,11 +66,11 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (newStatus && newStatus !== existing.status) {
     const fromCol = colById(cols, existing.status);
     const toCol = colById(cols, newStatus);
-    await logProductionActivity(user.id, id, "moved", {
+    await logProductionActivity(scope.dataId, id, "moved", {
       from: fromCol?.label ?? existing.status,
       to: toCol?.label ?? newStatus,
     });
-    void emitEvent(user.id, {
+    void emitEvent(scope.dataId, {
       type: "production.card.moved",
       entity: "production_task",
       entityId: id,
@@ -81,7 +81,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       existing.automation &&
       shouldFireAutomations(cols, existing.status, newStatus, false)
     ) {
-      fired = await fireKanbanAutomations(user.id, existing.automation, {
+      fired = await fireKanbanAutomations(scope.dataId, existing.automation, {
         task_title: existing.title,
         from_column: fromCol?.label,
         to_column: toCol?.label ?? newStatus,
@@ -89,27 +89,27 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       });
     }
   } else if (body.title || body.description || body.priority || body.due_date || body.tags || body.assignee || body.automation) {
-    await logProductionActivity(user.id, id, "updated", {});
+    await logProductionActivity(scope.dataId, id, "updated", {});
   }
 
   return NextResponse.json({ task, fired });
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "production", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
 
   const existing = await queryOne<{ title: string }>(
     "SELECT title FROM production_tasks WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   ).catch(() => null);
 
   if (existing) {
-    await logProductionActivity(user.id, id, "deleted", { title: existing.title });
+    await logProductionActivity(scope.dataId, id, "deleted", { title: existing.title });
   }
 
-  await query("DELETE FROM production_tasks WHERE id = $1 AND user_id = $2", [id, user.id]);
+  await query("DELETE FROM production_tasks WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
   return NextResponse.json({ ok: true });
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { describeProviders } from "@/lib/llm/providers";
 import { getBudget } from "@/lib/llm/budgets";
@@ -25,11 +25,11 @@ function monthStartIso(): string {
 }
 
 export async function GET() {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "settings", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const since = monthStartIso();
@@ -43,28 +43,28 @@ export async function GET() {
     const [totals, byFeature, byProvider, days, budget] = await Promise.all([
       queryOne<TotalsRow>(
         `SELECT ${AGG} FROM ai_usage WHERE user_id = $1 AND created_at >= $2`,
-        [user.id, since]
+        [scope.dataId, since]
       ),
       query<FeatureRow>(
         `SELECT feature, ${AGG} FROM ai_usage
          WHERE user_id = $1 AND created_at >= $2
          GROUP BY feature ORDER BY cost_micros DESC LIMIT 20`,
-        [user.id, since]
+        [scope.dataId, since]
       ),
       query<ProviderRow>(
         `SELECT provider, model, ${AGG} FROM ai_usage
          WHERE user_id = $1 AND created_at >= $2
          GROUP BY provider, model ORDER BY cost_micros DESC LIMIT 20`,
-        [user.id, since]
+        [scope.dataId, since]
       ),
       query<DayRow>(
         `SELECT to_char(created_at, 'YYYY-MM-DD') AS day, COUNT(*) AS calls,
                 COALESCE(SUM(cost_micros), 0) AS cost_micros
          FROM ai_usage WHERE user_id = $1 AND created_at >= $2
          GROUP BY 1 ORDER BY 1 ASC LIMIT 31`,
-        [user.id, since30]
+        [scope.dataId, since30]
       ),
-      getBudget(user.id),
+      getBudget(scope.dataId),
     ]);
 
     // Dense 30-day series so the bar strip always has 30 slots.

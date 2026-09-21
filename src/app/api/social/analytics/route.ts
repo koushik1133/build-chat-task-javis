@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 
 type PostRow = {
@@ -14,10 +14,10 @@ type PostRow = {
  * Returns simulated engagement analytics per post and per platform.
  */
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const userId = user.id;
+  let scope;
+  try { scope = await requireScope({ area: "social", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const userId = scope.dataId;
 
   const posts = await query<PostRow>(
     "SELECT id, platform, status, published_at FROM social_posts WHERE user_id = $1 ORDER BY created_at ASC",

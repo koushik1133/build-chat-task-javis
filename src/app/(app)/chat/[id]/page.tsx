@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope } from "@/lib/auth/scope";
 import { queryOne } from "@/lib/dsql";
 import { getMessages } from "@/lib/dynamodb";
 import { ChatWindow } from "@/components/chat-window";
@@ -11,9 +11,9 @@ export default async function ChatByIdPage({
 }) {
   const { id } = await params;
 
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
+    scope = await requireScope({ area: "knowledge" });
   } catch {
     return null;
   }
@@ -21,7 +21,7 @@ export default async function ChatByIdPage({
   // Verify chat ownership via Aurora DSQL
   const chat = await queryOne(
     "SELECT id FROM chats WHERE id = $1 AND user_id = $2",
-    [id, user.id]
+    [id, scope.dataId]
   );
   if (!chat) notFound();
 

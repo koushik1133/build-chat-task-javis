@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { syncAllForUser, defaultRange } from "@/lib/ads/sync";
 
 export const runtime = "nodejs";
@@ -12,9 +12,9 @@ const BodySchema = z.object({
 
 /** POST /api/ads/sync — refresh every connected ad account for the caller. */
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "ads", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const raw = await req.json().catch(() => ({}));
   const parsed = BodySchema.safeParse(raw ?? {});
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   }
 
   const { since, until } = defaultRange(parsed.data.days ?? 30);
-  const results = await syncAllForUser(user.id, since, until);
+  const results = await syncAllForUser(scope.dataId, since, until);
 
   const synced = results.filter((r) => r.ok).length;
   const failed = results.filter((r) => !r.ok);

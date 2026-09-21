@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from '@/lib/dsql';
 import { complete } from '@/lib/llm';
 import { llmNotConfiguredResponse } from '@/lib/llm-response';
@@ -7,11 +7,11 @@ import { parseModelJson } from '@/lib/model-json';
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "knowledge", edit: true });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const rawBody = await req.json().catch(() => null);
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
         const result = await query(
           `INSERT INTO realestate_properties (user_id, address, city, state, property_type, price, bedrooms, bathrooms, sqft, status) 
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-          [user.id, address, city, state, property_type, price, bedrooms, bathrooms, sqft, status]
+          [scope.dataId, address, city, state, property_type, price, bedrooms, bathrooms, sqft, status]
         );
         return NextResponse.json({ property: result[0] });
       }
@@ -94,11 +94,11 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let scope;
+    try {
+      scope = await requireScope({ area: "knowledge", edit: false });
+    } catch (err) {
+      return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -108,7 +108,7 @@ export async function GET(req: Request) {
       try {
         const properties = await query(
           'SELECT * FROM realestate_properties WHERE user_id = $1 ORDER BY created_at DESC',
-          [user.id]
+          [scope.dataId]
         );
         return NextResponse.json({ properties });
       } catch (e) {

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 import { randomUUID } from "crypto";
 
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const userId = user.id;
+  let scope;
+  try { scope = await requireScope({ area: "crm", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const userId = scope.dataId;
 
   const clients = await query(
     "SELECT * FROM agency_clients WHERE user_id = $1 ORDER BY created_at DESC",
@@ -17,10 +17,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const userId = user.id;
+  let scope;
+  try { scope = await requireScope({ area: "crm", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const userId = scope.dataId;
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -44,10 +44,10 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const userId = user.id;
+  let scope;
+  try { scope = await requireScope({ area: "crm", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const userId = scope.dataId;
 
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });

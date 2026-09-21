@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { decryptSecret } from "@/lib/secure-store";
 import { parseConversation, saveConversation, type ConversationTurn } from "@/lib/twilio-webhook";
 import type { InboundChannel } from "@/lib/receptionist/inbound-agent";
 
 export async function GET() {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "messaging", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   try {
@@ -20,7 +20,7 @@ export async function GET() {
        FROM messaging_conversations
        WHERE user_id = $1
        ORDER BY updated_at DESC`,
-      [user.id]
+      [scope.dataId]
     );
     return NextResponse.json({ conversations }, { status: 200 });
   } catch (err) {
@@ -68,11 +68,11 @@ async function sendViaTwilio(creds: TwilioCreds, channel: InboundChannel, to: st
 
 /** Append a human-authored reply to a thread and send it when Twilio is configured. */
 export async function POST(req: NextRequest) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "messaging", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = postSchema.safeParse(await req.json().catch(() => null));
@@ -83,13 +83,13 @@ export async function POST(req: NextRequest) {
   try {
     const conv = await queryOne<{ id: string; channel: InboundChannel; from_number: string; messages: string }>(
       `SELECT id, channel, from_number, messages FROM messaging_conversations WHERE id = $1 AND user_id = $2`,
-      [parsed.data.conversationId, user.id]
+      [parsed.data.conversationId, scope.dataId]
     );
     if (!conv) return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
 
     const creds = await queryOne<TwilioCreds>(
       `SELECT twilio_sid, twilio_auth_token, twilio_from_number FROM user_integrations WHERE user_id = $1`,
-      [user.id]
+      [scope.dataId]
     ).catch(() => null);
 
     const canSend =
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
 
     const messages = parseConversation(conv.messages);
     messages.push(turn);
-    const saved = await saveConversation(user.id, conv.from_number, conv.channel, conv.id, messages);
+    const saved = await saveConversation(scope.dataId, conv.from_number, conv.channel, conv.id, messages);
 
     return NextResponse.json({
       ok: true,

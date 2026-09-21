@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LogOut,
@@ -12,6 +12,8 @@ import {
   Plug,
   Sparkles,
   X,
+  Building2,
+  ChevronsUpDown,
 } from "lucide-react";
 import { cn, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,6 +25,7 @@ import { useNavRefreshSignal } from "@/lib/nav/nav-refresh";
 import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 
 type Chat = { id: string; title: string; updated_at: string };
+type OrgOption = { id: string; name: string; slug: string; role: string };
 
 type SidebarProps = {
   userEmail: string;
@@ -41,7 +44,11 @@ export function Sidebar({
   initialChannels = [],
 }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [chats, setChats] = useState<Chat[]>([]);
+  const [orgs, setOrgs] = useState<OrgOption[]>([]);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [switchingOrg, setSwitchingOrg] = useState(false);
   const [channels, setChannels] = useState<ChannelNavItem[]>(initialChannels);
   const [dark, setDark] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -84,6 +91,42 @@ export function Sidebar({
       active = false;
     };
   }, [navSignal]);
+
+  // Workspace switcher: only rendered when the user belongs to more than one org.
+  useEffect(() => {
+    let active = true;
+    fetch("/api/orgs")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!active || !d) return;
+        setOrgs(Array.isArray(d.orgs) ? d.orgs : []);
+        setActiveOrgId(typeof d.activeOrgId === "string" ? d.activeOrgId : null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function switchOrg(orgId: string) {
+    if (!orgId || orgId === activeOrgId || switchingOrg) return;
+    setSwitchingOrg(true);
+    try {
+      const res = await fetch("/api/orgs/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orgId }),
+      });
+      if (res.ok) {
+        setActiveOrgId(orgId);
+        router.refresh();
+      }
+    } catch {
+      // keep the previous workspace selected
+    } finally {
+      setSwitchingOrg(false);
+    }
+  }
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -180,6 +223,27 @@ export function Sidebar({
           </button>
         </div>
       </div>
+
+      {orgs.length > 1 && (
+        <div className="border-b border-border px-3 py-2">
+          <label className="relative flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-within:ring-1 focus-within:ring-primary/40">
+            <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="sr-only">Workspace</span>
+            <select
+              value={activeOrgId ?? ""}
+              disabled={switchingOrg}
+              onChange={(e) => void switchOrg(e.target.value)}
+              className="min-w-0 flex-1 appearance-none truncate bg-transparent pr-5 text-xs font-medium outline-none disabled:opacity-60"
+              aria-label="Switch workspace"
+            >
+              {orgs.map((o) => (
+                <option key={o.id} value={o.id}>{o.name}</option>
+              ))}
+            </select>
+            <ChevronsUpDown className="pointer-events-none absolute right-2.5 h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+          </label>
+        </div>
+      )}
 
       <div className="scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden py-2">
         <NavLinks items={APP_NAV_TOP} />

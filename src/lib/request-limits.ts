@@ -58,24 +58,79 @@ export function sanitiseLeadPayload(
  */
 const buckets = new Map<string, { count: number; resetAt: number }>();
 
+export interface RateLimitOptions {
+  limit: number;
+  windowMs: number;
+}
+
+export interface RateLimitResult {
+  allowed: boolean;
+  remaining: number;
+  /** Epoch ms at which the current window ends. */
+  resetAt: number;
+}
+
+export function rateLimit(key: string, limit: number, windowMs: number): RateLimitResult;
+export function rateLimit(key: string, opts: RateLimitOptions): RateLimitResult;
 export function rateLimit(
   key: string,
-  limit: number,
-  windowMs: number
-): { allowed: boolean; remaining: number } {
+  limitOrOpts: number | RateLimitOptions,
+  windowMsArg?: number
+): RateLimitResult {
+  const limit = typeof limitOrOpts === "number" ? limitOrOpts : limitOrOpts.limit;
+  const windowMs = typeof limitOrOpts === "number" ? (windowMsArg ?? 60_000) : limitOrOpts.windowMs;
   const now = Date.now();
   const bucket = buckets.get(key);
 
   if (!bucket || now >= bucket.resetAt) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
+    const resetAt = now + windowMs;
+    buckets.set(key, { count: 1, resetAt });
     // Opportunistically drop expired buckets so the map cannot grow forever.
     if (buckets.size > 5_000) {
       for (const [k, v] of buckets) if (now >= v.resetAt) buckets.delete(k);
     }
-    return { allowed: true, remaining: limit - 1 };
+    return { allowed: true, remaining: limit - 1, resetAt };
   }
 
-  if (bucket.count >= limit) return { allowed: false, remaining: 0 };
+  if (bucket.count >= limit) return { allowed: false, remaining: 0, resetAt: bucket.resetAt };
   bucket.count++;
-  return { allowed: true, remaining: limit - bucket.count };
+  return { allowed: true, remaining: limit - bucket.count, resetAt: bucket.resetAt };
+}
+
+/** Test hook: clear every bucket. */
+export function resetRateLimits(): void {
+  buckets.clear();
+}
+
+/**
+ * Apply several limits at once (e.g. 5/hour AND 20/day). Every bucket is
+ * consumed so a burst counts against each window.
+ */
+export function rateLimitAll(
+  keyPrefix: string,
+  limits: Array<RateLimitOptions & { name: string }>
+): RateLimitResult {
+  let worst: RateLimitResult = { allowed: true, remaining: Number.MAX_SAFE_INTEGER, resetAt: 0 };
+  for (const l of limits) {
+    const r = rateLimit(`${keyPrefix}:${l.name}`, l);
+    if (!r.allowed) return r;
+    if (r.remaining < worst.remaining) worst = r;
+  }
+  return worst;
+}
+
+/** Best-effort caller IP for rate-limit keys (trusts the first forwarded hop). */
+export function clientIp(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0].trim() || "unknown";
+  return req.headers.get("x-real-ip")?.trim() || "unknown";
+}
+
+/** Standard auth-endpoint limits: 5/hour and 20/day per IP. */
+export function authRateLimit(name: string, req: Request): RateLimitResult {
+  const ip = clientIp(req);
+  return rateLimitAll(`auth:${name}:${ip}`, [
+    { name: "hour", limit: 5, windowMs: 60 * 60 * 1000 },
+    { name: "day", limit: 20, windowMs: 24 * 60 * 60 * 1000 },
+  ]);
 }

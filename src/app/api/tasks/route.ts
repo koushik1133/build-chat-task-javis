@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 
 export async function GET() {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "tasks", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const tasks = await query(
@@ -18,7 +18,7 @@ export async function GET() {
      WHERE user_id = $1
      ORDER BY created_at DESC
      LIMIT 100`,
-    [user.id]
+    [scope.dataId]
   ).catch((err) => {
     console.error("[tasks] list failed:", err);
     return [];
@@ -34,11 +34,11 @@ const Patch = z.object({
 });
 
 export async function PATCH(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "tasks", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = Patch.safeParse(await req.json().catch(() => null));
@@ -52,7 +52,7 @@ export async function PATCH(req: Request) {
   if (title !== undefined) { sets.push(`title = $${i++}`); vals.push(title); }
   if (sets.length === 0) return NextResponse.json({ ok: true });
 
-  vals.push(id, user.id);
+  vals.push(id, scope.dataId);
   await query(
     `UPDATE tasks SET ${sets.join(", ")} WHERE id = $${i++} AND user_id = $${i}`,
     vals
@@ -62,27 +62,27 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "tasks", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const rawBody = await req.json().catch(() => null);
   if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const { id } = rawBody;
-  await query("DELETE FROM tasks WHERE id = $1 AND user_id = $2", [id, user.id]);
+  await query("DELETE FROM tasks WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
   return NextResponse.json({ ok: true });
 }
 
 const Create = z.object({ title: z.string().min(1).max(200) });
 
 export async function POST(req: Request) {
-  let user;
+  let scope;
   try {
-    ({ user } = await requireUser());
-  } catch {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    scope = await requireScope({ area: "tasks", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = Create.safeParse(await req.json().catch(() => null));
@@ -92,10 +92,10 @@ export async function POST(req: Request) {
     `INSERT INTO tasks (user_id, title)
      VALUES ($1, $2)
      RETURNING id, title, done, created_at`,
-    [user.id, parsed.data.title]
+    [scope.dataId, parsed.data.title]
   );
 
-  if (task) void emitEvent(user.id, { type: "task.created", entity: "task", entityId: String((task as { id: string }).id), data: { title: parsed.data.title } });
+  if (task) void emitEvent(scope.dataId, { type: "task.created", entity: "task", entityId: String((task as { id: string }).id), data: { title: parsed.data.title } });
 
   return NextResponse.json({ task });
 }

@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "settings", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const profile = await queryOne(
     "SELECT * FROM business_profile WHERE user_id = $1",
-    [user.id]
+    [scope.dataId]
   ).catch(() => null);
   return NextResponse.json({ profile });
 }
 
 export async function POST(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "settings", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const body = await req.json();
   const {
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
          company_name=$2, industry=$3, stage=$4, team_size=$5, geography=$6,
          product_desc=$7, target_market=$8, challenge=$9, revenue_range=$10,
          modules=$11, completed=true`,
-      [user.id, company_name, industry, stage, team_size, geography ?? "",
+      [scope.dataId, company_name, industry, stage, team_size, geography ?? "",
        product_desc ?? "", target_market ?? "", challenge ?? "",
        revenue_range ?? "", JSON.stringify(modules ?? [])]
     );
@@ -48,13 +48,13 @@ export async function POST(req: Request) {
     const template = pickTemplate(industry, stage);
     const existing = await queryOne(
       "SELECT id FROM board_configs WHERE user_id = $1",
-      [user.id]
+      [scope.dataId]
     ).catch(() => null);
     if (!existing) {
       await query(
         `INSERT INTO board_configs (user_id, name, template, columns, card_fields)
          VALUES ($1, $2, $3, $4, $5)`,
-        [user.id, `${company_name} Board`, template.id,
+        [scope.dataId, `${company_name} Board`, template.id,
          JSON.stringify(template.columns),
          JSON.stringify(["priority", "due_date", "tags"])]
       ).catch(() => null);

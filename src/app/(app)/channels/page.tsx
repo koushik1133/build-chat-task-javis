@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerSession } from "@/lib/supabase/server";
+import { resolveDataId } from "@/lib/auth/session-scope";
 import { PageContainer } from "@/components/page-container";
 import { buildChannelNav } from "@/lib/nav/channel-nav";
 import { PAGE_CHANNELS, iconFor, channelHref } from "@/lib/channels/registry";
@@ -14,7 +15,7 @@ export default async function ChannelsIndexPage() {
   const session = await getServerSession();
   if (!session) redirect("/login?next=%2Fchannels");
 
-  const connected = new Set((await buildChannelNav(session.user.id)).map((c) => c.id));
+  const connected = new Set((await buildChannelNav(await resolveDataId(session.user.id))).map((c) => c.id));
 
   return (
     <PageContainer

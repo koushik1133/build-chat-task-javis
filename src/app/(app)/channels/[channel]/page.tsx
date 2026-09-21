@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "@/lib/supabase/server";
+import { resolveDataId } from "@/lib/auth/session-scope";
 import { PageContainer } from "@/components/page-container";
 import { PostCard } from "@/components/social/post-card";
 import { loadChannelSnapshot } from "@/lib/channels/channel-data";
@@ -27,7 +28,7 @@ export default async function ChannelPage({
   const session = await getServerSession();
   if (!session) redirect(`/login?next=${encodeURIComponent(`/channels/${channelId}`)}`);
 
-  const snapshot = await loadChannelSnapshot(session.user.id, channelId);
+  const snapshot = await loadChannelSnapshot(await resolveDataId(session.user.id), channelId);
   if (!snapshot) notFound();
 
   const { channel, accounts, posts, counts } = snapshot;

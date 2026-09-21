@@ -11,6 +11,8 @@ type Notification = {
   body: string | null;
   read: boolean;
   created_at: string;
+  /** "outbox" rows come from notification_outbox (in_app channel). */
+  source?: "outbox";
 };
 
 export const NOTIFICATIONS_REFRESH = "javis:notifications-refresh";
@@ -64,11 +66,17 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
   const refresh = useCallback(async (openPanel = false) => {
     setLoading(true);
     try {
-      const res = await fetch("/api/notifications", { cache: "no-store" });
+      const [res, outboxRes] = await Promise.all([
+        fetch("/api/notifications", { cache: "no-store" }),
+        fetch("/api/notifications/outbox?unread=1", { cache: "no-store" }).catch(() => null),
+      ]);
       const d = await res.json();
-      const list: Notification[] = d.notifications ?? [];
+      const o = outboxRes && outboxRes.ok ? await outboxRes.json().catch(() => null) : null;
+      const outboxList: Notification[] = (o?.notifications ?? []).map((n: Notification) => ({ ...n, source: "outbox" as const }));
+      const list: Notification[] = [...outboxList, ...(d.notifications ?? [])]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       setNotifications(list);
-      setUnread(d.unread ?? 0);
+      setUnread((d.unread ?? 0) + (o?.unread ?? 0));
 
       if (!initialLoadRef.current) {
         const fresh = list.filter(n => !seenIdsRef.current.has(n.id));
@@ -135,23 +143,28 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ all: true }),
     });
+    fetch("/api/notifications/outbox", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ all: true, read: true }),
+    }).catch(() => {});
     setNotifications(n => n.map(x => ({ ...x, read: true })));
     setUnread(0);
   }
 
-  function markRead(id: string) {
-    fetch("/api/notifications", {
+  function markRead(id: string, source?: "outbox") {
+    fetch(source === "outbox" ? "/api/notifications/outbox" : "/api/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: [id] }),
-    });
+      body: JSON.stringify({ ids: [id], read: true }),
+    }).catch(() => {});
     setNotifications(n => n.map(x => x.id === id ? { ...x, read: true } : x));
     setUnread(u => Math.max(0, u - 1));
   }
 
   const handleNotifClick = (n: Notification) => {
     if (!n.read) {
-      markRead(n.id);
+      markRead(n.id, n.source);
     }
     const path = inferNotificationPath(n.title, n.body);
     router.push(path);
@@ -208,7 +221,20 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
         <button
           onClick={() => {
             setShowNotifs(v => !v);
-            if (!showNotifs) refresh();
+            if (!showNotifs) {
+              refresh();
+              // Outbox (in-app) rows count as read once the panel is opened.
+              const outboxUnread = notifications.filter(n => n.source === "outbox" && !n.read);
+              if (outboxUnread.length > 0) {
+                fetch("/api/notifications/outbox", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ ids: outboxUnread.map(n => n.id), read: true }),
+                }).catch(() => {});
+                setNotifications(prev => prev.map(n => n.source === "outbox" ? { ...n, read: true } : n));
+                setUnread(u => Math.max(0, u - outboxUnread.length));
+              }
+            }
           }}
           className={cn(
             "flex items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors relative",

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 
 const STATUSES = new Set(["pending", "approved", "rejected", "expired"]);
@@ -20,20 +20,20 @@ async function expireStale(userId: string) {
 }
 
 export async function GET(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "agents", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const url = new URL(req.url);
   const status = url.searchParams.get("status") ?? "pending";
   if (!STATUSES.has(status)) return NextResponse.json({ error: "invalid status" }, { status: 400 });
 
-  await expireStale(user.id);
+  await expireStale(scope.dataId);
 
   if (url.searchParams.get("count") === "1") {
     const row = await queryOne<{ n: string }>(
       `SELECT COUNT(*)::text AS n FROM approvals WHERE user_id = $1 AND status = $2`,
-      [user.id, status]
+      [scope.dataId, status]
     ).catch(() => null);
     return NextResponse.json({ count: Number(row?.n ?? 0) });
   }
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
      LEFT JOIN agents ag ON ag.id::text = a.agent_id
      WHERE a.user_id = $1 AND a.status = $2
      ORDER BY a.created_at DESC LIMIT 100`,
-    [user.id, status]
+    [scope.dataId, status]
   ).catch(() => null);
   if (!approvals) return NextResponse.json({ error: "failed to load approvals" }, { status: 500 });
   return NextResponse.json({ approvals });

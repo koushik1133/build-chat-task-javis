@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
+import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import {
   getUserIntegrations,
   toPublicView,
@@ -7,18 +7,18 @@ import {
 } from "@/lib/user-integrations";
 
 export async function GET() {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "settings", edit: false }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const row = await getUserIntegrations(user.id);
+  const row = await getUserIntegrations(scope.dataId);
   return NextResponse.json({ integrations: toPublicView(row) });
 }
 
 export async function PATCH(req: Request) {
-  let user;
-  try { ({ user } = await requireUser()); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  let scope;
+  try { scope = await requireScope({ area: "settings", edit: true }); }
+  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
   const body: unknown = await req.json().catch(() => null);
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -30,7 +30,7 @@ export async function PATCH(req: Request) {
   const str = (v: unknown) => (typeof v === "string" ? v : undefined);
   const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
 
-  const row = await upsertUserIntegrations(user.id, {
+  const row = await upsertUserIntegrations(scope.dataId, {
     slack_webhook_url: str(b.slack_webhook_url),
     slack_channel_name: str(b.slack_channel_name),
     email_from_name: str(b.email_from_name),
