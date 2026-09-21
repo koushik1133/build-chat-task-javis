@@ -771,3 +771,60 @@ CREATE TABLE IF NOT EXISTS playbook_settings (
   updated_at  TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (user_id, playbook_id)
 );
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PHASE 2 — organizations, roles, audit, outbox, money, portal, booking
+-- Scoping model: every organization has an owner_user_id. Existing tables stay
+-- keyed by user_id; a member of an org reads/writes rows where
+-- user_id = organizations.owner_user_id (see src/lib/auth/scope.ts).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── organizations ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS organizations (
+  id             TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  slug           TEXT NOT NULL,
+  owner_user_id  TEXT NOT NULL,
+  settings       TEXT,                -- JSON: branding, currency, locale, timezone
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_organizations_slug ON organizations (slug);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_organizations_owner ON organizations (owner_user_id);
+
+-- ── memberships: users ↔ organizations with a role ───────────────────────────
+CREATE TABLE IF NOT EXISTS memberships (
+  id                TEXT PRIMARY KEY,
+  org_id            TEXT NOT NULL,
+  user_id           TEXT,                       -- NULL until an invite is accepted
+  role              TEXT NOT NULL DEFAULT 'member',  -- owner|admin|manager|member|viewer
+  status            TEXT NOT NULL DEFAULT 'active',  -- active|invited|removed
+  invited_email     TEXT,
+  invite_token_hash TEXT,
+  invited_by        TEXT,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  accepted_at       TIMESTAMPTZ,
+  updated_at        TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_memberships_org ON memberships (org_id, status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_memberships_user ON memberships (user_id, status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_memberships_invite ON memberships (invite_token_hash);
+
+-- ── role_area_overrides: per-org customisation of the role × area matrix ─────
+CREATE TABLE IF NOT EXISTS role_area_overrides (
+  org_id     TEXT NOT NULL,
+  role       TEXT NOT NULL,
+  area       TEXT NOT NULL,
+  can_view   BOOLEAN DEFAULT TRUE,
+  can_edit   BOOLEAN DEFAULT FALSE,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (org_id, role, area)
+);
+
+-- ==== PHASE 2 LANE B: audit + soft delete + outbox ====
+
+-- ==== PHASE 2 LANE C: payments, quotes, invoices ====
+
+-- ==== PHASE 2 LANE D: calendar, booking, client portal ====
+
+-- ==== PHASE 2 LANE E: security ====
