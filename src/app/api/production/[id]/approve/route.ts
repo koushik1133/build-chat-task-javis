@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
-import { queryOne } from "@/lib/dsql";
+import { randomUUID } from "crypto";
+import { query, queryOne } from "@/lib/dsql";
+import { emitEvent } from "@/lib/events/bus";
 import { nextColumn, shouldFireAutomations } from "@/lib/production-board";
 import {
   getUserBoardColumns,
@@ -47,6 +49,19 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     to: next.label,
     from_id: current.id,
     to_id: next.id,
+  });
+
+  // Mirror the decision into the unified approvals inbox (history only).
+  await query(
+    `INSERT INTO approvals (id, user_id, run_id, agent_id, tool_name, input, preview, status, decided_by, decided_at)
+     VALUES ($1, $2, NULL, NULL, 'production.card', $3, $4, 'approved', $2, NOW())`,
+    [randomUUID(), user.id, JSON.stringify({ card_id: id, from: current.id, to: next.id }), task.title]
+  ).catch((err) => console.error("[production] approvals mirror failed", err));
+  void emitEvent(user.id, {
+    type: "production.card.approved",
+    entity: "production_task",
+    entityId: id,
+    data: { from: current.id, to: next.id, title: task.title },
   });
 
   let fired: { id: string; name: string; action: string }[] = [];

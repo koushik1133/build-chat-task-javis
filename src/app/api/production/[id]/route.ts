@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { query, queryOne } from "@/lib/dsql";
+import { emitEvent } from "@/lib/events/bus";
 import { validateMove, shouldFireAutomations, colById } from "@/lib/production-board";
 import {
   getUserBoardColumns,
@@ -68,6 +69,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     await logProductionActivity(user.id, id, "moved", {
       from: fromCol?.label ?? existing.status,
       to: toCol?.label ?? newStatus,
+    });
+    void emitEvent(user.id, {
+      type: "production.card.moved",
+      entity: "production_task",
+      entityId: id,
+      data: { from: existing.status, to: newStatus },
     });
 
     if (

@@ -5,11 +5,14 @@ import { useRouter } from "next/navigation";
 import {
   MessageSquare, Wand2, FileText, Github, ListTodo,
   BarChart2, Briefcase, Bot, Zap, Kanban,
-  ArrowRight, Search, X,
+  ArrowRight, Search, X, Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const OPEN_COPILOT = "__open-copilot__";
+
 const COMMANDS = [
+  { label: "Ask copilot about this page", category: "ACTIONS", href: OPEN_COPILOT, icon: Sparkles },
   { label: "New Chat", category: "ACTIONS", href: "/chat", icon: MessageSquare },
   { label: "Launch AI Agent", category: "ACTIONS", href: "/agents", icon: Bot },
   { label: "New Strategy Proposal", category: "ACTIONS", href: "/strategy", icon: Briefcase },
@@ -43,7 +46,11 @@ export function CommandPalette() {
 
   const go = useCallback(
     (href: string) => {
-      router.push(href);
+      if (href === OPEN_COPILOT) {
+        window.dispatchEvent(new CustomEvent("javis:open-copilot"));
+      } else {
+        router.push(href);
+      }
       close();
     },
     [router, close]

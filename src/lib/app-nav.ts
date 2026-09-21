@@ -25,6 +25,9 @@ import {
   Globe,
   Lightbulb,
   Megaphone,
+  CheckSquare,
+  Gauge,
+  KeyRound,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -92,6 +95,9 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/agents", label: "AI Agents", icon: Bot },
       { href: "/agents/swarms", label: "Agent Swarms", icon: Network },
       { href: "/automations", label: "Automations", icon: Zap },
+      { href: "/approvals", label: "Approvals", icon: CheckSquare },
+      { href: "/settings/ai", label: "AI Settings", icon: Gauge },
+      { href: "/settings/api-keys", label: "API Keys", icon: KeyRound },
     ],
   },
   {

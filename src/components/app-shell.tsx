@@ -8,6 +8,7 @@ import { GlobalNotificationBell } from "@/components/global-notification-bell";
 import { KERNELHUB_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import { ProductTour } from "@/components/product-tour";
+import { CopilotDrawer } from "@/components/copilot-drawer";
 
 export function AppShell({
   userEmail,
@@ -79,6 +80,7 @@ export function AppShell({
         </main>
         <GlobalNotificationBell />
         <ProductTour />
+        <CopilotDrawer />
       </div>
     </div>
   );

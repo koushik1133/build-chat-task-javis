@@ -762,3 +762,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 CREATE INDEX ASYNC IF NOT EXISTS idx_api_keys_hash ON api_keys (key_hash);
 CREATE INDEX ASYNC IF NOT EXISTS idx_api_keys_user ON api_keys (user_id);
+
+-- ── playbook_settings: per-user enable/disable of proactive playbooks ────────
+CREATE TABLE IF NOT EXISTS playbook_settings (
+  user_id     TEXT NOT NULL,
+  playbook_id TEXT NOT NULL,
+  enabled     BOOLEAN DEFAULT TRUE,
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, playbook_id)
+);

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { query, queryOne } from "@/lib/dsql";
 import { publishPost, isPublishingConfigured } from "@/lib/social/upload-post";
+import { emitEvent } from "@/lib/events/bus";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -91,6 +92,7 @@ export async function POST() {
         [post.id, result.postId ?? null, user.id]
       );
       published.push(post.id);
+      void emitEvent(user.id, { type: "social.post.published", entity: "social_post", entityId: post.id, data: { platform: post.platform, platformPostId: result.postId ?? null } });
     } else {
       const message = result.error ?? "Unknown publishing error";
       await query(
@@ -100,6 +102,7 @@ export async function POST() {
         [post.id, message.slice(0, 500), user.id]
       );
       failed.push({ id: post.id, error: message });
+      void emitEvent(user.id, { type: "social.post.failed", entity: "social_post", entityId: post.id, data: { platform: post.platform, error: message.slice(0, 500) } });
     }
   }
 

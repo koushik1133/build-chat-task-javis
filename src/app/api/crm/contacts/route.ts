@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/dsql";
+import { query, queryOne } from "@/lib/dsql";
 import { createClient } from "@/lib/supabase/server";
+import { emitEvent } from "@/lib/events/bus";
 
 /**
  * Normalise a tags value into a flat string[] so it is JSON-encoded exactly
@@ -80,6 +81,7 @@ export async function POST(req: NextRequest) {
        RETURNING *`,
       [user.id, domain, full_name.trim(), email, phone, company, role, JSON.stringify(normaliseTags(tags)), lifecycle, notes, deal_value]
     );
+    if (rows[0]) void emitEvent(user.id, { type: "crm.contact.created", entity: "crm_contact", entityId: String((rows[0] as { id: string }).id), data: { lifecycle } });
     return NextResponse.json({ contact: rows[0] }, { status: 201 });
   } catch (err: unknown) {
     console.error("[crm/contacts] error:", err);
@@ -111,11 +113,16 @@ export async function PATCH(req: NextRequest) {
 
     if (!fields.length) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
 
+    const prevLifecycle = typeof updates.lifecycle === "string"
+      ? (await queryOne<{ lifecycle: string }>(`SELECT lifecycle FROM crm_contacts WHERE id = $1 AND user_id = $2`, [id, user.id]).catch(() => null))?.lifecycle ?? null
+      : null;
+
     fields.push(`updated_at = now()`);
     values.push(id, user.id);
 
     const sql = `UPDATE crm_contacts SET ${fields.join(", ")} WHERE id = $${values.length - 1} AND user_id = $${values.length} RETURNING *`;
     const rows = await query(sql, values);
+    if (rows[0] && prevLifecycle !== null && prevLifecycle !== updates.lifecycle) void emitEvent(user.id, { type: "crm.contact.stage_changed", entity: "crm_contact", entityId: String(id), data: { from: prevLifecycle, to: updates.lifecycle } });
     return NextResponse.json({ contact: rows[0] });
   } catch (err: unknown) {
     console.error("[crm/contacts] error:", err);

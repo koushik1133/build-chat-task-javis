@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Plus, Search, Bot, Play, Pause, Trash2, CheckCircle2, Loader2,
-  Sparkles, Pencil, ChevronLeft, ChevronRight,
+  Sparkles, Pencil, ChevronLeft, ChevronRight, Zap, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dispatchNotificationRefresh } from "@/components/notification-bell";
@@ -29,6 +29,34 @@ type Agent = {
   created_at: string;
   system_prompt?: string | null;
   template_id?: string | null;
+  autonomy_level?: AutonomyLevel | null;
+};
+
+type AutonomyLevel = "draft" | "approve" | "auto";
+
+const AUTONOMY_OPTIONS: { id: AutonomyLevel; label: string; hint: string }[] = [
+  { id: "draft", label: "Draft", hint: "Never acts — every write is queued for you" },
+  { id: "approve", label: "Approve", hint: "Pauses for approval on sends/writes" },
+  { id: "auto", label: "Auto", hint: "Runs end-to-end without asking" },
+];
+
+type TriggerSummary = { id: string; kind: string; cron_expr?: string | null; event_type?: string | null; enabled?: boolean | null };
+
+type PlaybookRun = { id: string; entityId: string | null; runId: string | null; status: string; createdAt: string };
+type Playbook = {
+  id: string;
+  name: string;
+  description: string;
+  cooldownHours: number;
+  defaultTools: string[];
+  enabled: boolean;
+  recentRuns: PlaybookRun[];
+};
+
+const RUN_STATUS_STYLES: Record<string, string> = {
+  done: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400",
+  failed: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400",
+  awaiting_approval: "bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-400",
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -79,12 +107,138 @@ export default function AgentsPage() {
   const [correctionText, setCorrectionText] = useState("");
   const [savingCorrection, setSavingCorrection] = useState(false);
 
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
+  const [playbooksLoading, setPlaybooksLoading] = useState(true);
+  const [playbooksError, setPlaybooksError] = useState<string | null>(null);
+  const [playbookBusy, setPlaybookBusy] = useState<string | null>(null);
+  const [playbookNotice, setPlaybookNotice] = useState<string | null>(null);
+  /** agentId -> triggers; undefined = not loaded, [] = none or route missing */
+  const [triggers, setTriggers] = useState<Record<string, TriggerSummary[]>>({});
+  const [autonomySaving, setAutonomySaving] = useState<string | null>(null);
+
+  const loadPlaybooks = useCallback(async () => {
+    setPlaybooksLoading(true);
+    setPlaybooksError(null);
+    try {
+      const res = await fetch("/api/agents/playbooks", { cache: "no-store" });
+      if (!res.ok) throw new Error(`Failed to load playbooks (${res.status})`);
+      const d = await res.json();
+      setPlaybooks(d.playbooks ?? []);
+    } catch (err) {
+      setPlaybooksError(err instanceof Error ? err.message : "Failed to load playbooks");
+    } finally {
+      setPlaybooksLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetch("/api/agents").then(r => r.json()).then(d => setAgents(d.agents ?? [])).catch(() => {});
     fetch("/api/agents/runs").then(r => r.json()).then(d => setRuns(d.runs ?? [])).catch(() => {});
     fetch("/api/agents/templates").then(r => r.json()).then(d => setTemplates(d.templates ?? [])).catch(() => {});
     fetch("/api/agents/corrections").then(r => r.json()).then(d => setCorrections(d.corrections ?? [])).catch(() => {});
-  }, []);
+    loadPlaybooks();
+  }, [loadPlaybooks]);
+
+  // Triggers route is built by another lane; a 404 simply means "no summary yet".
+  useEffect(() => {
+    const missing = agents.filter(a => triggers[a.id] === undefined);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(missing.map(async (a) => {
+        try {
+          const res = await fetch(`/api/agents/${a.id}/triggers`, { cache: "no-store" });
+          const none: TriggerSummary[] = [];
+          if (!res.ok) return [a.id, none] as const;
+          const d = await res.json();
+          const list: TriggerSummary[] = Array.isArray(d.triggers) ? d.triggers : Array.isArray(d) ? d : none;
+          return [a.id, list] as const;
+        } catch {
+          const none: TriggerSummary[] = [];
+          return [a.id, none] as const;
+        }
+      }));
+      if (cancelled) return;
+      setTriggers(prev => {
+        const next = { ...prev };
+        for (const [id, list] of entries) next[id] = list;
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [agents, triggers]);
+
+  async function setAutonomy(agent: Agent, level: AutonomyLevel) {
+    const previous = agent.autonomy_level ?? "approve";
+    setAutonomySaving(agent.id);
+    setAgents(a => a.map(ag => ag.id === agent.id ? { ...ag, autonomy_level: level } : ag));
+    try {
+      const res = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autonomy_level: level }),
+      });
+      if (!res.ok) throw new Error();
+      const d = await res.json().catch(() => null);
+      if (d?.agent && d.agent.autonomy_level !== undefined && d.agent.autonomy_level !== level) {
+        // Server didn't persist the field (route may not support it yet); reflect what it has.
+        setAgents(a => a.map(ag => ag.id === agent.id ? { ...ag, autonomy_level: d.agent.autonomy_level ?? previous } : ag));
+      }
+    } catch {
+      setAgents(a => a.map(ag => ag.id === agent.id ? { ...ag, autonomy_level: previous } : ag));
+    } finally {
+      setAutonomySaving(null);
+    }
+  }
+
+  async function togglePlaybook(pb: Playbook) {
+    const next = !pb.enabled;
+    setPlaybooks(list => list.map(p => p.id === pb.id ? { ...p, enabled: next } : p));
+    const res = await fetch("/api/agents/playbooks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: pb.id, enabled: next }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setPlaybooks(list => list.map(p => p.id === pb.id ? { ...p, enabled: pb.enabled } : p));
+      setPlaybookNotice(`Could not ${next ? "enable" : "disable"} ${pb.name}.`);
+    }
+  }
+
+  async function runPlaybookNow(pb: Playbook) {
+    setPlaybookBusy(pb.id);
+    setPlaybookNotice(null);
+    try {
+      const res = await fetch("/api/agents/playbooks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: pb.id }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Run failed (${res.status})`);
+      setPlaybookNotice(d.runId ? `${pb.name}: run queued.` : `${pb.name}: skipped (${d.skipped ?? "nothing to do"}).`);
+      if (d.runId) {
+        loadPlaybooks();
+        fetch("/api/agents").then(r => r.json()).then(x => setAgents(x.agents ?? [])).catch(() => {});
+      }
+    } catch (err) {
+      setPlaybookNotice(err instanceof Error ? err.message : "Run failed");
+    } finally {
+      setPlaybookBusy(null);
+    }
+  }
+
+  function describeTriggers(list: TriggerSummary[] | undefined): string | null {
+    if (!list || list.length === 0) return null;
+    const active = list.filter(t => t.enabled !== false);
+    if (active.length === 0) return "Triggers paused";
+    const parts = active.slice(0, 3).map(t =>
+      t.kind === "schedule" ? `schedule ${t.cron_expr ?? ""}`.trim()
+      : t.kind === "event" ? `on ${t.event_type ?? "event"}`
+      : t.kind
+    );
+    return parts.join(" · ") + (active.length > 3 ? ` +${active.length - 3}` : "");
+  }
 
   function openDeploy() {
     setShowDeploy(true);
@@ -515,9 +669,36 @@ export default function AgentsPage() {
                       {agent.system_prompt}
                     </p>
                   )}
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-4">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
                     <CheckCircle2 className="h-3 w-3 text-primary" />
                     {agent.tasks_completed} tasks completed
+                  </div>
+                  <div className="mb-4 space-y-2">
+                    <div className="flex items-center gap-2 text-xs">
+                      <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <label htmlFor={`autonomy-${agent.id}`} className="text-muted-foreground">Autonomy</label>
+                      <select
+                        id={`autonomy-${agent.id}`}
+                        aria-label={`Autonomy level for ${agent.name}`}
+                        value={agent.autonomy_level ?? "approve"}
+                        disabled={autonomySaving === agent.id}
+                        onChange={e => setAutonomy(agent, e.target.value as AutonomyLevel)}
+                        title={AUTONOMY_OPTIONS.find(o => o.id === (agent.autonomy_level ?? "approve"))?.hint}
+                        className="rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
+                      >
+                        {AUTONOMY_OPTIONS.map(o => (
+                          <option key={o.id} value={o.id}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <Zap className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">
+                        {triggers[agent.id] === undefined
+                          ? "Loading triggers…"
+                          : describeTriggers(triggers[agent.id]) ?? "No triggers — runs on demand"}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -550,6 +731,92 @@ export default function AgentsPage() {
             })}
           </div>
         )}
+
+        {/* Playbooks */}
+        <section className="rounded-xl border border-border bg-card p-5 space-y-3" aria-labelledby="playbooks-heading">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 id="playbooks-heading" className="text-sm font-semibold flex items-center gap-2">
+                <Zap className="h-4 w-4 text-primary" /> Playbooks
+                <InfoTooltip text="Proactive checks that run on their own — stalled deals, unanswered messages, overdue cards — and hand the work to a dedicated agent. Anything risky still stops in Approvals." />
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Always-on detectors. Turn one off to silence it, or run it now to check immediately.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={loadPlaybooks} disabled={playbooksLoading} aria-label="Refresh playbooks">
+              <Loader2 className={`h-3.5 w-3.5 ${playbooksLoading ? "animate-spin" : "opacity-0"}`} />
+            </Button>
+          </div>
+
+          {playbookNotice && (
+            <div role="status" className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
+              {playbookNotice}
+            </div>
+          )}
+
+          {playbooksLoading && playbooks.length === 0 ? (
+            <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading playbooks…
+            </div>
+          ) : playbooksError ? (
+            <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-xs text-destructive flex items-center justify-between gap-3">
+              <span>{playbooksError}</span>
+              <Button size="sm" variant="outline" onClick={loadPlaybooks}>Retry</Button>
+            </div>
+          ) : playbooks.length === 0 ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">No playbooks available.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {playbooks.map(pb => (
+                <div key={pb.id} className={`rounded-lg border p-4 transition-colors ${pb.enabled ? "border-border" : "border-border/60 opacity-70"}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{pb.name}</div>
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{pb.description}</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={pb.enabled}
+                      aria-label={`${pb.enabled ? "Disable" : "Enable"} ${pb.name}`}
+                      onClick={() => togglePlaybook(pb)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${pb.enabled ? "bg-primary" : "bg-secondary"}`}
+                    >
+                      <span className={`inline-block h-4 w-4 rounded-full bg-background shadow transition-transform ${pb.enabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                    </button>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-muted-foreground">Cooldown {pb.cooldownHours}h · {pb.defaultTools.length} tools</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={playbookBusy === pb.id}
+                      onClick={() => runPlaybookNow(pb)}
+                    >
+                      {playbookBusy === pb.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                      Run now
+                    </Button>
+                  </div>
+                  {pb.recentRuns.length > 0 && (
+                    <ul className="mt-3 space-y-1 border-t border-border/60 pt-2" aria-label={`Recent ${pb.name} outcomes`}>
+                      {pb.recentRuns.map(r => (
+                        <li key={r.id} className="flex items-center justify-between gap-2 text-[10px]">
+                          <span className={`rounded-full px-1.5 py-0.5 font-medium capitalize ${RUN_STATUS_STYLES[r.status] ?? "bg-secondary text-muted-foreground"}`}>
+                            {r.status.replace("_", " ")}
+                          </span>
+                          <span className="truncate text-muted-foreground">{r.entityId ? `entity ${r.entityId.slice(0, 8)}…` : "—"}</span>
+                          <span className="shrink-0 text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* Run history */}
         {runs.length > 0 && (

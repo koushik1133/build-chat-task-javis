@@ -1,0 +1,31 @@
+import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/supabase/server";
+import { AgentNotFoundError, getRun, startRun } from "@/lib/agents/runner";
+
+export const runtime = "nodejs";
+
+/** POST /api/agents/runs/:runId/retry — queue a fresh run with the same prompt. */
+export async function POST(_req: Request, ctx: { params: Promise<{ runId: string }> }) {
+  let user;
+  try { ({ user } = await requireUser()); }
+  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const { runId } = await ctx.params;
+
+  const run = await getRun(runId, user.id);
+  if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  try {
+    const newRunId = await startRun(user.id, run.agent_id, {
+      prompt: run.prompt,
+      triggerKind: "manual",
+      triggerRef: run.id,
+      automationId: run.automation_id,
+      workflowName: run.workflow_name ? `${run.workflow_name} (retry)` : "Retry",
+    });
+    return NextResponse.json({ runId: newRunId, retryOf: run.id }, { status: 202 });
+  } catch (err) {
+    if (err instanceof AgentNotFoundError) return NextResponse.json({ error: "agent no longer exists" }, { status: 404 });
+    console.error("[agents/runs/retry] failed:", err);
+    return NextResponse.json({ error: "failed to queue retry" }, { status: 500 });
+  }
+}

@@ -1,4 +1,5 @@
-# Cloud Scheduler job — fires the automation cron every minute
+# Cloud Scheduler jobs — one per cron route, each firing every minute.
+#
 # Deploy with:
 #   gcloud scheduler jobs create http javis-automations \
 #     --schedule="* * * * *" \
@@ -7,6 +8,16 @@
 #     --headers="Authorization=Bearer YOUR_CRON_SECRET" \
 #     --oidc-service-account-email=javis-scheduler@YOUR_PROJECT.iam.gserviceaccount.com \
 #     --location=us-central1
+#
+#   gcloud scheduler jobs create http javis-agents \
+#     --schedule="* * * * *" \
+#     --uri="https://YOUR_CLOUD_RUN_URL/api/cron/agents" \
+#     --http-method=POST \
+#     --headers="Authorization=Bearer YOUR_CRON_SECRET" \
+#     --oidc-service-account-email=javis-scheduler@YOUR_PROJECT.iam.gserviceaccount.com \
+#     --attempt-deadline=60s \
+#     --location=us-central1
+---
 name: javis-automations
 schedule: "* * * * *"
 timeZone: UTC
@@ -14,5 +25,18 @@ target:
   httpTarget:
     uri: "https://YOUR_CLOUD_RUN_URL/api/cron/automations"
     httpMethod: GET
+    headers:
+      Authorization: "Bearer YOUR_CRON_SECRET"
+---
+# Agent worker tick: promotes due schedule triggers, runs playbook detectors
+# and drains the agent_jobs queue for up to ~45s per tick.
+name: javis-agents
+schedule: "* * * * *"
+timeZone: UTC
+attemptDeadline: 60s
+target:
+  httpTarget:
+    uri: "https://YOUR_CLOUD_RUN_URL/api/cron/agents"
+    httpMethod: POST
     headers:
       Authorization: "Bearer YOUR_CRON_SECRET"

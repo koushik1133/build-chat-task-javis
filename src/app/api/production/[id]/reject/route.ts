@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
+import { emitEvent } from "@/lib/events/bus";
 import { getUserBoardColumns, logProductionActivity } from "@/lib/production-server";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -29,6 +31,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   });
 
   await query("DELETE FROM production_tasks WHERE id = $1 AND user_id = $2", [id, user.id]);
+
+  // Mirror the decision into the unified approvals inbox (history only).
+  await query(
+    `INSERT INTO approvals (id, user_id, run_id, agent_id, tool_name, input, preview, status, decided_by, decided_at)
+     VALUES ($1, $2, NULL, NULL, 'production.card', $3, $4, 'rejected', $2, NOW())`,
+    [randomUUID(), user.id, JSON.stringify({ card_id: id, column: current?.id ?? task.status, reason: reason || null }), task.title]
+  ).catch((err) => console.error("[production] approvals mirror failed", err));
+  void emitEvent(user.id, {
+    type: "production.card.rejected",
+    entity: "production_task",
+    entityId: id,
+    data: { column: current?.id ?? task.status, reason: reason || null, title: task.title },
+  });
 
   return NextResponse.json({ ok: true });
 }

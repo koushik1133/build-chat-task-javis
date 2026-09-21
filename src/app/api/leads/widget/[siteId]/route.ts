@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
 import { enrichLead } from "@/lib/lead-enrichment";
+import { emitEvent } from "@/lib/events/bus";
 import { readCappedText, sanitiseLeadPayload, rateLimit } from "@/lib/request-limits";
 
 export const runtime = "nodejs";
@@ -68,6 +69,8 @@ export async function POST(
        RETURNING id`,
       [leadId, siteId, site.user_id, JSON.stringify(data)]
     );
+
+    void emitEvent(site.user_id, { type: "lead.captured", entity: "site_lead", entityId: leadId, data: { siteId, source: "widget" } });
 
     // 3. Auto-enrich in-process (fire-and-forget). The lead is always stored;
     //    only the LLM enrichment is throttled per site.

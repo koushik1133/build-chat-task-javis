@@ -1,29 +1,19 @@
 import { randomUUID } from "crypto";
 import { query } from "@/lib/dsql";
+import { assertBudget } from "@/lib/llm/budgets";
+import { completeWithTools, type CompleteWithToolsOptions } from "@/lib/llm/router";
+import type { RouterMessage } from "@/lib/agents/types";
+
+export { estimateCostMicros } from "@/lib/llm/pricing";
+import { estimateCostMicros } from "@/lib/llm/pricing";
 
 /**
  * Records every model call so usage can be shown, capped and (later) priced
- * per outcome. Cost is estimated from a small per-model price table; unknown
- * models fall back to a conservative default so caps still bite.
+ * per outcome. Cost is estimated from a small per-model price table
+ * (see ./pricing.ts).
  */
 
 export type UsageFeature = "agent" | "copilot" | "chat" | "playbook" | "receptionist" | "generate" | "other";
-
-/** USD per 1M tokens: [input, output]. Kept deliberately small and easy to edit. */
-const PRICES_PER_M: Record<string, [number, number]> = {
-  "llama-3.3-70b-versatile": [0.59, 0.79],
-  "llama-3.1-8b-instant": [0.05, 0.08],
-  "gemini-1.5-flash": [0.075, 0.3],
-  "gemini-2.0-flash": [0.1, 0.4],
-  "gemini-1.5-pro": [1.25, 5.0],
-};
-const DEFAULT_PRICE: [number, number] = [1.0, 3.0];
-
-export function estimateCostMicros(model: string, promptTokens: number, completionTokens: number): number {
-  const [inP, outP] = PRICES_PER_M[model] ?? DEFAULT_PRICE;
-  const usd = (promptTokens / 1e6) * inP + (completionTokens / 1e6) * outP;
-  return Math.round(usd * 1e6);
-}
 
 export interface UsageEvent {
   runId?: string | null;
@@ -47,4 +37,37 @@ export async function recordUsage(userId: string, u: UsageEvent): Promise<number
     console.error("[metering] failed to record usage:", err);
   }
   return cost;
+}
+
+export interface MeteredCompleteOptions extends Omit<CompleteWithToolsOptions, "tools"> {
+  runId?: string | null;
+}
+
+/**
+ * Budget-checked, metered plain completion for non-agent features
+ * (chat, copilot, generate). Throws LlmBudgetExceededError at the cap and
+ * LlmNotConfiguredError when no provider is available.
+ */
+export async function meteredComplete(
+  userId: string,
+  feature: UsageFeature,
+  messages: RouterMessage[],
+  opts: MeteredCompleteOptions = {}
+): Promise<string> {
+  const budget = await assertBudget(userId);
+  const { runId, ...rest } = opts;
+  const res = await completeWithTools(messages, {
+    ...rest,
+    tools: undefined,
+    allowlist: rest.allowlist ?? budget.allowlist,
+  });
+  await recordUsage(userId, {
+    runId: runId ?? null,
+    feature,
+    provider: res.provider,
+    model: res.model,
+    promptTokens: res.promptTokens,
+    completionTokens: res.completionTokens,
+  });
+  return res.content ?? "";
 }

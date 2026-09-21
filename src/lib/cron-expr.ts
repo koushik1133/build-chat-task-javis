@@ -114,10 +114,20 @@ export function nextRun(expr: string | ParsedCron, from: Date, timeZone = "UTC")
   const cursor = new Date(from);
   cursor.setUTCSeconds(0, 0);
   cursor.setUTCMinutes(cursor.getUTCMinutes() + 1);
-  const limit = 366 * 24 * 60;
-  for (let i = 0; i < limit; i++) {
-    if (cronMatches(c, cursor, timeZone)) return new Date(cursor);
-    cursor.setUTCMinutes(cursor.getUTCMinutes() + 1);
+  const end = from.getTime() + 366 * 24 * 60 * 60_000;
+  while (cursor.getTime() <= end) {
+    const t = partsIn(cursor, timeZone);
+    const dayOk = c.dayOfMonth.has(t.day) && c.month.has(t.month) && c.dayOfWeek.has(t.weekday);
+    if (dayOk && c.hour.has(t.hour) && c.minute.has(t.minute)) return new Date(cursor);
+    if (dayOk && c.hour.has(t.hour)) {
+      cursor.setUTCMinutes(cursor.getUTCMinutes() + 1);
+    } else {
+      // Day or hour can't match right now: jump to the next :00/:30 boundary.
+      // Local hour boundaries fall on those marks in every timezone (including
+      // half-hour offsets), so a matching hour's first minute is never skipped.
+      const m = cursor.getUTCMinutes();
+      cursor.setUTCMinutes(m < 30 ? 30 : 60);
+    }
   }
   return null;
 }

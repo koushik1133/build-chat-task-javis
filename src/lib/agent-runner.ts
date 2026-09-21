@@ -1,40 +1,32 @@
 /**
- * Runs an AI agent job via Groq, stores output, and returns for delivery.
+ * Facade over the agent runtime (`@/lib/agents/runner`).
+ *
+ * Automations and the swarm route expect a synchronous "run and give me the
+ * output" call, so `runAgentJob` creates the run and executes it inline. New
+ * code should use `startRun` + the worker instead.
  */
 
-import { query, queryOne } from "@/lib/dsql";
-import { complete, type ChatMessage } from "@/lib/llm";
-import { getDefaultSystemPrompt } from "@/lib/agent-templates";
+import { query } from "@/lib/dsql";
+import {
+  AgentNotFoundError,
+  buildAgentPrompt,
+  executeRun,
+  getRun,
+  loadAgent,
+  startRun,
+  type AgentRow,
+} from "@/lib/agents/runner";
 
-export type AgentRow = {
-  id: string;
-  name: string;
-  role: string;
-  status: string;
-  system_prompt?: string | null;
-};
+export type { AgentRow };
+export { buildAgentPrompt };
 
 export type AgentRunResult = {
   runId: string;
   agent: AgentRow;
   prompt: string;
   output: string;
+  status: "done" | "awaiting_approval" | "failed" | "cancelled";
 };
-
-const DEFAULT_SYSTEM =
-  "You are a helpful business AI agent. Produce a concise, actionable daily brief in plain language with bullet points.";
-
-export function buildAgentPrompt(agent: AgentRow, customPrompt?: string | null): string {
-  if (customPrompt?.trim()) {
-    return customPrompt.trim();
-  }
-  return `Daily scheduled run for ${agent.name} (${agent.role}). Date: ${new Date().toLocaleDateString()}. Provide today's brief.`;
-}
-
-function resolveSystemPrompt(agent: AgentRow): string {
-  if (agent.system_prompt?.trim()) return agent.system_prompt.trim();
-  return getDefaultSystemPrompt(agent.role) || DEFAULT_SYSTEM;
-}
 
 export async function runAgentJob(
   userId: string,
@@ -45,79 +37,49 @@ export async function runAgentJob(
     automationId?: string | null;
   } = {}
 ): Promise<AgentRunResult | null> {
-  const agent = await queryOne<AgentRow>(
-    `SELECT id, name, role, status, system_prompt FROM agents WHERE id = $1 AND user_id = $2`,
-    [agentId, userId]
-  ).catch(() =>
-    queryOne<AgentRow>(
-      `SELECT id, name, role, status FROM agents WHERE id = $1 AND user_id = $2`,
-      [agentId, userId]
-    )
-  );
-
+  const agent = await loadAgent(userId, agentId);
   if (!agent) return null;
 
-  const userPrompt = buildAgentPrompt(agent, opts.prompt);
-  let system = resolveSystemPrompt(agent);
-
-  // Fetch recent corrections for this agent
-  const corrections = await query<{ original_text: string; corrected_text: string }>(
-    `SELECT original_text, corrected_text FROM agent_corrections WHERE user_id = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT 5`,
-    [userId, agentId]
-  ).catch(() => []);
-
-  if (corrections.length > 0) {
-    system += "\n\nCRITICAL FEEDBACK FROM PAST RUNS (DO NOT REPEAT THESE MISTAKES):\n";
-    corrections.forEach((c, i) => {
-      system += `[Correction ${i + 1}]\nInstead of: "${c.original_text}"\nYou MUST do: "${c.corrected_text}"\n\n`;
+  let runId: string;
+  try {
+    runId = await startRun(userId, agentId, {
+      prompt: opts.prompt,
+      workflowName: opts.workflowName ?? null,
+      automationId: opts.automationId ?? null,
+      triggerKind: opts.automationId ? "automation" : "manual",
+      enqueue: false,
     });
+  } catch (err) {
+    if (err instanceof AgentNotFoundError) return null;
+    throw err;
   }
 
-  const messages: ChatMessage[] = [
-    { role: "system", content: system },
-    { role: "user", content: userPrompt },
-  ];
+  const outcome = await executeRun(runId, "inline");
+  const run = await getRun(runId, userId);
+  const prompt = run?.prompt ?? buildAgentPrompt(agent, opts.prompt);
 
   let output: string;
-  try {
-    output = await complete(messages, { maxTokens: 1200 });
-  } catch (err) {
-    output = `Agent run failed: ${(err as Error).message}`;
+  switch (outcome.status) {
+    case "done":
+      output = outcome.output;
+      break;
+    case "awaiting_approval":
+      output = `Run is paused: "${outcome.toolName}" needs your approval. Open the Approvals inbox to continue.`;
+      break;
+    case "cancelled":
+      output = "Run was cancelled.";
+      break;
+    default:
+      output = `Agent run failed: ${outcome.error}`;
   }
 
-  if (!output.trim()) {
-    output = "Agent completed but returned no content. Try adding a clearer prompt in the automation.";
-  }
-
-  const row = await queryOne<{ id: string }>(
-    `INSERT INTO agent_runs (user_id, agent_id, automation_id, workflow_name, prompt, output)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [
-      userId,
-      agentId,
-      opts.automationId ?? null,
-      opts.workflowName ?? null,
-      userPrompt,
-      output,
-    ]
-  ).catch((dbErr) => {
-    console.error("[agent-runner] failed to log agent_run:", dbErr);
-    return { id: `fallback-run-${crypto.randomUUID()}` };
-  });
-
-  await query(
-    `UPDATE agents SET status = 'active', tasks_completed = tasks_completed + 1 WHERE id = $1`,
-    [agentId]
-  ).catch(() => {});
-
-  if (!row) return null;
-
-  return { runId: row.id, agent, prompt: userPrompt, output };
+  return { runId, agent, prompt, output, status: outcome.status };
 }
 
 export async function getRecentAgentRuns(userId: string, limit = 20) {
   return query(
-    `SELECT r.id, r.agent_id, r.workflow_name, r.prompt, r.output, r.created_at,
+    `SELECT r.id, r.agent_id, r.workflow_name, r.prompt, r.output, r.status, r.trigger_kind,
+            r.tokens_in, r.tokens_out, r.cost_micros, r.error, r.started_at, r.finished_at, r.created_at,
             a.name AS agent_name, a.role AS agent_role
      FROM agent_runs r
      JOIN agents a ON a.id = r.agent_id

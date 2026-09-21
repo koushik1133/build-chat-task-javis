@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
 import { query, queryOne } from "@/lib/dsql";
+import { emitEvent } from "@/lib/events/bus";
 
 export async function GET() {
   let user;
@@ -93,6 +94,8 @@ export async function POST(req: Request) {
      RETURNING id, title, done, created_at`,
     [user.id, parsed.data.title]
   );
+
+  if (task) void emitEvent(user.id, { type: "task.created", entity: "task", entityId: String((task as { id: string }).id), data: { title: parsed.data.title } });
 
   return NextResponse.json({ task });
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
 import { enrichLead } from "@/lib/lead-enrichment";
+import { emitEvent } from "@/lib/events/bus";
 import { readCappedText, sanitiseLeadPayload, rateLimit } from "@/lib/request-limits";
 
 export const runtime = "nodejs";
@@ -62,6 +63,8 @@ export async function POST(
       "INSERT INTO site_leads (site_id, user_id, data) VALUES ($1, $2, $3) RETURNING id",
       [siteId, site.user_id, JSON.stringify(data)]
     );
+
+    if (result?.id) void emitEvent(site.user_id, { type: "lead.captured", entity: "site_lead", entityId: result.id, data: { siteId } });
 
     // Auto-enrich in-process (fire-and-forget). The lead is always stored;
     // only the LLM enrichment is throttled per site.

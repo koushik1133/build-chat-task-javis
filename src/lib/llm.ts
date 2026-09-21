@@ -1,8 +1,14 @@
 import OpenAI from "openai";
+import { completeWithTools, isRetriableLlmError } from "@/lib/llm/router";
+import { availableProviders } from "@/lib/llm/providers";
 
-// Groq only — uses the OpenAI-compatible REST API.
-// Required env var: GROQ_API_KEY
-// Optional: GROQ_MODEL (default: llama-3.3-70b-versatile)
+// Simple facade for plain completions. Failover (Groq → Gemini on network
+// errors, 5xx, timeouts and persistent 429s) lives in src/lib/llm/router.ts.
+// Required env var: GROQ_API_KEY and/or GEMINI_API_KEY
+// Optional: GROQ_MODEL (default: llama-3.3-70b-versatile), GEMINI_MODEL
+
+export { LlmNotConfiguredError, isLlmConfigured } from "@/lib/llm/providers";
+import { LlmNotConfiguredError } from "@/lib/llm/providers";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -10,81 +16,46 @@ export type ChatMessage = {
 };
 
 /**
- * Raised when no model provider is configured. Distinct from a genuine upstream
- * failure so routes can answer 503 with an actionable message instead of a
- * generic 500 that looks like a bug in the app.
+ * Streaming chat. Uses the first available provider; if opening the stream
+ * fails with a retriable error the next provider is tried.
  */
-export class LlmNotConfiguredError extends Error {
-  constructor() {
-    super(
-      "AI features are not configured. Set GROQ_API_KEY or GEMINI_API_KEY in your environment."
-    );
-    this.name = "LlmNotConfiguredError";
-  }
-}
-
-/** True when at least one model provider key is present. */
-export function isLlmConfigured(): boolean {
-  return Boolean(
-    process.env.GROQ_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim()
-  );
-}
-
-function client() {
-  const groqKey = process.env.GROQ_API_KEY;
-  const geminiKey = process.env.GEMINI_API_KEY;
-
-  if (!groqKey && !geminiKey) {
-    throw new LlmNotConfiguredError();
-  }
-
-  if (groqKey) {
-    return {
-      openai: new OpenAI({
-        apiKey: groqKey,
-        baseURL: "https://api.groq.com/openai/v1",
-      }),
-      model: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
-    };
-  }
-
-  // Fallback to Gemini
-  return {
-    openai: new OpenAI({
-      apiKey: geminiKey!,
-      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-    }),
-    model: process.env.GEMINI_MODEL ?? "gemini-1.5-flash",
-  };
-}
-
 export async function streamChat(messages: ChatMessage[]) {
-  const { openai, model } = client();
-  return openai.chat.completions.create({
-    model,
-    messages,
-    stream: true,
-    temperature: 0.4,
-  });
+  const providers = availableProviders();
+  if (providers.length === 0) throw new LlmNotConfiguredError();
+
+  let lastError: unknown;
+  for (const p of providers) {
+    const openai = new OpenAI({ apiKey: p.apiKey, baseURL: p.baseURL, maxRetries: 0 });
+    try {
+      return await openai.chat.completions.create({
+        model: p.model,
+        messages,
+        stream: true,
+        temperature: 0.4,
+      });
+    } catch (err) {
+      lastError = err;
+      if (!isRetriableLlmError(err)) throw err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("All LLM providers failed");
 }
 
 export async function completeJson<T>(
   messages: ChatMessage[],
   schemaHint: string
 ): Promise<T | null> {
-  const { openai, model } = client();
-  const res = await openai.chat.completions.create({
-    model,
-    messages: [
+  const res = await completeWithTools(
+    [
       ...messages,
       {
         role: "system",
         content: `Reply with ONLY valid JSON matching: ${schemaHint}. No prose, no code fences.`,
       },
     ],
-    temperature: 0,
-  });
-  const raw = res.choices[0]?.message?.content?.trim() ?? "";
+    { temperature: 0, maxTokens: 1500 }
+  );
+  const raw = res.content?.trim() ?? "";
   const cleaned = raw.replace(/^```(?:json)?\s*|```\s*$/g, "");
   try {
     return JSON.parse(cleaned) as T;
@@ -99,18 +70,12 @@ export async function complete(
 ): Promise<string> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const { openai, model } = client();
-      const res = await openai.chat.completions.create({
-        model,
-        messages,
-        temperature: 0.4,
-        max_tokens: maxTokens,
-      });
-      return res.choices[0]?.message?.content ?? "";
+      const res = await completeWithTools(messages, { maxTokens, temperature: 0.4 });
+      return res.content ?? "";
     } catch (err: unknown) {
       const status = (err as { status?: number }).status;
+      // Every provider was rate limited: back off 15s, 30s, 60s and try again.
       if (status === 429 && attempt < retries) {
-        // Back off: 15s, 30s, 60s
         await new Promise((r) => setTimeout(r, 15_000 * (attempt + 1)));
         continue;
       }

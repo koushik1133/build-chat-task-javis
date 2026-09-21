@@ -1,7 +1,10 @@
 import OpenAI from "openai";
-import { LlmNotConfiguredError } from "@/lib/llm";
 import type { LlmTurnResult, RouterMessage, ToolSpec } from "@/lib/agents/types";
 import { toOpenAiTools, fromOpenAiToolName } from "@/lib/agents/registry";
+import { availableProviders, LlmNotConfiguredError } from "@/lib/llm/providers";
+
+export { availableProviders, describeProviders } from "@/lib/llm/providers";
+export type { ProviderDef, ProviderId, ProviderInfo } from "@/lib/llm/providers";
 
 /**
  * Provider-aware LLM router with tool calling and failover.
@@ -10,39 +13,9 @@ import { toOpenAiTools, fromOpenAiToolName } from "@/lib/agents/registry";
  * survives a short backoff moves to the next provider. Which provider actually
  * served the request is returned so usage can be attributed and metered.
  *
- * `src/lib/llm.ts` remains the simple facade for plain completions; this
- * module is what the agent loop and copilots use.
+ * `src/lib/llm.ts` is the simple facade for plain completions and is built on
+ * top of this module; the agent loop and copilots use it directly.
  */
-
-export interface ProviderDef {
-  id: "groq" | "gemini";
-  apiKey: string;
-  baseURL: string;
-  model: string;
-}
-
-export function availableProviders(): ProviderDef[] {
-  const out: ProviderDef[] = [];
-  const groq = process.env.GROQ_API_KEY?.trim();
-  const gemini = process.env.GEMINI_API_KEY?.trim();
-  if (groq) {
-    out.push({
-      id: "groq",
-      apiKey: groq,
-      baseURL: "https://api.groq.com/openai/v1",
-      model: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
-    });
-  }
-  if (gemini) {
-    out.push({
-      id: "gemini",
-      apiKey: gemini,
-      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-      model: process.env.GEMINI_MODEL ?? "gemini-1.5-flash",
-    });
-  }
-  return out;
-}
 
 export interface CompleteWithToolsOptions {
   tools?: ToolSpec[];
@@ -54,7 +27,8 @@ export interface CompleteWithToolsOptions {
   timeoutMs?: number;
 }
 
-function isRetriable(err: unknown): boolean {
+/** Network errors, timeouts, 5xx and 429 are worth retrying on another provider. */
+export function isRetriableLlmError(err: unknown): boolean {
   const status = (err as { status?: number })?.status;
   if (status === 429 || (typeof status === "number" && status >= 500)) return true;
   const msg = String((err as Error)?.message ?? err).toLowerCase();
@@ -65,6 +39,16 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Providers permitted by an allowlist of provider ids and/or model names. */
+export function selectProviders(allowlist?: string[] | null) {
+  let providers = availableProviders();
+  if (allowlist && allowlist.length > 0) {
+    const allow = new Set(allowlist);
+    providers = providers.filter((p) => allow.has(p.id) || allow.has(p.model));
+  }
+  return providers;
+}
+
 /**
  * One model turn. Returns text and/or tool calls; the caller runs the tools
  * and calls again with `tool` messages appended.
@@ -73,14 +57,12 @@ export async function completeWithTools(
   messages: RouterMessage[],
   opts: CompleteWithToolsOptions = {}
 ): Promise<LlmTurnResult> {
-  let providers = availableProviders();
-  if (opts.allowlist && opts.allowlist.length > 0) {
-    const allow = new Set(opts.allowlist);
-    providers = providers.filter((p) => allow.has(p.id) || allow.has(p.model));
-  }
+  let providers = selectProviders(opts.allowlist);
+  const wantsTools = Boolean(opts.tools && opts.tools.length > 0);
+  if (wantsTools) providers = providers.filter((p) => p.supportsTools);
   if (providers.length === 0) throw new LlmNotConfiguredError();
 
-  const tools = opts.tools && opts.tools.length > 0 ? toOpenAiTools(opts.tools) : undefined;
+  const tools = wantsTools ? toOpenAiTools(opts.tools as ToolSpec[]) : undefined;
   const timeoutMs = opts.timeoutMs ?? 25_000;
   let lastError: unknown;
 
@@ -116,7 +98,7 @@ export async function completeWithTools(
         };
       } catch (err) {
         lastError = err;
-        if (!isRetriable(err)) throw err;
+        if (!isRetriableLlmError(err)) throw err;
         // One short backoff on the same provider (rate limits are usually brief).
         if (attempt === 0 && (err as { status?: number })?.status === 429) {
           await sleep(1500);

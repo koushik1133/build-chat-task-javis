@@ -1,5 +1,7 @@
 /** Pre-built agent templates — system prompts users can customize. */
 
+import type { AutonomyLevel } from "@/lib/agents/types";
+
 export type AgentTemplate = {
   id: string;
   name: string;
@@ -8,6 +10,10 @@ export type AgentTemplate = {
   desc: string;
   system_prompt: string;
   example_tasks: string[];
+  /** Tool allowlist for agents created from this template (omit = all tools). */
+  tools?: string[];
+  /** Default autonomy for agents created from this template. */
+  autonomy_level?: AutonomyLevel;
 };
 
 export const AGENT_TEMPLATES: AgentTemplate[] = [
@@ -28,6 +34,8 @@ Use bullet points. Be practical, not generic.`,
       "Suggest outreach for fleet managers",
       "Daily lead brief for my industry",
     ],
+    tools: ["crm.search_contacts", "crm.create_contact", "leads.list", "comms.draft_email"],
+    autonomy_level: "approve",
   },
   {
     id: "data-analyst",
@@ -46,6 +54,8 @@ Keep it short, bullet-pointed, and decision-focused.`,
       "Which metrics matter for a small manufacturer",
       "Dashboard priorities for this month",
     ],
+    tools: ["crm.search_contacts", "leads.list", "tasks.list", "production.list_cards"],
+    autonomy_level: "auto",
   },
   {
     id: "content-writer",
@@ -64,6 +74,8 @@ Match a professional but friendly tone.`,
       "Newsletter intro for customers",
       "Blog idea for our industry",
     ],
+    tools: ["knowledge.search", "comms.draft_email"],
+    autonomy_level: "approve",
   },
   {
     id: "support-agent",
@@ -82,6 +94,8 @@ Be concise and customer-first.`,
       "Draft reply for shipping delay",
       "Weekly support summary template",
     ],
+    tools: ["crm.search_contacts", "knowledge.search", "comms.draft_email", "tasks.create"],
+    autonomy_level: "approve",
   },
   {
     id: "ops-manager",
@@ -100,6 +114,8 @@ Use bullet points. Be specific to running a lean team.`,
       "Inventory check reminders",
       "End-of-day ops summary",
     ],
+    tools: ["tasks.list", "tasks.create", "production.list_cards", "production.move_card"],
+    autonomy_level: "approve",
   },
   {
     id: "code-reviewer",
@@ -118,6 +134,8 @@ Keep it under 200 words, actionable.`,
       "API security reminders",
       "Tech debt priorities this sprint",
     ],
+    tools: ["knowledge.search", "tasks.create"],
+    autonomy_level: "draft",
   },
   {
     id: "lead-qualifier",
@@ -135,6 +153,8 @@ Keep it under 200 words, actionable.`,
       "Score these 5 leads by priority",
       "Which leads should we call first?",
     ],
+    tools: ["leads.list", "leads.mark_status", "crm.search_contacts", "crm.update_contact"],
+    autonomy_level: "approve",
   },
   {
     id: "company-researcher",
@@ -153,6 +173,8 @@ Keep it under 200 words, actionable.`,
       "Find decision makers at this company",
       "What is their likely tech stack?",
     ],
+    tools: ["knowledge.search", "crm.search_contacts", "crm.log_activity"],
+    autonomy_level: "approve",
   },
   {
     id: "outreach-writer",
@@ -171,6 +193,8 @@ Keep it under 200 words, actionable.`,
       "Write a follow-up sequence (3 emails)",
       "Personalize this template for the lead",
     ],
+    tools: ["crm.search_contacts", "comms.draft_email", "comms.send_email"],
+    autonomy_level: "approve",
   },
   {
     id: "sales-closer",
@@ -188,6 +212,8 @@ Keep it under 200 words, actionable.`,
       "Draft a proposal for this client",
       "Create 3-touch closing sequence",
     ],
+    tools: ["crm.search_contacts", "crm.update_contact", "crm.log_activity", "comms.draft_email", "tasks.create"],
+    autonomy_level: "approve",
   },
   {
     id: "documentation-agent",
@@ -206,6 +232,8 @@ Keep it under 200 words, actionable.`,
       "Write an SOP for our onboarding process",
       "Create a README for this project",
     ],
+    tools: ["knowledge.search", "knowledge.business_profile"],
+    autonomy_level: "approve",
   },
   {
     id: "strategy-planner",
@@ -224,6 +252,8 @@ Keep it under 200 words, actionable.`,
       "Break down this business goal into steps",
       "Create a product launch plan",
     ],
+    tools: ["tasks.list", "tasks.create", "knowledge.search"],
+    autonomy_level: "draft",
   },
   {
     id: "meeting-scheduler",
@@ -242,6 +272,8 @@ Keep it under 200 words, actionable.`,
       "Write follow-up after sales meeting",
       "Prepare onboarding meeting agenda",
     ],
+    tools: ["crm.search_contacts", "comms.draft_email", "tasks.create"],
+    autonomy_level: "approve",
   },
   {
     id: "social-media-agent",
@@ -259,6 +291,8 @@ Keep it under 200 words, actionable.`,
       "Create a week of LinkedIn content",
       "Draft announcement post for our launch",
     ],
+    tools: ["knowledge.search", "social.list_posts", "social.draft_post", "social.schedule_post"],
+    autonomy_level: "approve",
   },
 ];
 

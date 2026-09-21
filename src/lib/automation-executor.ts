@@ -5,6 +5,8 @@
 import { query, queryOne } from "@/lib/dsql";
 import { type UserIntegrations } from "@/lib/user-integrations";
 import { runAgentJob } from "@/lib/agent-runner";
+import { AgentNotFoundError, startRun } from "@/lib/agents/runner";
+import { enqueueJob } from "@/lib/agents/queue";
 import { sendEmailUnified } from "@/lib/email-sender";
 
 export type AutomationContext = {
@@ -36,6 +38,10 @@ export type ActionConfig = {
   prompt?: string;
   /** Where to send agent output: notification, email, slack */
   deliver_via?: string[];
+  /** Playbook id for "Run Playbook" */
+  playbook_id?: string;
+  /** Optional entity the playbook should focus on */
+  entity_id?: string;
 };
 
 export type ExecuteResult = {
@@ -334,6 +340,38 @@ export async function executeAutomationAction(
 
       case "Deploy Agent":
         return runAgentWithDelivery(ctx.user_id, config, ctx, integrations);
+
+      case "Run Agent (queued)": {
+        const agentId = config.agent_id?.trim();
+        if (!agentId) {
+          return { success: false, message: "No agent selected", detail: "Pick an agent from the dropdown." };
+        }
+        try {
+          const runId = await startRun(ctx.user_id, agentId, {
+            prompt: config.prompt,
+            workflowName: ctx.workflow_name,
+            automationId: ctx.automation_id ?? null,
+            triggerKind: "automation",
+          });
+          return { success: true, message: `queued run ${runId}`, detail: `Run ID: ${runId}` };
+        } catch (err) {
+          if (err instanceof AgentNotFoundError) {
+            return { success: false, message: "Agent not found", detail: "Create an agent in AI Agents, then select it here." };
+          }
+          throw err;
+        }
+      }
+
+      case "Run Playbook": {
+        const playbookId = config.playbook_id?.trim();
+        if (!playbookId) return { success: false, message: "No playbook selected" };
+        const jobId = await enqueueJob(ctx.user_id, {
+          kind: "playbook",
+          playbookId,
+          ...(config.entity_id?.trim() ? { entityId: config.entity_id.trim() } : {}),
+        });
+        return { success: true, message: `queued playbook ${playbookId}`, detail: `Job ID: ${jobId}` };
+      }
 
       default:
         return { success: false, message: `Unknown action: ${actionType}` };

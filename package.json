@@ -19,6 +19,7 @@
     "@aws-sdk/client-dynamodb": "^3.1069.0",
     "@aws-sdk/lib-dynamodb": "^3.1069.0",
     "@aws/aurora-dsql-node-postgres-connector": "^0.1.9",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@octokit/rest": "^21.0.2",
     "@pinecone-database/pinecone": "^7.2.0",
     "@radix-ui/react-slot": "^1.1.0",

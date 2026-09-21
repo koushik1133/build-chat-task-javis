@@ -1,28 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { queryOne, query } from "@/lib/dsql";
-import { complete } from "@/lib/llm";
+import { decryptSecret } from "@/lib/secure-store";
+import { handleInboundMessage, type InboundChannel, type InboundResult } from "@/lib/receptionist/inbound-agent";
 
 /** Max stored turns kept per conversation, so LLM context can't grow without bound. */
 const MAX_HISTORY = 40;
 
-interface ConversationTurn {
+/** Sent back over the channel when a drafted reply is held for human approval. */
+export const HOLD_ACK = "Thanks — a team member will reply shortly.";
+
+export interface ConversationTurn {
   role: "user" | "assistant";
   content: string;
   ts: string;
+  /** Drafted by the receptionist but not sent; awaiting approval in the inbox. */
+  pending?: boolean;
+  /** Sent from the UI without Twilio credentials (demo mode). */
+  simulated?: boolean;
+  /** Intent the receptionist classified for the turn it replied to. */
+  intent?: string;
 }
 
-function twiml(message?: string) {
+/** Pure TwiML builder for the messaging webhooks (exported for tests). */
+export function buildTwiml(message?: string): string {
   const body = message
     ? `<Message>${message
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")}</Message>`
     : "";
-  return new NextResponse(
-    `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`,
-    { status: 200, headers: { "Content-Type": "text/xml" } }
-  );
+  return `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`;
+}
+
+function twiml(message?: string) {
+  return new NextResponse(buildTwiml(message), {
+    status: 200,
+    headers: { "Content-Type": "text/xml" },
+  });
 }
 
 /**
@@ -76,6 +91,143 @@ export function verifyTwilioSignature(
   );
 }
 
+// ── Shared tenant lookup + persistence (used by SMS/WhatsApp, voice, simulator) ──
+
+export interface TwilioIntegration {
+  user_id: string;
+  messaging_auto_reply: boolean;
+  twilio_auth_token: string | null;
+}
+
+/** Find the tenant that owns a Twilio number. Null when unprovisioned. */
+export async function findIntegrationByNumber(toNumber: string): Promise<TwilioIntegration | null> {
+  return queryOne<TwilioIntegration>(
+    `SELECT user_id, messaging_auto_reply, twilio_auth_token
+     FROM user_integrations WHERE twilio_from_number = $1`,
+    [toNumber]
+  );
+}
+
+/** Auth token may be stored encrypted (v1:…) or plain; env var is the fallback. */
+export function resolveAuthToken(integration: TwilioIntegration): string {
+  const stored = integration.twilio_auth_token;
+  return (stored ? decryptSecret(stored) ?? stored : "") || process.env.TWILIO_AUTH_TOKEN || "";
+}
+
+/**
+ * Verify a Twilio-signed request for the tenant that owns `toNumber`.
+ * Returns the integration, or a NextResponse to send back (403, or the
+ * caller's "unknown number" response so we never confirm which numbers exist).
+ */
+export async function authorizeTwilioRequest(
+  req: NextRequest,
+  params: URLSearchParams,
+  toNumber: string,
+  unknownNumber: () => NextResponse
+): Promise<TwilioIntegration | NextResponse> {
+  const integration = await findIntegrationByNumber(toNumber);
+  if (!integration) return unknownNumber();
+
+  const skipVerification = process.env.TWILIO_SKIP_SIGNATURE_VERIFICATION === "true";
+  if (!skipVerification) {
+    const authToken = resolveAuthToken(integration);
+    if (!authToken || !verifyTwilioSignature(req, params, authToken)) {
+      console.warn(`[twilio] rejected unverified webhook for ${toNumber}`);
+      return new NextResponse("Forbidden", { status: 403 });
+    }
+  }
+  return integration;
+}
+
+export function parseConversation(raw: string | null | undefined): ConversationTurn[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ConversationTurn[]) : [];
+  } catch {
+    // Corrupt history — start a fresh thread rather than failing the reply.
+    return [];
+  }
+}
+
+export async function loadConversation(userId: string, fromNumber: string, channel: InboundChannel) {
+  const conv = await queryOne<{ id: string; messages: string }>(
+    `SELECT id, messages FROM messaging_conversations
+     WHERE user_id = $1 AND from_number = $2 AND channel = $3`,
+    [userId, fromNumber, channel]
+  );
+  return { id: conv?.id ?? null, messages: parseConversation(conv?.messages) };
+}
+
+/** Upsert the thread, keeping only the newest MAX_HISTORY turns. Returns the row id. */
+export async function saveConversation(
+  userId: string,
+  fromNumber: string,
+  channel: InboundChannel,
+  conversationId: string | null,
+  messages: ConversationTurn[]
+): Promise<{ id: string; messages: ConversationTurn[] }> {
+  const trimmed = messages.slice(-MAX_HISTORY);
+  if (conversationId) {
+    await query(
+      `UPDATE messaging_conversations SET messages = $1, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(trimmed), conversationId]
+    );
+    return { id: conversationId, messages: trimmed };
+  }
+  const row = await queryOne<{ id: string }>(
+    `INSERT INTO messaging_conversations (user_id, channel, from_number, messages, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id`,
+    [userId, channel, fromNumber, JSON.stringify(trimmed)]
+  );
+  return { id: row?.id ?? "", messages: trimmed };
+}
+
+export interface ProcessedInbound {
+  conversationId: string;
+  messages: ConversationTurn[];
+  result: InboundResult;
+}
+
+/**
+ * The full inbound pipeline: append the user turn, ask the receptionist for a
+ * reply, append it (flagged `pending` when it must be approved), persist.
+ */
+export async function processInbound(input: {
+  userId: string;
+  channel: InboundChannel;
+  fromNumber: string;
+  text: string;
+}): Promise<ProcessedInbound> {
+  const conv = await loadConversation(input.userId, input.fromNumber, input.channel);
+  const history = conv.messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-MAX_HISTORY)
+    .map((m) => ({ role: m.role, content: m.content }));
+
+  const messages = [...conv.messages];
+  messages.push({ role: "user", content: input.text, ts: new Date().toISOString() });
+
+  const result = await handleInboundMessage(input.userId, {
+    channel: input.channel,
+    fromNumber: input.fromNumber,
+    text: input.text,
+    history,
+  });
+
+  const assistantTurn: ConversationTurn = {
+    role: "assistant",
+    content: result.reply,
+    ts: new Date().toISOString(),
+    intent: result.intent,
+  };
+  if (!result.autoSend) assistantTurn.pending = true;
+  messages.push(assistantTurn);
+
+  const saved = await saveConversation(input.userId, input.fromNumber, input.channel, conv.id, messages);
+  return { conversationId: saved.id, messages: saved.messages, result };
+}
+
 /**
  * Shared inbound handler for the Twilio SMS and WhatsApp webhooks.
  *
@@ -97,90 +249,21 @@ export async function handleTwilioInbound(req: NextRequest) {
     const isWhatsApp = fromRaw.startsWith("whatsapp:");
     const fromNumber = fromRaw.replace(/^whatsapp:/, "");
     const toNumber = toRaw.replace(/^whatsapp:/, "");
-    const channel = isWhatsApp ? "whatsapp" : "sms";
-
-    const integration = await queryOne<{
-      user_id: string;
-      messaging_auto_reply: boolean;
-      twilio_auth_token: string | null;
-    }>(
-      `SELECT user_id, messaging_auto_reply, twilio_auth_token
-       FROM user_integrations WHERE twilio_from_number = $1`,
-      [toNumber]
-    );
+    const channel: InboundChannel = isWhatsApp ? "whatsapp" : "sms";
 
     // Unknown destination number: say nothing rather than confirming to an
     // unauthenticated caller whether a number is provisioned.
-    if (!integration) return twiml();
+    const auth = await authorizeTwilioRequest(req, params, toNumber, () => twiml());
+    if (auth instanceof NextResponse) return auth;
 
-    const skipVerification =
-      process.env.TWILIO_SKIP_SIGNATURE_VERIFICATION === "true";
+    const { result } = await processInbound({
+      userId: auth.user_id,
+      channel,
+      fromNumber,
+      text: bodyText,
+    });
 
-    if (!skipVerification) {
-      const authToken =
-        integration.twilio_auth_token || process.env.TWILIO_AUTH_TOKEN || "";
-      if (!authToken || !verifyTwilioSignature(req, params, authToken)) {
-        console.warn(`[twilio] rejected unverified ${channel} webhook for ${toNumber}`);
-        return new NextResponse("Forbidden", { status: 403 });
-      }
-    }
-
-    const conv = await queryOne<{ id: string; messages: string }>(
-      `SELECT id, messages FROM messaging_conversations
-       WHERE user_id = $1 AND from_number = $2 AND channel = $3`,
-      [integration.user_id, fromNumber, channel]
-    );
-
-    let messages: ConversationTurn[] = [];
-    if (conv?.messages) {
-      try {
-        const parsed = JSON.parse(conv.messages);
-        if (Array.isArray(parsed)) messages = parsed;
-      } catch {
-        // Corrupt history — start a fresh thread rather than failing the reply.
-      }
-    }
-
-    messages.push({ role: "user", content: bodyText, ts: new Date().toISOString() });
-
-    let replyText = "Message received, but AI auto-reply is disabled.";
-    if (integration.messaging_auto_reply) {
-      const chatMessages = [
-        {
-          role: "system" as const,
-          content:
-            "You are a helpful business assistant for KernelHub. Keep your answers concise, friendly, and suitable for a text message.",
-        },
-        ...messages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .slice(-MAX_HISTORY)
-          .map((m) => ({ role: m.role, content: m.content })),
-      ];
-      try {
-        replyText = await complete(chatMessages);
-      } catch (err) {
-        console.error("[twilio] auto-reply generation failed:", err);
-        replyText = "Sorry — I couldn't process that just now. Please try again shortly.";
-      }
-    }
-
-    messages.push({ role: "assistant", content: replyText, ts: new Date().toISOString() });
-    const trimmed = messages.slice(-MAX_HISTORY);
-
-    if (conv?.id) {
-      await query(
-        `UPDATE messaging_conversations SET messages = $1, updated_at = NOW() WHERE id = $2`,
-        [JSON.stringify(trimmed), conv.id]
-      );
-    } else {
-      await queryOne(
-        `INSERT INTO messaging_conversations (user_id, channel, from_number, messages, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id`,
-        [integration.user_id, channel, fromNumber, JSON.stringify(trimmed)]
-      );
-    }
-
-    return twiml(replyText);
+    return twiml(result.autoSend ? result.reply : HOLD_ACK);
   } catch (err) {
     console.error("Twilio webhook error:", err);
     return twiml();
