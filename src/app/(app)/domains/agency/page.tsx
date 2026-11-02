@@ -1,5 +1,8 @@
-import { redirect } from "next/navigation";
+import { legacyHubRedirect } from "@/lib/records/legacy-redirect";
 
-export default function AgencyDomainAliasPage() {
-  redirect("/agency");
+/** Legacy "agency" hub: replaced by the records primitive ("agency" pack). */
+export const dynamic = "force-dynamic";
+
+export default async function DomainRedirectPage() {
+  await legacyHubRedirect("agency", "/domains/agency");
 }

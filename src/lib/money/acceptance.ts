@@ -3,6 +3,7 @@ import { query, queryOne } from "@/lib/dsql";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { businessName, getQuoteById, quoteIsExpired, type QuoteDTO } from "./quotes";
 import { createInvoiceFromQuote } from "./invoices";
+import { reserveForQuote } from "@/lib/inventory/stock";
 
 /**
  * Public quote acceptance: email OTP (6 digits, sha256-hashed, 10 min, 5
@@ -100,6 +101,12 @@ export async function acceptQuote(quoteId: string, input: AcceptInput): Promise<
   let invoiceId: string | null = null;
   const owner = await ownerOf(quoteId);
   if (owner) {
+    try {
+      await reserveForQuote(owner, quoteId, q.items);
+    } catch (err) {
+      // Insufficient stock or DB error: the quote stays accepted; surface to the owner via logs.
+      console.error("[acceptance] stock reservation failed", err);
+    }
     try {
       const inv = await createInvoiceFromQuote(owner, quoteId);
       invoiceId = inv.id;

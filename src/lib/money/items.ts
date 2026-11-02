@@ -13,6 +13,8 @@ export const LineItemSchema = z.object({
   qty: z.number().finite().min(0).max(1_000_000),
   unit_minor: z.number().int().min(0).max(1_000_000_000_000),
   tax_rate_bp: z.number().int().min(0).max(10_000).default(0),
+  /** Optional pricebook link; lets inventory reserve/consume stock for this line. */
+  product_id: z.string().max(100).optional(),
 });
 export type LineItem = z.infer<typeof LineItemSchema>;
 export const LineItemsSchema = z.array(LineItemSchema).max(200);

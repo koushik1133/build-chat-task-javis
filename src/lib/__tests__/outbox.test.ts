@@ -33,7 +33,7 @@ afterEach(() => {
 
 describe("channelStatus", () => {
   it("is simulated for email/sms/whatsapp without provider env", () => {
-    expect(channelStatus()).toEqual({ email: "simulated", sms: "simulated", whatsapp: "simulated", in_app: "live", webhook: "live" });
+    expect(channelStatus()).toEqual({ email: "simulated", sms: "simulated", whatsapp: "simulated", in_app: "live", webhook: "live", push: "simulated" });
   });
 
   it("goes live when RESEND_API_KEY and TWILIO_* are set", () => {
@@ -76,6 +76,16 @@ describe("dispatch", () => {
     expect(String(init.body)).toContain("whatsapp%3A%2B15551234567");
   });
 
+  it("never forwards the internal ownerId to a webhook endpoint", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await dispatch({ ...msg, channel: "webhook", recipient: "https://partner.example/hook", data: { kind: "lead" }, ownerId: "owner-user-id" });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({ kind: "lead" });
+    expect(String(init.body)).not.toContain("owner-user-id");
+  });
+
   it("marks in_app sent immediately and rejects bad webhook URLs", async () => {
     expect((await dispatch({ ...msg, channel: "in_app" })).status).toBe("sent");
     await expect(dispatch({ ...msg, channel: "webhook", recipient: "not a url" })).rejects.toThrow(/valid URL/);
@@ -107,6 +117,22 @@ describe("enqueueNotification + drainOutbox", () => {
     expect(res).toEqual({ claimed: 1, sent: 0, simulated: 1, failed: 0 });
     const update = query.mock.calls.find(([sql]) => String(sql).includes("SET status = $2, sent_at"));
     expect(update?.[1]).toEqual(["n1", "simulated"]);
+  });
+
+  it("passes the row owner to the channel as a separate field, not inside data", async () => {
+    const row = {
+      id: "n3", user_id: "owner-user-id", channel: "webhook", recipient: "https://partner.example/hook", subject: "s", body: "b",
+      data: '{"kind":"lead"}', status: "queued", attempts: 1, error: null, scheduled_at: "", sent_at: null, read_at: null, created_at: "",
+    };
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    query.mockImplementation(async (sql: string) => (sql.includes("SELECT id FROM notification_outbox") ? [{ id: "n3" }] : []));
+    queryOne.mockResolvedValue(row);
+    const res = await drainOutbox(10);
+    expect(res.sent).toBe(1);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(init.body)).not.toContain("owner-user-id");
+    expect(JSON.parse(String(init.body)).data).toEqual({ kind: "lead" });
   });
 
   it("requeues on error and fails after the last attempt", async () => {

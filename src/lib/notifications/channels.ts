@@ -12,6 +12,8 @@ export interface OutboundMessage {
   subject: string | null;
   body: string | null;
   data: Record<string, unknown> | null;
+  /** Org data id the row belongs to (branding lookups). Internal: never forwarded to third parties. */
+  ownerId?: string | null;
 }
 
 export type SendOutcome = { status: "sent" | "simulated"; providerId?: string };
@@ -23,7 +25,10 @@ const WEBHOOK_TIMEOUT_MS = 5_000;
 async function sendEmail(msg: OutboundMessage): Promise<SendOutcome> {
   if (!emailIsLive()) return { status: "simulated" };
   const { sendEmailUnified } = await import("@/lib/email-sender");
-  const html = msg.body ?? "";
+  const ownerId = typeof msg.ownerId === "string" && msg.ownerId ? msg.ownerId : null;
+  const rawHtml = msg.body ?? "";
+  const { wrapBrandedEmail } = await import("@/lib/branding");
+  const html = ownerId ? await wrapBrandedEmail(ownerId, rawHtml) : rawHtml;
   const result = await sendEmailUnified({
     to: msg.recipient,
     subject: msg.subject ?? "(no subject)",
@@ -90,12 +95,26 @@ async function sendWebhook(msg: OutboundMessage): Promise<SendOutcome> {
   return { status: "sent" };
 }
 
+async function sendPush(msg: OutboundMessage): Promise<SendOutcome> {
+  const { isPushConfigured, deliverPushForUser } = await import("@/lib/push/sink");
+  if (!isPushConfigured()) return { status: "simulated" };
+  const r = await deliverPushForUser(msg.recipient, {
+    title: msg.subject ?? "KernelHub",
+    body: msg.body ?? "",
+    url: typeof msg.data?.url === "string" ? msg.data.url : "/",
+    tag: typeof msg.data?.tag === "string" ? msg.data.tag : null,
+  });
+  if (r.sent === 0 && r.failed > 0) throw new Error(`push failed on ${r.failed} device(s)`);
+  return { status: r.sent > 0 ? "sent" : "simulated" };
+}
+
 const SENDERS: Record<NotificationChannel, Sender> = {
   email: sendEmail,
   sms: sendTwilio,
   whatsapp: sendTwilio,
   in_app: sendInApp,
   webhook: sendWebhook,
+  push: sendPush,
 };
 
 export async function dispatch(msg: OutboundMessage): Promise<SendOutcome> {

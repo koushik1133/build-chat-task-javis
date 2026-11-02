@@ -9,6 +9,7 @@ import { KERNELHUB_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import { ProductTour } from "@/components/product-tour";
 import { CopilotDrawer } from "@/components/copilot-drawer";
+import { SearchButton } from "@/components/search-button";
 
 export function AppShell({
   userEmail,
@@ -73,6 +74,7 @@ export function AppShell({
             {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
           <span className="truncate text-sm font-semibold tracking-tight">{KERNELHUB_NAME}</span>
+          <SearchButton className="ml-auto" />
         </header>
 
         <main className={cn("min-h-0 min-w-0 flex-1 overflow-hidden bg-background")}>

@@ -5,6 +5,7 @@ import { executeRun, resumeRun } from "@/lib/agents/runner";
 import { promoteDueTriggers } from "@/lib/agents/triggers";
 import { ensureToolsLoaded } from "@/lib/agents/tools";
 import { drainOutbox } from "@/lib/notifications/outbox";
+import { runSlaSweep } from "@/lib/helpdesk/tickets";
 import type { JobRow } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -70,7 +71,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -110,7 +111,17 @@ async function handleTick(req: Request) {
     }
   }
 
-  counts.outbox = (await drainOutbox(50)).claimed;
+  try {
+    counts.outbox = (await drainOutbox(50)).claimed;
+  } catch (err) {
+    console.error("[cron/agents] outbox drain failed:", err);
+  }
+  try {
+    const sla = await runSlaSweep(200);
+    counts.sla = sla.breachedFirstResponse + sla.breachedResolution;
+  } catch (err) {
+    console.error("[cron/agents] SLA sweep failed:", err);
+  }
 
   counts.ms = Date.now() - tickStart;
   return NextResponse.json({ ok: true, worker: workerId, ...counts, server_time: new Date().toISOString() });

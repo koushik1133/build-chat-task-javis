@@ -20,6 +20,9 @@ import "./strategy";
 import "./social";
 import "./calendar";
 import "./billing";
+import "./finance";
+import "./records";
+import "./helpdesk";
 // END tool-module imports
 // ─────────────────────────────────────────────────────────────────────────────
 

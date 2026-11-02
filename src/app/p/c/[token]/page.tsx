@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { CalendarDays, FileText, Kanban, Loader2, Receipt } from "lucide-react";
+import { CalendarDays, FileText, Kanban, LifeBuoy, Loader2, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SupportTab } from "@/components/portal/support-tab";
+import { cn } from "@/lib/utils";
 import type { PortalData } from "@/lib/portal";
 
 const money = (minor: number, currency: string) => new Intl.NumberFormat(undefined, { style: "currency", currency }).format(minor / 100);
@@ -26,6 +28,7 @@ export default function ClientPortalPage() {
   const [data, setData] = useState<PortalData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [tab, setTab] = useState<"overview" | "support">("overview");
 
   const load = useCallback(async () => {
     try {
@@ -75,6 +78,28 @@ export default function ClientPortalPage() {
         )}
       </header>
 
+      <div role="tablist" aria-label="Portal sections" className="inline-flex rounded-lg border border-border bg-card p-1">
+        {([["overview", "Overview", FileText], ["support", "Support", LifeBuoy]] as const).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            role="tab"
+            type="button"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              tab === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" aria-hidden="true" /> {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "support" ? (
+        <SupportTab token={params.token} />
+      ) : (
+        <>
       <Section icon={CalendarDays} title="Upcoming appointments">
         {upcoming.length === 0 ? <Empty text="No upcoming appointments." /> : (
           <ul className="divide-y divide-border/60">
@@ -138,6 +163,8 @@ export default function ClientPortalPage() {
             ))}
           </ul>
         </Section>
+      )}
+        </>
       )}
     </main>
   );

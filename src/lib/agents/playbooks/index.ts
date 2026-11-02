@@ -1,12 +1,14 @@
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { enqueueJob } from "@/lib/agents/queue";
+import { tableExists } from "@/lib/table-exists";
 import type { PlaybookDef } from "./types";
 import { stalledDeal } from "./stalled-deal";
 import { unansweredInbound } from "./unanswered-inbound";
 import { overdueCard } from "./overdue-card";
 import { leadFollowUp } from "./lead-follow-up";
 import { socialGap } from "./social-gap";
+import { ticketAutoResolve } from "./ticket-auto-resolve";
 
 export type { PlaybookDef } from "./types";
 
@@ -17,7 +19,7 @@ export type { PlaybookDef } from "./types";
  * `runPlaybook` is also reachable from the UI ("Run now"). Dedupe lives in
  * `playbook_runs`; per-user opt-out lives in `playbook_settings`.
  */
-export const PLAYBOOKS: PlaybookDef[] = [stalledDeal, unansweredInbound, overdueCard, leadFollowUp, socialGap];
+export const PLAYBOOKS: PlaybookDef[] = [stalledDeal, unansweredInbound, overdueCard, leadFollowUp, socialGap, ticketAutoResolve];
 
 export function getPlaybook(id: string): PlaybookDef | undefined {
   return PLAYBOOKS.find((p) => p.id === id);
@@ -125,6 +127,10 @@ export async function runPlaybook(
 
 /** Distinct users who have data any playbook could act on (bounded). */
 async function candidateUsers(): Promise<string[]> {
+  // `tickets` ships with the Phase 3 helpdesk migration, which may not be
+  // applied where this code runs. Guard it: a missing relation would fail the
+  // whole UNION (swallowed below) and silently switch off every playbook.
+  const withTickets = await tableExists("tickets");
   const rows = await query<{ user_id: string }>(
     `SELECT user_id FROM (
        SELECT user_id FROM crm_contacts
@@ -132,6 +138,7 @@ async function candidateUsers(): Promise<string[]> {
        UNION SELECT user_id FROM production_tasks
        UNION SELECT user_id FROM site_leads WHERE user_id IS NOT NULL
        UNION SELECT user_id FROM social_brands
+       ${withTickets ? "UNION SELECT user_id FROM tickets" : ""}
      ) u WHERE user_id IS NOT NULL ORDER BY user_id LIMIT $1`,
     [MAX_USERS]
   ).catch(() => []);

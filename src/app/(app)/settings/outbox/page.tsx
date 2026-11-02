@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page-container";
 import { cn, timeAgo } from "@/lib/utils";
 
-type Channel = "email" | "sms" | "whatsapp" | "in_app" | "webhook";
+type Channel = "email" | "sms" | "whatsapp" | "in_app" | "webhook" | "push";
 type Status = "queued" | "sent" | "simulated" | "failed" | "read";
 
 interface OutboxRow {
@@ -25,7 +25,7 @@ interface OutboxRow {
   created_at: string;
 }
 
-const CHANNELS: Channel[] = ["email", "sms", "whatsapp", "in_app", "webhook"];
+const CHANNELS: Channel[] = ["email", "sms", "whatsapp", "in_app", "webhook", "push"];
 const STATUSES: Status[] = ["queued", "sent", "simulated", "failed", "read"];
 
 const STATUS_STYLES: Record<Status, string> = {

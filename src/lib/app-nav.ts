@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Boxes,
   MessageSquare,
   FileText,
   Github,
@@ -32,6 +33,14 @@ import {
   Inbox,
   CalendarDays,
   Receipt,
+  Package,
+  Wallet,
+  PieChart,
+  LifeBuoy,
+  BookOpen,
+  Palette,
+  Upload,
+  BellRing,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -76,6 +85,8 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/leads", label: "Lead Inbox", icon: Users },
       { href: "/crm", label: "CRM", icon: Globe },
       { href: "/calendar", label: "Calendar", icon: CalendarDays },
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
+      { href: "/knowledge", label: "Knowledge Base", icon: BookOpen },
     ],
   },
   {
@@ -93,6 +104,9 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/production", label: "Production", icon: Kanban },
       { href: "/tasks", label: "Tasks", icon: ListTodo },
       { href: "/billing", label: "Billing", icon: Receipt },
+      { href: "/inventory", label: "Inventory", icon: Package },
+      { href: "/finance", label: "Finance", icon: Wallet },
+      { href: "/reports", label: "Reports", icon: PieChart },
     ],
   },
   {
@@ -107,11 +121,15 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/settings/audit", label: "Audit Log", icon: ScrollText },
       { href: "/settings/outbox", label: "Outbox", icon: Inbox },
       { href: "/settings/api-keys", label: "API Keys", icon: KeyRound },
+      { href: "/settings/branding", label: "Branding", icon: Palette },
+      { href: "/settings/import", label: "Import & Export", icon: Upload },
+      { href: "/settings/notifications", label: "Notifications", icon: BellRing },
     ],
   },
   {
     title: "Domain Hubs",
     items: [
+      { href: "/r", label: "Records", icon: Boxes },
       { href: "/domains/healthcare", label: "Healthcare Hub", icon: Heart },
       { href: "/domains/education", label: "Education Hub", icon: GraduationCap },
       { href: "/domains/legal", label: "Legal Hub", icon: Scale },

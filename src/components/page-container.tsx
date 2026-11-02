@@ -10,6 +10,12 @@ type PageContainerProps = {
   description?: string;
   /** Plain-English tooltip for the page title */
   tooltip?: string;
+  /** Small line above the title, e.g. a back link */
+  eyebrow?: React.ReactNode;
+  /** Icon shown beside the title */
+  icon?: React.ReactNode;
+  /** Primary actions, aligned to the end of the header on wide screens */
+  actions?: React.ReactNode;
 };
 
 export function PageContainer({
@@ -19,7 +25,11 @@ export function PageContainer({
   title,
   description,
   tooltip,
+  eyebrow,
+  icon,
+  actions,
 }: PageContainerProps) {
+  const hasHeader = Boolean(title || description || eyebrow || actions);
   return (
     <div
       className={cn(
@@ -28,17 +38,30 @@ export function PageContainer({
       )}
     >
       <div className={cn("mx-auto w-full", wide ? "max-w-7xl" : "max-w-3xl")}>
-        {(title || description) && (
+        {hasHeader && (
           <header className="mb-6 sm:mb-8">
-            {title && (
-              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl flex items-center gap-2">
-                {title}
-                {tooltip && <InfoTooltip text={tooltip} />}
-              </h1>
-            )}
-            {description && (
-              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
-            )}
+            {eyebrow && <div className="mb-2">{eyebrow}</div>}
+            <div className={cn(actions && "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between")}>
+              <div className={cn("min-w-0", icon && "flex items-start gap-3")}>
+                {icon && (
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground" aria-hidden>
+                    {icon}
+                  </span>
+                )}
+                <div className="min-w-0">
+                  {title && (
+                    <h1 className="flex items-center gap-2 break-words text-xl font-semibold tracking-tight sm:text-2xl">
+                      {title}
+                      {tooltip && <InfoTooltip text={tooltip} />}
+                    </h1>
+                  )}
+                  {description && (
+                    <p className="mt-1.5 text-pretty text-sm leading-relaxed text-muted-foreground">{description}</p>
+                  )}
+                </div>
+              </div>
+              {actions && <div className="flex flex-wrap items-center gap-2 sm:shrink-0">{actions}</div>}
+            </div>
           </header>
         )}
         {children}

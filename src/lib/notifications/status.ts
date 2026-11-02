@@ -1,10 +1,11 @@
+import { isPushConfigured } from "@/lib/push/vapid";
 /**
  * Which outbound channels are wired to a real provider vs. simulated.
  *
  * Simulated channels still write the outbox row with the full body so a
  * developer can read OTPs / invite links from Settings → Outbox.
  */
-export const NOTIFICATION_CHANNELS = ["email", "sms", "whatsapp", "in_app", "webhook"] as const;
+export const NOTIFICATION_CHANNELS = ["email", "sms", "whatsapp", "in_app", "webhook", "push"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
 export type ChannelMode = "live" | "simulated";
@@ -38,5 +39,6 @@ export function channelStatus(): Record<NotificationChannel, ChannelMode> {
     whatsapp: twilio,
     in_app: "live",
     webhook: "live",
+    push: isPushConfigured() ? "live" : "simulated",
   };
 }

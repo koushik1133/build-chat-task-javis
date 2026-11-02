@@ -23,6 +23,7 @@ import { channelHref, iconFor } from "@/lib/channels/registry";
 import type { ChannelNavItem } from "@/lib/nav/channel-nav";
 import { useNavRefreshSignal } from "@/lib/nav/nav-refresh";
 import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
+import { NavGroupLabel, NavLabel } from "@/components/i18n/nav-label";
 
 type Chat = { id: string; title: string; updated_at: string };
 type OrgOption = { id: string; name: string; slug: string; role: string };
@@ -146,7 +147,7 @@ export function Sidebar({
       <>
         <div className="mx-3 my-2.5 border-t border-border" />
         <div className="px-3 mb-1">
-          <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground">{title}</span>
+          <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground"><NavGroupLabel title={title} /></span>
         </div>
       </>
     );
@@ -185,7 +186,7 @@ export function Sidebar({
                     : "text-muted-foreground group-hover:scale-105 group-hover:text-foreground"
                 )}
               />
-              <span className="truncate">{label}</span>
+              <span className="truncate"><NavLabel href={href} fallback={label} /></span>
             </Link>
           );
         })}

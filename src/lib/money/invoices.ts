@@ -7,6 +7,7 @@ import { getProvider } from "@/lib/payments";
 import type { PaymentEvent } from "@/lib/payments/types";
 import { computeTotals, formatMoney, parseItems, type LineItem } from "./items";
 import { businessName, getQuote } from "./quotes";
+import { consumeForInvoice } from "@/lib/inventory/stock";
 
 export { computeTotals } from "./items";
 export type { LineItem } from "./items";
@@ -228,9 +229,9 @@ export function deriveStatus(inv: { status: InvoiceStatus; total_minor: number; 
 }
 
 export async function recomputeInvoiceStatus(id: string): Promise<InvoiceStatus | null> {
-  return withRetry(async () => {
-    const row = await queryOne<{ status: InvoiceStatus; total_minor: string; due_at: string | null }>(
-      `SELECT status, total_minor, due_at FROM invoices WHERE id = $1`,
+  const out = await withRetry(async () => {
+    const row = await queryOne<{ user_id: string; status: InvoiceStatus; total_minor: string; due_at: string | null; items: string | null; quote_id: string | null }>(
+      `SELECT user_id, status, total_minor, due_at, items, quote_id FROM invoices WHERE id = $1`,
       [id]
     );
     if (!row) return null;
@@ -245,8 +246,21 @@ export async function recomputeInvoiceStatus(id: string): Promise<InvoiceStatus 
         WHERE id = $1`,
       [id, paid, next]
     );
-    return next;
+    return { next, row };
   });
+  if (!out) return null;
+  const { next, row } = out;
+  if (next === "paid" && row.status !== "paid") {
+    // Stock lifecycle: goods leave the shelf once the invoice is paid. Idempotent
+    // per invoice inside consumeForInvoice; a failure (insufficient stock, missing
+    // table) must never undo or block the payment itself.
+    try {
+      await consumeForInvoice(row.user_id, id, parseItems(row.items), { quoteId: row.quote_id });
+    } catch (err) {
+      console.error(`[invoices] stock consumption failed for ${id}:`, err);
+    }
+  }
+  return next;
 }
 
 export async function sendInvoice(

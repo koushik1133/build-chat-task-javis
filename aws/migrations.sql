@@ -1080,3 +1080,372 @@ CREATE INDEX ASYNC IF NOT EXISTS idx_calendar_blocks_calendar_starts ON calendar
 -- Per-site CORS allow-list for the public lead/widget endpoints.
 -- JSON array or comma-separated origins, e.g. '["https://acme.com"]'. NULL = use PUBLIC_WIDGET_ORIGINS env.
 ALTER TABLE sites ADD COLUMN IF NOT EXISTS allowed_origins TEXT;
+
+-- ==== PHASE 3 LANE A ====
+-- Phase 3 / Lane A: configurable records + workflow primitive
+CREATE TABLE IF NOT EXISTS record_types (
+  id             TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id        TEXT        NOT NULL,
+  slug           TEXT        NOT NULL,
+  name           TEXT        NOT NULL,
+  icon           TEXT,
+  description    TEXT,
+  fields         TEXT        NOT NULL DEFAULT '[]', -- JSON array of field defs
+  stages         TEXT        NOT NULL DEFAULT '[]', -- JSON array of {key,label,color}
+  views          TEXT        NOT NULL DEFAULT '{}', -- JSON
+  copilot_prompt TEXT,
+  pack_slug      TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS record_types_user_slug ON record_types(user_id, slug);
+
+CREATE TABLE IF NOT EXISTS records (
+  id           TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id      TEXT        NOT NULL,
+  type_id      TEXT        NOT NULL,
+  title        TEXT        NOT NULL,
+  stage        TEXT        NOT NULL,
+  data         TEXT        NOT NULL DEFAULT '{}', -- JSON object keyed by field key
+  summary      TEXT,
+  contact_id   TEXT,
+  amount_minor BIGINT,
+  currency     TEXT,
+  due_at       TIMESTAMPTZ,
+  assigned_to  TEXT,
+  deleted_at   TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS records_user_type_stage ON records(user_id, type_id, stage);
+
+CREATE INDEX ASYNC IF NOT EXISTS records_user_type_updated ON records(user_id, type_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS record_activity (
+  id         TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id    TEXT        NOT NULL,
+  record_id  TEXT        NOT NULL,
+  actor_id   TEXT,
+  kind       TEXT        NOT NULL DEFAULT 'comment', -- created|moved|updated|comment|linked
+  body       TEXT,
+  diff       TEXT, -- JSON
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS record_activity_record ON record_activity(user_id, record_id, created_at);
+
+CREATE TABLE IF NOT EXISTS record_links (
+  id          TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id     TEXT        NOT NULL,
+  record_id   TEXT        NOT NULL,
+  target_kind TEXT        NOT NULL, -- contact|task|quote|invoice|booking|record
+  target_id   TEXT        NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS record_links_record ON record_links(user_id, record_id);
+
+
+-- ==== PHASE 3 LANE B ====
+-- ── Phase 3 / Lane B: Helpdesk (tickets + SLAs) and Knowledge base ───────────
+
+CREATE TABLE IF NOT EXISTS sla_policies (
+  id                      TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id                 TEXT NOT NULL,
+  name                    TEXT NOT NULL,
+  first_response_minutes  INTEGER NOT NULL DEFAULT 60,
+  resolution_minutes      INTEGER NOT NULL DEFAULT 1440,
+  business_hours_only     BOOLEAN NOT NULL DEFAULT FALSE,
+  priority_overrides      TEXT,                -- JSON: { "urgent": { "first_response_minutes": 15, "resolution_minutes": 240 } }
+  is_default              BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_sla_policies_user ON sla_policies (user_id);
+
+CREATE TABLE IF NOT EXISTS tickets (
+  id                       TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id                  TEXT NOT NULL,
+  number                   INTEGER NOT NULL,
+  subject                  TEXT NOT NULL,
+  status                   TEXT NOT NULL DEFAULT 'open',      -- open|pending|resolved|closed
+  priority                 TEXT NOT NULL DEFAULT 'normal',    -- low|normal|high|urgent
+  source                   TEXT NOT NULL DEFAULT 'manual',    -- portal|widget|email|sms|whatsapp|manual|agent
+  contact_id               TEXT,
+  requester_email          TEXT,
+  requester_name           TEXT,
+  assigned_to              TEXT,
+  sla_policy_id            TEXT,
+  first_response_due_at    TIMESTAMPTZ,
+  resolution_due_at        TIMESTAMPTZ,
+  first_responded_at       TIMESTAMPTZ,
+  resolved_at              TIMESTAMPTZ,
+  breached_first_response  BOOLEAN NOT NULL DEFAULT FALSE,
+  breached_resolution      BOOLEAN NOT NULL DEFAULT FALSE,
+  escalated_at             TIMESTAMPTZ,
+  tags                     TEXT NOT NULL DEFAULT '[]',        -- JSON array
+  conversation_id          TEXT,
+  created_at               TIMESTAMPTZ DEFAULT NOW(),
+  updated_at               TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_tickets_user_status ON tickets (user_id, status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_tickets_user_resolution_due ON tickets (user_id, resolution_due_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_tickets_user_contact ON tickets (user_id, contact_id);
+
+CREATE TABLE IF NOT EXISTS ticket_messages (
+  id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id      TEXT NOT NULL,
+  ticket_id    TEXT NOT NULL,
+  author_kind  TEXT NOT NULL,                    -- agent|customer|ai|system
+  author_id    TEXT,
+  body         TEXT NOT NULL,
+  is_internal  BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages (ticket_id, created_at);
+
+CREATE TABLE IF NOT EXISTS ticket_counters (
+  user_id      TEXT PRIMARY KEY,
+  next_number  INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS kb_articles (
+  id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id            TEXT NOT NULL,
+  slug               TEXT NOT NULL,
+  title              TEXT NOT NULL,
+  body_md            TEXT NOT NULL DEFAULT '',
+  excerpt            TEXT,
+  category           TEXT,
+  tags               TEXT NOT NULL DEFAULT '[]',   -- JSON array
+  status             TEXT NOT NULL DEFAULT 'draft', -- draft|published
+  is_public          BOOLEAN NOT NULL DEFAULT FALSE,
+  views              INTEGER NOT NULL DEFAULT 0,
+  source_ticket_ids  TEXT NOT NULL DEFAULT '[]',   -- JSON array
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ DEFAULT NOW(),
+  published_at       TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_kb_articles_user_slug ON kb_articles (user_id, slug);
+CREATE INDEX ASYNC IF NOT EXISTS idx_kb_articles_user_status ON kb_articles (user_id, status);
+
+CREATE TABLE IF NOT EXISTS kb_categories (
+  id       TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id  TEXT NOT NULL,
+  slug     TEXT NOT NULL,
+  name     TEXT NOT NULL,
+  sort     INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_kb_categories_user_slug ON kb_categories (user_id, slug);
+
+-- Ticket numbers are unique per org; public help center lists only published+public rows.
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_tickets_user_number ON tickets (user_id, number);
+CREATE INDEX ASYNC IF NOT EXISTS idx_tickets_user_first_response_due ON tickets (user_id, first_response_due_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_kb_articles_user_public ON kb_articles (user_id, is_public, status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_kb_categories_user_sort ON kb_categories (user_id, sort);
+
+
+-- ==== PHASE 3 LANE C ====
+-- ==== PHASE 3 LANE C: inventory / pricebook, expenses, time, change orders ====
+-- DSQL rules: no FKs, JSON stored as TEXT, CREATE INDEX ASYNC, one DDL per statement.
+-- All tables are keyed by user_id = organizations.owner_user_id (requireScope().dataId).
+
+-- ── products: pricebook + stock ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS products (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  sku              TEXT,
+  name             TEXT NOT NULL,
+  description      TEXT,
+  kind             TEXT NOT NULL DEFAULT 'product',   -- product|service|rental
+  unit             TEXT NOT NULL DEFAULT 'each',
+  unit_price_minor BIGINT NOT NULL DEFAULT 0,
+  cost_minor       BIGINT NOT NULL DEFAULT 0,
+  currency         TEXT NOT NULL DEFAULT 'USD',
+  tax_rate_bp      INTEGER NOT NULL DEFAULT 0,
+  track_stock      BOOLEAN NOT NULL DEFAULT FALSE,
+  stock_on_hand    INTEGER NOT NULL DEFAULT 0,
+  stock_reserved   INTEGER NOT NULL DEFAULT 0,
+  reorder_point    INTEGER NOT NULL DEFAULT 0,
+  active           BOOLEAN NOT NULL DEFAULT TRUE,
+  deleted_at       TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_products_user_sku ON products (user_id, sku);
+CREATE INDEX ASYNC IF NOT EXISTS idx_products_user_name ON products (user_id, name);
+CREATE INDEX ASYNC IF NOT EXISTS idx_products_user_kind ON products (user_id, kind);
+
+-- ── stock_movements: append-only ledger ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  product_id  TEXT NOT NULL,
+  kind        TEXT NOT NULL,            -- receive|reserve|release|consume|adjust|checkout|checkin
+  qty         INTEGER NOT NULL,         -- signed for adjust; positive otherwise
+  ref_kind    TEXT,                     -- quote|invoice|booking|record|checkout|manual
+  ref_id      TEXT,
+  note        TEXT,
+  created_by  TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_stock_movements_product ON stock_movements (user_id, product_id, created_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_stock_movements_ref ON stock_movements (user_id, ref_kind, ref_id);
+
+-- ── equipment_checkouts: rentals / kit out on a job ─────────────────────────
+CREATE TABLE IF NOT EXISTS equipment_checkouts (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  product_id      TEXT NOT NULL,
+  qty             INTEGER NOT NULL DEFAULT 1,
+  checked_out_to  TEXT,                 -- member id, contact name, or free text
+  ref_kind        TEXT,
+  ref_id          TEXT,
+  due_back_at     TIMESTAMPTZ,
+  returned_at     TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_equipment_checkouts_user ON equipment_checkouts (user_id, returned_at, due_back_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_equipment_checkouts_product ON equipment_checkouts (user_id, product_id);
+
+-- ── expenses ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS expenses (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  category      TEXT NOT NULL DEFAULT 'general',
+  vendor        TEXT,
+  description   TEXT,
+  amount_minor  BIGINT NOT NULL DEFAULT 0,
+  currency      TEXT NOT NULL DEFAULT 'USD',
+  tax_minor     BIGINT NOT NULL DEFAULT 0,
+  spent_at      TIMESTAMPTZ DEFAULT NOW(),
+  receipt_url   TEXT,
+  ref_kind      TEXT,                   -- quote|invoice|booking|record|...
+  ref_id        TEXT,
+  billable      BOOLEAN NOT NULL DEFAULT FALSE,
+  invoice_id    TEXT,                   -- set once billed through /api/invoices/[id]/billables
+  created_by    TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_expenses_user_spent ON expenses (user_id, spent_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_expenses_user_ref ON expenses (user_id, ref_kind, ref_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_expenses_invoice ON expenses (invoice_id);
+
+-- ── time_entries ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS time_entries (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  member_id    TEXT,                    -- actor user id (memberships.user_id)
+  ref_kind     TEXT,
+  ref_id       TEXT,
+  description  TEXT,
+  started_at   TIMESTAMPTZ NOT NULL,
+  ended_at     TIMESTAMPTZ,             -- NULL while the timer runs
+  minutes      INTEGER,                 -- NULL while the timer runs
+  rate_minor   BIGINT NOT NULL DEFAULT 0, -- per hour
+  currency     TEXT NOT NULL DEFAULT 'USD',
+  billable     BOOLEAN NOT NULL DEFAULT TRUE,
+  invoice_id   TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_time_entries_user_started ON time_entries (user_id, started_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_time_entries_user_ref ON time_entries (user_id, ref_kind, ref_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_time_entries_member_open ON time_entries (user_id, member_id, ended_at);
+
+-- ── change_orders ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS change_orders (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  quote_id     TEXT,
+  invoice_id   TEXT,
+  number       INTEGER NOT NULL,
+  title        TEXT NOT NULL,
+  description  TEXT,
+  items        TEXT NOT NULL DEFAULT '[]', -- JSON [{description, qty, unit_minor, tax_rate_bp, product_id?}]
+  delta_minor  BIGINT NOT NULL DEFAULT 0,  -- total of items (may be negative for credits)
+  currency     TEXT NOT NULL DEFAULT 'USD',
+  status       TEXT NOT NULL DEFAULT 'draft', -- draft|sent|accepted|rejected
+  accepted_at  TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_change_orders_user_created ON change_orders (user_id, created_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_change_orders_quote ON change_orders (user_id, quote_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_change_orders_invoice ON change_orders (user_id, invoice_id);
+
+-- ── co_counters: per-org change-order numbering ─────────────────────────────
+CREATE TABLE IF NOT EXISTS co_counters (
+  user_id      TEXT PRIMARY KEY,
+  next_number  INTEGER NOT NULL DEFAULT 1
+);
+
+
+-- ==== PHASE 3 LANE D ====
+-- Phase 3 / Lane D: CSV import jobs, web push subscriptions, crew links
+-- DSQL: one DDL per transaction, CREATE INDEX ASYNC only, no foreign keys.
+
+-- ── import_jobs: one row per CSV import (dry runs included) ──────────────────
+CREATE TABLE IF NOT EXISTS import_jobs (
+  id            TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id       TEXT        NOT NULL,            -- org data id
+  actor_id      TEXT,                            -- signed-in user who ran it
+  target        TEXT        NOT NULL,            -- crm_contacts|leads|tasks|products|expenses
+  status        TEXT        NOT NULL DEFAULT 'done', -- dry_run|done|failed
+  dry_run       BOOLEAN     NOT NULL DEFAULT FALSE,
+  row_count     INTEGER     NOT NULL DEFAULT 0,
+  inserted      INTEGER     NOT NULL DEFAULT 0,
+  skipped       INTEGER     NOT NULL DEFAULT 0,
+  error_count   INTEGER     NOT NULL DEFAULT 0,
+  mapping       TEXT        NOT NULL DEFAULT '{}', -- JSON {field: header}
+  errors        TEXT        NOT NULL DEFAULT '[]', -- JSON array (first 50)
+  file_name     TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS import_jobs_user_created ON import_jobs(user_id, created_at);
+
+-- ── push_subscriptions: Web Push endpoints per device ────────────────────────
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id          TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id     TEXT        NOT NULL,              -- org data id (deliverPushForUser key)
+  member_id   TEXT,                              -- signed-in user who subscribed
+  endpoint    TEXT        NOT NULL,
+  keys        TEXT        NOT NULL,              -- JSON {p256dh, auth}
+  user_agent  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS push_subscriptions_endpoint ON push_subscriptions(endpoint);
+
+CREATE INDEX ASYNC IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
+
+-- ── crew links reuse share_tokens (kind = 'crew'); add a human label ─────────
+ALTER TABLE share_tokens ADD COLUMN IF NOT EXISTS label TEXT;
+
+
+-- ==== PHASE 3 LANE E ====
+-- ── Phase 3 / Lane E: white-label org branding ──────────────────────────────
+-- One row per org, keyed by the org's data id (owner_user_id) like every other
+-- module table. Org locale / currency / timezone live in organizations.settings
+-- (JSON TEXT) and need no migration.
+
+CREATE TABLE IF NOT EXISTS org_branding (
+  user_id        TEXT PRIMARY KEY,
+  brand_name     TEXT,
+  logo_url       TEXT,
+  primary_color  TEXT,                 -- #rrggbb
+  accent_color   TEXT,                 -- #rrggbb
+  email_footer   TEXT,
+  custom_domain  TEXT,
+  support_email  TEXT,
+  favicon_url    TEXT,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+

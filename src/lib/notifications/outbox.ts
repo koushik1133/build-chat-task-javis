@@ -123,6 +123,7 @@ export async function drainOutbox(limit = 50): Promise<DrainResult> {
         subject: row.subject,
         body: row.body,
         data: parseOutboxData(row),
+        ownerId: row.user_id,
       });
       await query(
         `UPDATE notification_outbox SET status = $2, sent_at = NOW(), error = NULL WHERE id = $1`,
