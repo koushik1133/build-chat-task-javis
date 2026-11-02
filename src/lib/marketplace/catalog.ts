@@ -280,6 +280,8 @@ interface ReviewRow {
 
 export async function listReviews(dataId: string, listingId: string, limit = 50): Promise<ReviewDTO[]> {
   if (!(await hasTables())) return [];
+  // Reviews inherit the listing's visibility: a private listing of another org must not leak its reviews (or its existence).
+  if (!(await getListing(dataId, listingId))) return [];
   const rows = await query<ReviewRow>(`SELECT id, user_id, listing_id, rating, body, created_at FROM marketplace_reviews WHERE listing_id = $1 ORDER BY created_at DESC LIMIT $2`, [
     listingId,
     Math.min(Math.max(limit, 1), 200),

@@ -5,6 +5,7 @@ import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { dbUnavailableResponse } from "@/lib/api-db";
 import { query, queryOne } from "@/lib/dsql";
 import { parseBody } from "@/lib/money/http";
+import { canClaimSsoDomain } from "@/lib/sso/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,12 @@ export async function POST(req: NextRequest) {
   const parsed = await parseBody(req, Body, 2_048);
   if (!parsed.ok) return parsed.res;
   try {
+    if (!(await canClaimSsoDomain(scope, parsed.data.domain))) {
+      return NextResponse.json(
+        { error: "forbidden", detail: "You can only claim a domain that you or an active member of this workspace signs in with." },
+        { status: 403 }
+      );
+    }
     const taken = await queryOne<{ user_id: string }>(`SELECT user_id FROM sso_domains WHERE domain = $1`, [parsed.data.domain]);
     if (taken && taken.user_id !== scope.dataId) return NextResponse.json({ error: "conflict", detail: "That domain is already claimed by another workspace." }, { status: 409 });
     if (taken) {

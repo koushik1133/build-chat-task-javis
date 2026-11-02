@@ -90,10 +90,22 @@ export async function markAsAgency(parentOrgId: string): Promise<void> {
  * Create a client workspace under the caller's active org. The caller must be
  * the owner/admin of the parent (checked by the route via requireScope).
  */
+export class AgencyForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgencyForbiddenError";
+  }
+}
+
 export async function createChildOrg(
-  parent: Pick<Scope, "orgId" | "userId" | "dataId">,
+  parent: Pick<Scope, "orgId" | "userId" | "dataId" | "role">,
   input: { name: string; slug?: string | null }
 ): Promise<ChildOrgDTO> {
+  // Only the parent's owner or an admin may create client workspaces, whatever
+  // area overrides say about "settings" — this hands out memberships on a new org.
+  if (parent.role !== "owner" && parent.role !== "admin") {
+    throw new AgencyForbiddenError("Only the workspace owner or an admin can create client workspaces.");
+  }
   const name = input.name.trim();
   if (!name) throw new Error("name is required");
   const id = randomUUID();
@@ -111,22 +123,24 @@ export async function createChildOrg(
     [id, name, slug, parent.orgId]
   );
 
-  // Owner memberships so requireScope() can switch into the child: the parent
-  // org's real owner, plus the acting admin when they differ.
+  // Memberships so requireScope() can switch into the child: the parent org's
+  // real owner becomes the child's owner; an acting admin gets an admin seat
+  // (never a self-granted owner role).
   const parentOwner = await queryOne<{ owner_user_id: string }>(`SELECT owner_user_id FROM organizations WHERE id = $1`, [parent.orgId]);
-  const owners = new Set<string>([parent.userId]);
-  if (parentOwner?.owner_user_id) owners.add(parentOwner.owner_user_id);
-  for (const uid of owners) {
+  const seats = new Map<string, Role>();
+  if (parentOwner?.owner_user_id) seats.set(parentOwner.owner_user_id, "owner");
+  if (!seats.has(parent.userId)) seats.set(parent.userId, parent.role === "owner" ? "owner" : "admin");
+  for (const [uid, role] of seats) {
     await query(
-      `INSERT INTO memberships (id, org_id, user_id, role, status, accepted_at) VALUES ($1, $2, $3, 'owner', 'active', NOW())`,
-      [randomUUID(), id, uid]
+      `INSERT INTO memberships (id, org_id, user_id, role, status, accepted_at) VALUES ($1, $2, $3, $4, 'active', NOW())`,
+      [randomUUID(), id, uid, role]
     );
   }
   await markAsAgency(parent.orgId);
 
   const row = await queryOne<ChildOrgRow>(`SELECT ${COLS} FROM organizations WHERE id = $1`, [id]);
   if (!row) throw new Error("client workspace creation failed");
-  return toDTO(row, { members: owners.size, invites: 0 });
+  return toDTO(row, { members: seats.size, invites: 0 });
 }
 
 async function membershipCounts(orgIds: string[]): Promise<Map<string, { members: number; invites: number }>> {

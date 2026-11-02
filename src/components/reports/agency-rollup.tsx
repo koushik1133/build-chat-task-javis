@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Building2 } from "lucide-react";
-import { Banner, SkeletonList } from "@/components/ui/feedback";
+import { Banner, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { api } from "@/components/finance/shared";
@@ -56,18 +56,27 @@ export function AgencyRollup({ qs }: { qs: string }) {
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">Revenue, pipeline, bookings, tickets and AI spend per client for the selected range.</p>
         </div>
-        <Link href="/agency/clients" className="text-sm text-primary underline-offset-2 hover:underline">Manage clients</Link>
+        <Link href="/agency/clients" className="inline-flex min-h-11 items-center rounded-md text-sm text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">
+          Manage clients
+        </Link>
       </div>
-      {error && <Banner tone="error" className="mt-3" onDismiss={() => setError(null)}>{error}</Banner>}
-      {loading && !report ? (
+      {error && report && (
+        <Banner tone="error" className="mt-3" onDismiss={() => setError(null)}>
+          {error}
+        </Banner>
+      )}
+      {error && !report ? (
+        <ErrorState message={error} onRetry={() => void load()} className="mt-4" />
+      ) : loading && !report ? (
         <SkeletonList count={3} itemClassName="h-10" className="mt-4" label="Loading roll-up…" />
       ) : report && t ? (
         <div className="mt-4" aria-busy={loading || undefined}>
+          <p className="sr-only" role="status" aria-live="polite">{loading ? "Updating the client roll-up…" : `Roll-up for ${t.clients} client${t.clients === 1 ? "" : "s"} ready.`}</p>
           {t.currencies.length > 1 && <Banner tone="warn">Totals mix currencies ({t.currencies.join(", ")}). Per-client figures are exact.</Banner>}
           <ul className="space-y-2 sm:hidden">
             {report.rows.map((r) => (
               <li key={r.org.id} className="rounded-lg border border-border p-3">
-                <p className="truncate font-medium">{r.org.name}</p>
+                <p className="truncate font-medium">{r.org.name}{r.org.archived && <span className="ml-2 text-xs font-normal text-muted-foreground">archived</span>}</p>
                 <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
                   <dt className="text-muted-foreground">Revenue</dt><dd className="text-right tabular-nums">{fmtMoney(r.revenue_minor, r.currency)}</dd>
                   <dt className="text-muted-foreground">Open quotes</dt><dd className="text-right tabular-nums">{r.open_quotes} · {fmtMoney(r.open_quotes_minor, r.currency)}</dd>

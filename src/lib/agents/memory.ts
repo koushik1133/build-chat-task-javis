@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { likeContains } from "@/lib/like";
-import { deleteFile, searchChunks, upsertChunks } from "@/lib/pinecone";
+import { CORRECTION_FILE_PREFIX, deleteFile, searchChunks, upsertChunks } from "@/lib/pinecone";
 
 /**
  * Corrections-as-memory.
@@ -39,7 +39,7 @@ interface CorrectionRow {
   created_at: string;
 }
 
-export const CORRECTION_FILE_PREFIX = "corr:";
+export { CORRECTION_FILE_PREFIX };
 const MAX_FIELD = 4000;
 
 export function toCorrectionMemory(r: CorrectionRow): CorrectionMemory {
@@ -113,7 +113,7 @@ export async function recallCorrections(userId: string, agentId: string, k = 5, 
 
   if (task?.trim()) {
     try {
-      const hits = await searchChunks(userId, task.slice(0, 2000), limit * 4);
+      const hits = await searchChunks(userId, task.slice(0, 2000), limit * 4, { includeCorrections: true });
       const ids = Array.from(
         new Set(hits.filter((h) => h.fileId.startsWith(CORRECTION_FILE_PREFIX)).map((h) => h.fileId.slice(CORRECTION_FILE_PREFIX.length)))
       );

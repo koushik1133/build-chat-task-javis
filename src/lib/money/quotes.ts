@@ -6,7 +6,7 @@ import { enqueueNotification } from "@/lib/notifications/outbox";
 import { releaseForQuote } from "@/lib/inventory/stock";
 import { emitEvent } from "@/lib/events/bus";
 import { computeTotals, formatMoney, parseItems, type LineItem } from "./items";
-import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 export { computeTotals } from "./items";
 export type { LineItem } from "./items";
@@ -108,7 +108,7 @@ export async function listQuotes(dataId: string, opts: { status?: string; limit?
   }
   sql += keysetClause(opts.cursor, params, { alias: "q." });
   params.push(Math.min(Math.max(opts.limit ?? 100, 1), 500));
-  sql += ` ORDER BY q.created_at DESC, q.id DESC LIMIT $${params.length}`;
+  sql += ` ORDER BY ${keysetOrder("q.")} LIMIT $${params.length}`;
   const rows = await query<JoinedRow>(sql, params);
   return rows.map(toDTO);
 }

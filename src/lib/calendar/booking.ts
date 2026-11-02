@@ -3,7 +3,7 @@ import { query, queryOne, transaction } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { listSlots, wouldClash, zonedParts, type AvailabilityRule, type Interval } from "@/lib/calendar/slots";
-import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /**
  * Booking domain: calendars, availability, booking types, bookings.
@@ -443,7 +443,7 @@ export async function listBookings(dataId: string, opts: ListBookingsOptions = {
   }
   sql += keysetClause(opts.cursor, params);
   params.push(Math.min(Math.max(opts.limit ?? 100, 1), 500));
-  sql += ` ORDER BY created_at DESC, id DESC LIMIT $${params.length}`;
+  sql += ` ORDER BY ${keysetOrder()} LIMIT $${params.length}`;
   return query<BookingRow>(sql, params);
 }
 

@@ -1,6 +1,6 @@
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
-import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /** Tasks data layer for the public API. Emits `task.created` like the in-app route. */
 
@@ -41,7 +41,7 @@ export async function listTasks(dataId: string, opts: { done?: boolean | null; l
   }
   sql += keysetClause(opts.cursor, params);
   params.push(Math.min(Math.max(opts.limit ?? 50, 1), 500));
-  sql += ` ORDER BY created_at DESC, id DESC LIMIT $${params.length}`;
+  sql += ` ORDER BY ${keysetOrder()} LIMIT $${params.length}`;
   return (await query<TaskRow>(sql, params)).map(toTaskDTO);
 }
 

@@ -2,7 +2,7 @@ import { query as sql } from "@/lib/dsql";
 import { ROUTES } from "@/lib/public-api/registry";
 import { ApiError } from "@/lib/public-api/envelope";
 import { op } from "@/lib/public-api/handler";
-import { keysetClause, page } from "@/lib/public-api/pagination";
+import { keysetClause, keysetOrder, page } from "@/lib/public-api/pagination";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +42,7 @@ export const GET = op(ROUTES.listEvents, async ({ principal, query, list }) => {
   where += keysetClause(list.cursor, params);
   params.push(list.limit + 1);
   const rows = await sql<EventRow>(
-    `SELECT id, type, entity, entity_id, data, created_at FROM events WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT $${params.length}`,
+    `SELECT id, type, entity, entity_id, data, created_at FROM events WHERE ${where} ORDER BY ${keysetOrder()} LIMIT $${params.length}`,
     params
   );
   const p = page(rows, list.limit, (r) => ({ created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at), id: r.id }));

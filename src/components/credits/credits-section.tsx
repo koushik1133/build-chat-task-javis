@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { Coins, Loader2, RefreshCw, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
 import { Checkbox } from "@/components/ui/input";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
+import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { formatCredits, formatCreditsAsMoney } from "@/lib/credits/pricing";
 import type { CreditPack } from "@/lib/credits/packs";
 import type { LedgerEntry } from "@/lib/credits/ledger";
@@ -49,21 +50,24 @@ export function CreditsSection() {
   const [notice, setNotice] = useState<string | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [togglingEnforce, setTogglingEnforce] = useState(false);
+  const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
+    const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/ai/credits", { cache: "no-store" });
+      const res = await fetch("/api/ai/credits", { cache: "no-store", signal });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? "Could not load AI credits.");
       setView(data as CreditsView);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load AI credits.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [nextSignal]);
 
   useEffect(() => {
     void load();
@@ -112,25 +116,26 @@ export function CreditsSection() {
   }
 
   const low = view ? view.balance < 1000 : false;
+  const pendingCount = view ? view.purchases.filter((p) => p.status === "pending").length : 0;
 
   return (
-    <section className="mb-6 rounded-xl border border-border bg-card" aria-labelledby="credits-heading">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+    <section className="mb-6 rounded-xl border border-border bg-card" aria-labelledby="credits-heading" aria-busy={loading || undefined}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
         <div className="min-w-0">
-          <h2 id="credits-heading" className="flex items-center gap-2 font-semibold">
+          <h2 id="credits-heading" className="flex items-center gap-2 text-sm font-semibold">
             <Coins className="h-4 w-4" aria-hidden /> AI credits
           </h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Every model call is debited (provider cost × {view?.markup ?? 1.5}); agent outcomes are priced per agent. 1,000 credits = $1.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} aria-label="Refresh credits">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+        <Button variant="outline" size="sm" touch onClick={() => void load()} disabled={loading} aria-label="Refresh credits">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
           Refresh
         </Button>
       </div>
 
-      <div className="px-5 py-4">
+      <div className="px-4 py-4 sm:px-5">
         {error && (
           <Banner tone="error" onDismiss={() => setError(null)}>
             {error}
@@ -148,13 +153,17 @@ export function CreditsSection() {
         {view && (
           <>
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-              <div className={cn("rounded-xl border p-5", low ? "border-amber-500/40 bg-amber-500/5" : "border-border")}>
+              <div className={cn("rounded-xl border p-4 sm:p-5", low ? "border-amber-500/40 bg-amber-500/5" : "border-border")}>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Balance</p>
-                <p className="mt-1 text-3xl font-semibold tabular-nums" aria-live="polite">
-                  {formatCredits(view.balance)}
+                <p className="mt-1 text-3xl font-semibold tabular-nums" role="status" aria-live="polite">
+                  {formatCredits(view.balance)} <span className="sr-only">credits</span>
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">≈ {formatCreditsAsMoney(view.balance)}</p>
-                {low && <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">Running low — buy a pack to keep agents running.</p>}
+                {low && (
+                  <p className="mt-2 text-xs font-medium text-amber-800 dark:text-amber-300" role="status">
+                    Running low. Buy a pack to keep agents running.
+                  </p>
+                )}
                 <div className="mt-4">
                   <Checkbox
                     label={
@@ -186,58 +195,45 @@ export function CreditsSection() {
                         disabled={buying !== null}
                         aria-label={`Buy ${p.name} pack for ${fmtMoney(p.price_minor, p.currency)}`}
                       >
-                        {buying === p.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <ShoppingCart className="h-4 w-4" aria-hidden />}
+                        {buying === p.id ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <ShoppingCart className="h-4 w-4" aria-hidden />}
                         Buy
                       </Button>
                     </li>
                   ))}
                 </ul>
                 {view.provider === "simulated" && (
-                  <p className="mt-2 text-xs text-muted-foreground">Payments run in simulated mode: checkout opens a page where you confirm a test payment — no card is charged.</p>
+                  <p className="mt-2 text-xs text-muted-foreground">Payments run in simulated mode: checkout opens a page where you confirm a test payment. No card is charged.</p>
                 )}
               </div>
             </div>
 
             <h3 className="mb-2 mt-6 text-sm font-semibold">Ledger</h3>
             {view.ledger.length === 0 ? (
-              <Empty icon={<Coins className="h-5 w-5" />} title="No credit activity yet" text="Usage, purchases and outcome charges will appear here." />
+              <Empty icon={<Coins className="h-5 w-5" aria-hidden />} title="No credit activity yet" text="Usage, purchases and outcome charges will appear here. Buy a pack above to get started." className="py-8" />
             ) : (
               <TableScroller label="Credit ledger">
                 <table className="w-full min-w-[560px] text-sm">
                   <thead className={THEAD}>
                     <tr>
-                      <th className={TH}>When</th>
-                      <th className={TH}>Kind</th>
-                      <th className={TH}>Note</th>
-                      <th className={cn(TH, "text-right")}>Credits</th>
-                      <th className={cn(TH, "text-right")}>Balance</th>
+                      <th scope="col" className={TH}>When</th>
+                      <th scope="col" className={TH}>Kind</th>
+                      <th scope="col" className={TH}>Note</th>
+                      <th scope="col" className={cn(TH, "text-right")}>Credits</th>
+                      <th scope="col" className={cn(TH, "text-right")}>Balance</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {view.ledger.map((e) => (
-                      <tr key={e.id}>
-                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{fmtDate(e.created_at)}</td>
-                        <td className="px-3 py-2">
-                          <Pill tone={KIND_TONE[e.kind] ?? "neutral"}>{e.kind}</Pill>
-                        </td>
-                        <td className="max-w-[260px] truncate px-3 py-2 text-muted-foreground" title={e.note ?? undefined}>
-                          {e.note ?? (e.ref_kind ? `${e.ref_kind} ${e.ref_id ?? ""}` : "—")}
-                        </td>
-                        <td className={cn("px-3 py-2 text-right tabular-nums", e.credits < 0 ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300")}>
-                          {e.credits > 0 ? "+" : ""}
-                          {new Intl.NumberFormat().format(e.credits)}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{new Intl.NumberFormat().format(e.balance_after)}</td>
-                      </tr>
+                      <LedgerRow key={e.id} entry={e} />
                     ))}
                   </tbody>
                 </table>
               </TableScroller>
             )}
 
-            {view.purchases.some((p) => p.status === "pending") && (
-              <p className="mt-3 text-xs text-muted-foreground">
-                {view.purchases.filter((p) => p.status === "pending").length} checkout(s) still pending — credits land once the payment is confirmed.
+            {pendingCount > 0 && (
+              <p className="mt-3 text-xs text-muted-foreground" role="status">
+                {pendingCount} checkout{pendingCount === 1 ? " is" : "s are"} still pending. Credits land once the payment is confirmed.
               </p>
             )}
           </>
@@ -246,3 +242,24 @@ export function CreditsSection() {
     </section>
   );
 }
+
+const LedgerRow = memo(function LedgerRow({ entry: e }: { entry: LedgerEntry }) {
+  return (
+    <tr>
+      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+        <time dateTime={e.created_at}>{fmtDate(e.created_at)}</time>
+      </td>
+      <td className="px-3 py-2">
+        <Pill tone={KIND_TONE[e.kind] ?? "neutral"}>{e.kind}</Pill>
+      </td>
+      <td className="max-w-[260px] truncate px-3 py-2 text-muted-foreground" title={e.note ?? undefined}>
+        {e.note ?? (e.ref_kind ? `${e.ref_kind} ${e.ref_id ?? ""}` : "—")}
+      </td>
+      <td className={cn("px-3 py-2 text-right tabular-nums", e.credits < 0 ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300")}>
+        {e.credits > 0 ? "+" : ""}
+        {new Intl.NumberFormat().format(e.credits)}
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums">{new Intl.NumberFormat().format(e.balance_after)}</td>
+    </tr>
+  );
+});

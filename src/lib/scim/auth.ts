@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/dsql";
 import { SCIM_CONTENT_TYPE, scimError, type ScimType } from "./schema";
 
+/** Minimal env shape so callers (and tests) can pass a plain object instead of process.env. */
+type EnvLike = Record<string, string | undefined>;
+
 /**
  * SCIM bearer tokens. One token authorises provisioning for exactly one
  * workspace: `user_id` is the org data id (organizations.owner_user_id), so a
@@ -110,8 +113,10 @@ export async function authenticateScim(req: Request): Promise<{ ok: true; ctx: S
   return { ok: true, ctx };
 }
 
-/** `https://host/api/scim/v2` for the current request. */
-export function scimBaseUrl(req: Request): string {
+/** `https://host/api/scim/v2` — the configured app origin when set, else derived from the request. */
+export function scimBaseUrl(req: Request, env: EnvLike = process.env): string {
+  const configured = env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+  if (configured) return `${configured}/api/scim/v2`;
   const u = new URL(req.url);
   const proto = req.headers.get("x-forwarded-proto") ?? u.protocol.replace(":", "");
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? u.host;

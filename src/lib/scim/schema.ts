@@ -104,8 +104,11 @@ const FILTER_RE = /^\s*([A-Za-z][A-Za-z0-9_.:$-]*)\s+(eq|ne|co|sw|ew|pr)(?:\s+(?
  * `attr op "value"`, `attr pr`, booleans and numbers. Anything else
  * (and/or/not, grouping, complex paths) returns null → 400 invalidFilter.
  */
+export const MAX_FILTER_LENGTH = 512;
+
 export function parseFilter(raw: string | null | undefined): ScimFilter | null {
   if (!raw || !raw.trim()) return null;
+  if (raw.length > MAX_FILTER_LENGTH) return null;
   const m = FILTER_RE.exec(raw);
   if (!m) return null;
   const [, attr, opRaw, str, lit, num] = m;

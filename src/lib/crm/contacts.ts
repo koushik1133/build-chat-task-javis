@@ -1,7 +1,7 @@
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { likeContains } from "@/lib/like";
-import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /**
  * CRM contacts data layer (used by the public API; the in-app route keeps its
@@ -101,7 +101,7 @@ export async function listContacts(dataId: string, opts: ListContactsOptions = {
   }
   sql += keysetClause(opts.cursor, params);
   params.push(Math.min(Math.max(opts.limit ?? 50, 1), 500));
-  sql += ` ORDER BY created_at DESC, id DESC LIMIT $${params.length}`;
+  sql += ` ORDER BY ${keysetOrder()} LIMIT $${params.length}`;
   return (await query<ContactRow>(sql, params)).map(toContactDTO);
 }
 

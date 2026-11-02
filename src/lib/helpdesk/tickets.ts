@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne, withRetry } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { enqueueNotification } from "@/lib/notifications/outbox";
-import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import {
   computeDueTimes,
   isTicketPriority,
@@ -361,7 +361,7 @@ export async function listTickets(dataId: string, opts: ListTicketsOptions = {})
     const keyset = keysetClause(opts.cursor, params);
     params.push(limit);
     return query<TicketRow>(
-      `SELECT ${TICKET_COLS} FROM tickets WHERE ${where.join(" AND ")}${keyset} ORDER BY created_at DESC, id DESC LIMIT $${params.length}`,
+      `SELECT ${TICKET_COLS} FROM tickets WHERE ${where.join(" AND ")}${keyset} ORDER BY ${keysetOrder()} LIMIT $${params.length}`,
       params
     );
   }

@@ -9,7 +9,7 @@ import type { PaymentEvent } from "@/lib/payments/types";
 import { computeTotals, formatMoney, parseItems, type LineItem } from "./items";
 import { businessName, getQuote } from "./quotes";
 import { consumeForInvoice } from "@/lib/inventory/stock";
-import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 export { computeTotals } from "./items";
 export type { LineItem } from "./items";
@@ -109,7 +109,7 @@ export async function listInvoices(dataId: string, opts: { status?: string; limi
   }
   sql += keysetClause(opts.cursor, params, { alias: "i." });
   params.push(Math.min(Math.max(opts.limit ?? 100, 1), 500));
-  sql += ` ORDER BY i.created_at DESC, i.id DESC LIMIT $${params.length}`;
+  sql += ` ORDER BY ${keysetOrder("i.")} LIMIT $${params.length}`;
   return (await query<JoinedRow>(sql, params)).map(toDTO);
 }
 

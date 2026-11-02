@@ -336,23 +336,24 @@ export async function executeEvalRun(evalRunId: string): Promise<EvalRunRow | nu
         model,
       ]).catch(() => undefined);
     }
-  } catch (err) {
-    return fail(errorMessage(err));
-  }
 
-  const summary = aggregateScores(results);
-  const allErrored = results.length > 0 && results.every((r) => r.error && r.score === null);
-  await query(
-    `UPDATE agent_eval_runs SET status = $2, score = $3, results = $4, model = $5, cost_micros = $6, error = $7, finished_at = NOW() WHERE id = $1`,
-    [
-      run.id,
-      allErrored ? "failed" : "done",
-      summary.score,
-      JSON.stringify(results),
-      model,
-      totalCost,
-      allErrored ? results[0]?.error ?? "all cases failed" : null,
-    ]
-  );
+    const summary = aggregateScores(results);
+    const allErrored = results.length > 0 && results.every((r) => r.error && r.score === null);
+    await query(
+      `UPDATE agent_eval_runs SET status = $2, score = $3, results = $4, model = $5, cost_micros = $6, error = $7, finished_at = NOW() WHERE id = $1`,
+      [
+        run.id,
+        allErrored ? "failed" : "done",
+        summary.score,
+        JSON.stringify(results),
+        model,
+        totalCost,
+        allErrored ? results[0]?.error ?? "all cases failed" : null,
+      ]
+    );
+  } catch (err) {
+    // Covers the final write too: a run must never be left in "running" (the job has one attempt).
+    return fail(errorMessage(err)).catch(() => null);
+  }
   return getEvalRun(run.user_id, run.id);
 }

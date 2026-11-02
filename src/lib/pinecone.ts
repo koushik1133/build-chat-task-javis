@@ -53,18 +53,34 @@ export type RetrievedChunk = {
   score: number;
 };
 
+/** File-id prefix of agent correction memories (src/lib/agents/memory.ts); they share the namespace with uploads. */
+export const CORRECTION_FILE_PREFIX = "corr:";
+
+export interface SearchChunksOptions {
+  /** Return correction memories too (only the corrections recall wants them). Default false. */
+  includeCorrections?: boolean;
+}
+
+/** Pure: drop correction memories from a hit list unless asked for. */
+export function filterRetrieved(hits: RetrievedChunk[], opts: SearchChunksOptions = {}): RetrievedChunk[] {
+  return opts.includeCorrections ? hits : hits.filter((h) => !h.fileId.startsWith(CORRECTION_FILE_PREFIX));
+}
+
 export async function searchChunks(
   userId: string,
   query: string,
-  topK = 5
+  topK = 5,
+  opts: SearchChunksOptions = {}
 ): Promise<RetrievedChunk[]> {
   await ensureIndex();
   const ns = pc().index(INDEX).namespace(userId);
+  // Over-fetch a little so filtering out corrections still fills `topK` for knowledge searches.
+  const fetchK = opts.includeCorrections ? topK : Math.min(topK * 2, topK + 10);
   const res = await ns.searchRecords({
-    query: { topK, inputs: { text: query } },
+    query: { topK: fetchK, inputs: { text: query } },
     fields: ["chunk_text", "file_name", "file_id"],
   });
-  return (res.result?.hits ?? []).map((h) => {
+  const hits = (res.result?.hits ?? []).map((h) => {
     const f = (h.fields ?? {}) as Record<string, unknown>;
     return {
       text: String(f.chunk_text ?? ""),
@@ -73,6 +89,7 @@ export async function searchChunks(
       score: h._score ?? 0,
     };
   });
+  return filterRetrieved(hits, opts).slice(0, topK);
 }
 
 export async function deleteFile(userId: string, fileId: string) {

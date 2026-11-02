@@ -7,6 +7,9 @@ import { recordOptOut, type CampaignRow, type TargetRow } from "./campaigns";
 import { buildCampaignTwiml, buildGatherResultTwiml, buildHangupTwiml, interpretDigits, mergeScript, webhookUrl, type GatherOutcome } from "./twiml";
 import { canDialNow, isRetryDue, type CallWindow } from "./window";
 
+/** Minimal env shape so callers (and tests) can pass a plain object instead of process.env. */
+type EnvLike = Record<string, string | undefined>;
+
 /**
  * The dialer. `dialNext` is the cron hook: it picks running campaigns whose
  * local calling window is open, takes due targets (never on the DNC list —
@@ -55,11 +58,23 @@ export async function renderScript(campaign: CampaignRow, target: TargetRow): Pr
   return mergeScript(campaign.script, fields) || "Hello, this is an automated call.";
 }
 
-async function markAttempt(target: TargetRow, callSid: string | null): Promise<void> {
-  await query(
-    `UPDATE voice_campaign_targets SET status = 'calling', attempts = attempts + 1, last_attempt_at = NOW(), call_sid = $1 WHERE id = $2`,
-    [callSid, target.id]
+/**
+ * Claim a target for one attempt. Conditional on the retryable status and the
+ * attempt budget so two overlapping ticks (or workers) can never dial the same
+ * person twice: only the claimant that flips the row proceeds.
+ */
+export async function claimAttempt(target: Pick<TargetRow, "id">, maxAttempts: number): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `UPDATE voice_campaign_targets SET status = 'calling', attempts = attempts + 1, last_attempt_at = NOW(), call_sid = NULL
+      WHERE id = $1 AND status IN ('queued','no_answer','voicemail','failed') AND attempts < $2
+      RETURNING id`,
+    [target.id, Math.max(1, maxAttempts)]
   );
+  return Boolean(row);
+}
+
+async function setCallSid(target: Pick<TargetRow, "id">, callSid: string | null): Promise<void> {
+  await query(`UPDATE voice_campaign_targets SET call_sid = $1 WHERE id = $2`, [callSid, target.id]);
 }
 
 async function insertCall(target: TargetRow, callSid: string | null, status: string): Promise<string> {
@@ -141,7 +156,8 @@ export async function completeTarget(
       target.id,
     ]);
   }
-  if (input.status === "opted_out") {
+  // A simulated call never touches the real do-not-call list: the outcome is a dice roll.
+  if (input.status === "opted_out" && !input.simulated) {
     await recordOptOut(target.user_id, { phone: target.phone, contact_id: target.contact_id, channel: "voice", reason: "Pressed 2 during campaign call" }).catch(() => undefined);
   }
   void emitEvent(target.user_id, {
@@ -167,16 +183,18 @@ export async function maybeFinishCampaign(dataId: string, campaignId: string): P
   return true;
 }
 
-async function dialOne(t: TargetWithCampaign, mode: VoiceMode): Promise<"dialed" | "simulated" | "failed"> {
+async function dialOne(t: TargetWithCampaign, mode: VoiceMode): Promise<"dialed" | "simulated" | "failed" | "skipped"> {
+  // Claim first: the row flips to 'calling' before any call is placed, so a
+  // concurrent tick that selected the same target finds nothing to claim.
+  if (!(await claimAttempt(t, t.campaign.max_attempts))) return "skipped";
   if (mode === "live") {
     try {
       const sid = await createTwilioCall(t);
-      await markAttempt(t, sid);
+      await setCallSid(t, sid);
       await insertCall(t, sid, "queued");
       return "dialed";
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await markAttempt(t, null);
       await insertCall(t, null, "failed");
       await completeTarget(t, { status: "failed", callStatus: "failed", outcome: { error: message.slice(0, 200) } });
       return "failed";
@@ -184,7 +202,7 @@ async function dialOne(t: TargetWithCampaign, mode: VoiceMode): Promise<"dialed"
   }
   // Simulated: the call "happens" instantly with a random outcome.
   const sid = `SIM${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
-  await markAttempt(t, sid);
+  await setCallSid(t, sid);
   await insertCall(t, sid, "simulated");
   const o = pickSimulatedOutcome();
   const gather = o.digits !== undefined ? interpretDigits(o.digits) : null;
@@ -238,6 +256,7 @@ export async function dialNext(limit = 20, now = new Date()): Promise<DialResult
       if (budget <= 0) break;
       budget--;
       const r = await dialOne({ ...t, campaign: c }, mode);
+      if (r === "skipped") continue; // another worker claimed it first
       if (r === "dialed") result.dialed++;
       else if (r === "simulated") result.simulated++;
       else result.failed++;
@@ -252,15 +271,16 @@ export async function dialNext(limit = 20, now = new Date()): Promise<DialResult
  * Verify Twilio's signature for the campaign webhook. The URL Twilio signed
  * includes the query string (target + kind), so candidates keep `search`.
  */
-export function verifyCampaignSignature(req: Request, params: URLSearchParams): boolean {
-  if (process.env.TWILIO_SKIP_SIGNATURE_VERIFICATION === "true") return true;
-  const token = process.env.TWILIO_AUTH_TOKEN ?? "";
+export function verifyCampaignSignature(req: Request, params: URLSearchParams, env: EnvLike = process.env): boolean {
+  // The dev-only bypass is ignored in production so a leaked env flag can never open the webhook.
+  if (env.TWILIO_SKIP_SIGNATURE_VERIFICATION === "true" && env.NODE_ENV !== "production") return true;
+  const token = env.TWILIO_AUTH_TOKEN ?? "";
   const provided = req.headers.get("x-twilio-signature");
   if (!token || !provided) return false;
   const url = new URL(req.url);
   const pathAndQuery = `${url.pathname}${url.search}`;
   const candidates = new Set<string>([req.url]);
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+  const configured = env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
   if (configured) candidates.add(`${configured}${pathAndQuery}`);
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   const proto = req.headers.get("x-forwarded-proto") ?? "https";

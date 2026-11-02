@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Loader2, Pause, PhoneCall, PhoneOutgoing, Play, Plus, RefreshCw, Square, UserPlus } from "lucide-react";
 import { PageContainer } from "@/components/page-container";
@@ -9,7 +9,7 @@ import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
-import { Pill, StatusPill, type Tone } from "@/components/ui/pill";
+import { Pill, StatusPill, TONE, type Tone } from "@/components/ui/pill";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
 import { isAbortError, useAbortable, useDebouncedValue } from "@/components/ui/hooks";
 import type { CallRow, CampaignRow, TargetRow } from "@/lib/voice/campaigns";
@@ -50,7 +50,7 @@ export default function VoicePage() {
   return (
     <Suspense
       fallback={
-        <PageContainer wide title="Voice Campaigns">
+        <PageContainer wide title="Voice campaigns">
           <Loading label="Loading campaigns…" />
         </PageContainer>
       }
@@ -89,7 +89,7 @@ function VoiceInner() {
       if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load campaigns.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [nextSignal]);
 
@@ -97,20 +97,25 @@ function VoiceInner() {
     void load();
   }, [load]);
 
-  const select = (id: string | null) => router.replace(id ? `/voice?campaign=${encodeURIComponent(id)}` : "/voice");
+  const select = useCallback((id: string | null) => router.replace(id ? `/voice?campaign=${encodeURIComponent(id)}` : "/voice", { scroll: false }), [router]);
 
   return (
     <PageContainer
       wide
-      title="Voice Campaigns"
+      title="Voice campaigns"
       icon={<PhoneOutgoing className="h-5 w-5" aria-hidden />}
       description="Automated outbound calls that read a script to your contacts and capture a yes/no with one key press."
       tooltip="Calls are placed by the background worker inside the campaign's calling window, in its timezone. Contacts on the do-not-call list are never dialled. Press 2 on a call opts the number out automatically."
       actions={
-        <Button onClick={() => setWizard(true)} disabled={!migrated} touch>
-          <Plus className="h-4 w-4" aria-hidden />
-          New campaign
-        </Button>
+        <>
+          <Button variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh campaigns">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+          </Button>
+          <Button onClick={() => setWizard(true)} disabled={!migrated} touch>
+            <Plus className="h-4 w-4" aria-hidden />
+            New campaign
+          </Button>
+        </>
       }
     >
       {notice && (
@@ -150,12 +155,9 @@ function VoiceInner() {
         />
       ) : (
         <>
-          <div className="mb-3 flex justify-end">
-            <Button variant="ghost" size="sm" onClick={() => void load()} disabled={loading} aria-label="Refresh campaigns">
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
-              Refresh
-            </Button>
-          </div>
+          <p className="sr-only" role="status" aria-live="polite">
+            {loading ? "Refreshing campaigns…" : `${campaigns.length} campaign${campaigns.length === 1 ? "" : "s"}`}
+          </p>
           <TableScroller label="Campaigns">
             <table className="w-full min-w-[760px] text-sm">
               <thead className={THEAD}>
@@ -171,23 +173,7 @@ function VoiceInner() {
               </thead>
               <tbody className="divide-y divide-border">
                 {campaigns.map((c) => (
-                  <tr key={c.id} className="hover:bg-secondary/40">
-                    <td className="px-3 py-2">
-                      <button type="button" onClick={() => select(c.id)} className="min-h-11 text-left font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">
-                        {c.name}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">
-                      <StatusPill status={c.status} map={CAMPAIGN_TONE} />
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">
-                      {c.window_start}–{c.window_end} <span className="text-xs">{c.timezone}</span>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{c.stats.total}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{c.stats.answered}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{c.stats.interested}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{timeAgo(c.updated_at)}</td>
-                  </tr>
+                  <CampaignRowItem key={c.id} c={c} onSelect={select} />
                 ))}
               </tbody>
             </table>
@@ -211,16 +197,58 @@ function VoiceInner() {
   );
 }
 
+const CampaignRowItem = memo(function CampaignRowItem({ c, onSelect }: { c: CampaignListRow; onSelect: (id: string) => void }) {
+  return (
+    <tr className="hover:bg-secondary/40">
+      <td className="px-3 py-2">
+        <button type="button" onClick={() => onSelect(c.id)} className="inline-flex min-h-11 items-center rounded text-left font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">
+          {c.name}
+        </button>
+      </td>
+      <td className="px-3 py-2">
+        <StatusPill status={c.status} map={CAMPAIGN_TONE} />
+      </td>
+      <td className="px-3 py-2 text-muted-foreground">
+        {c.window_start}–{c.window_end} <span className="text-xs">{c.timezone}</span>
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums">{c.stats.total}</td>
+      <td className="px-3 py-2 text-right tabular-nums">{c.stats.answered}</td>
+      <td className="px-3 py-2 text-right tabular-nums">{c.stats.interested}</td>
+      <td className="px-3 py-2 text-muted-foreground">{timeAgo(c.updated_at)}</td>
+    </tr>
+  );
+});
+
 // ── Detail ───────────────────────────────────────────────────────────────────
 
 function StatTile({ label, value, tone }: { label: string; value: number; tone?: Tone }) {
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={cn("text-xl font-semibold tabular-nums", tone === "success" && "text-emerald-600 dark:text-emerald-400", tone === "danger" && "text-red-600 dark:text-red-400")}>{value}</div>
+      <div className={cn("text-xl font-semibold tabular-nums", tone && tone !== "neutral" && cn("inline-block rounded-md px-1.5", TONE[tone]))}>{value}</div>
     </div>
   );
 }
+
+const TargetRowItem = memo(function TargetRowItem({ t, call }: { t: TargetRow; call: CallRow | undefined }) {
+  const o = parseOutcome(t.outcome);
+  return (
+    <tr>
+      <td className="px-3 py-2 font-mono text-xs">{t.phone}</td>
+      <td className="px-3 py-2">{t.first_name ?? <span className="text-muted-foreground">—</span>}</td>
+      <td className="px-3 py-2">
+        <StatusPill status={t.status} map={TARGET_TONE} />
+      </td>
+      <td className="px-3 py-2 text-xs text-muted-foreground">
+        {o.gather === "interested" ? <Pill tone="success">Pressed 1 · interested</Pill> : o.gather === "opted_out" ? <Pill tone="danger">Pressed 2 · opt out</Pill> : o.error ? <Pill tone="danger" className="whitespace-normal">{o.error}</Pill> : o.answered_by?.startsWith("machine") ? "Voicemail" : o.gather === "no_input" ? "No key pressed" : "—"}
+        {o.simulated && <span className="ml-1 text-[10px] uppercase tracking-wide">(simulated)</span>}
+        {call?.duration_s ? <span className="ml-1">· {call.duration_s}s</span> : null}
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums">{t.attempts}</td>
+      <td className="px-3 py-2 text-muted-foreground">{t.last_attempt_at ? timeAgo(t.last_attempt_at) : "—"}</td>
+    </tr>
+  );
+});
 
 function CampaignDetail({ id, mode, onBack, onChanged, setNotice }: { id: string; mode: Mode; onBack: () => void; onChanged: () => void; setNotice: (n: Notice | null) => void }) {
   const nextSignal = useAbortable();
@@ -250,7 +278,7 @@ function CampaignDetail({ id, mode, onBack, onChanged, setNotice }: { id: string
       if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load the campaign.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [id, nextSignal]);
 
@@ -311,35 +339,35 @@ function CampaignDetail({ id, mode, onBack, onChanged, setNotice }: { id: string
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => setAddOpen(true)} disabled={campaign.status === "done"}>
+          <Button size="sm" variant="outline" touch onClick={() => setAddOpen(true)} disabled={campaign.status === "done"}>
             <UserPlus className="h-3.5 w-3.5" aria-hidden />
             Add targets
           </Button>
           {canStart && (
-            <Button size="sm" onClick={() => void setStatus("running")} disabled={busy || stats.total === 0} title={stats.total === 0 ? "Add targets first" : undefined}>
+            <Button size="sm" touch onClick={() => void setStatus("running")} disabled={busy || stats.total === 0} title={stats.total === 0 ? "Add targets first" : undefined}>
               <Play className="h-3.5 w-3.5" aria-hidden />
               {campaign.status === "paused" ? "Resume" : "Start"}
             </Button>
           )}
           {canPause && (
-            <Button size="sm" variant="outline" onClick={() => void setStatus("paused")} disabled={busy}>
+            <Button size="sm" variant="outline" touch onClick={() => void setStatus("paused")} disabled={busy}>
               <Pause className="h-3.5 w-3.5" aria-hidden />
               Pause
             </Button>
           )}
           {canFinish && (
-            <Button size="sm" variant="ghost" onClick={() => void setStatus("done")} disabled={busy}>
+            <Button size="sm" variant="ghost" touch onClick={() => void setStatus("done")} disabled={busy}>
               <Square className="h-3.5 w-3.5" aria-hidden />
               Finish
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => void load()} aria-label="Refresh campaign">
+          <Button size="icon-sm" variant="ghost" touch onClick={() => void load()} aria-label="Refresh campaign">
             <RefreshCw className="h-3.5 w-3.5" aria-hidden />
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8" aria-label="Campaign stats">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8" role="group" aria-label="Campaign stats" aria-live={campaign.status === "running" ? "polite" : undefined}>
         <StatTile label="Targets" value={stats.total} />
         <StatTile label="Queued" value={stats.queued} />
         <StatTile label="Calling" value={stats.calling} />
@@ -351,12 +379,12 @@ function CampaignDetail({ id, mode, onBack, onChanged, setNotice }: { id: string
       </div>
 
       <details className="rounded-lg border border-border bg-card p-3">
-        <summary className="cursor-pointer text-sm font-medium">Script</summary>
+        <summary className="cursor-pointer rounded text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Script</summary>
         <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{campaign.script}</p>
       </details>
 
       {targets.length === 0 ? (
-        <Empty icon={<UserPlus className="h-5 w-5" />} title="No targets yet" text="Add contacts or phone numbers to this campaign." action={<Button size="sm" onClick={() => setAddOpen(true)}>Add targets</Button>} />
+        <Empty icon={<UserPlus className="h-5 w-5" />} title="No targets yet" text="Add contacts or phone numbers to this campaign." action={<Button touch onClick={() => setAddOpen(true)}><UserPlus className="h-4 w-4" aria-hidden /> Add targets</Button>} />
       ) : (
         <TableScroller label="Campaign targets">
           <table className="w-full min-w-[720px] text-sm">
@@ -371,26 +399,9 @@ function CampaignDetail({ id, mode, onBack, onChanged, setNotice }: { id: string
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {targets.map((t) => {
-                const o = parseOutcome(t.outcome);
-                const call = callBySid.get(t.call_sid ?? "");
-                return (
-                  <tr key={t.id}>
-                    <td className="px-3 py-2 font-mono text-xs">{t.phone}</td>
-                    <td className="px-3 py-2">{t.first_name ?? <span className="text-muted-foreground">—</span>}</td>
-                    <td className="px-3 py-2">
-                      <StatusPill status={t.status} map={TARGET_TONE} />
-                    </td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {o.gather === "interested" ? <Pill tone="success">Pressed 1 · interested</Pill> : o.gather === "opted_out" ? <Pill tone="danger">Pressed 2 · opt out</Pill> : o.error ? <span className="text-red-700 dark:text-red-300">{o.error}</span> : o.answered_by?.startsWith("machine") ? "Voicemail" : o.gather === "no_input" ? "No key pressed" : "—"}
-                      {o.simulated && <span className="ml-1 text-[10px] uppercase tracking-wide">(simulated)</span>}
-                      {call?.duration_s ? <span className="ml-1">· {call.duration_s}s</span> : null}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{t.attempts}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{t.last_attempt_at ? timeAgo(t.last_attempt_at) : "—"}</td>
-                  </tr>
-                );
-              })}
+              {targets.map((t) => (
+                <TargetRowItem key={t.id} t={t} call={callBySid.get(t.call_sid ?? "")} />
+              ))}
             </tbody>
           </table>
         </TableScroller>
@@ -476,7 +487,7 @@ function AudienceEditor({ value, onChange }: { value: AudienceState; onChange: (
         <div className="flex flex-wrap gap-3">
           {(["filter", "phones"] as const).map((s) => (
             <label key={s} className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-0">
-              <input type="radio" name="audience-source" value={s} checked={value.source === s} onChange={() => onChange({ ...value, source: s })} className="accent-primary" />
+              <input type="radio" name="audience-source" value={s} checked={value.source === s} onChange={() => onChange({ ...value, source: s })} className="h-4 w-4 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background" />
               {s === "filter" ? "CRM contacts" : "Paste phone numbers"}
             </label>
           ))}
@@ -504,7 +515,7 @@ function AudienceEditor({ value, onChange }: { value: AudienceState; onChange: (
           </div>
           <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
             {previewErr ? (
-              <span className="text-red-700 dark:text-red-300">{previewErr}</span>
+              <span className="text-destructive">{previewErr}</span>
             ) : preview ? (
               <>
                 {preview.total} contact{preview.total === 1 ? "" : "s"} match (first 200 shown), <strong>{preview.withPhone}</strong> with a phone number. Contacts tagged <code className="font-mono">do_not_call</code> or on the opt-out list are skipped.
@@ -555,11 +566,11 @@ function AddTargetsDialog({ campaignId, onClose, onDone }: { campaignId: string;
         {err && <Banner tone="error">{err}</Banner>}
         <AudienceEditor value={audience} onChange={setAudience} />
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" touch onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || (audience.source === "phones" && parsePhoneLines(audience.phones).length === 0)}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          <Button type="submit" touch disabled={busy || (audience.source === "phones" && parsePhoneLines(audience.phones).length === 0)}>
+            {busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}
             Add targets
           </Button>
         </DialogFooter>
@@ -653,7 +664,7 @@ function CampaignWizard({ mode, onClose, onCreated }: { mode: Mode; onClose: () 
           </li>
         ))}
       </ol>
-      {err && <Banner tone="error">{err}</Banner>}
+      {err && <Banner tone="error" onDismiss={() => setErr(null)}>{err}</Banner>}
 
       <form
         onSubmit={(e) => {
@@ -663,7 +674,7 @@ function CampaignWizard({ mode, onClose, onCreated }: { mode: Mode; onClose: () 
       >
         {step === 0 && (
           <Field label="Campaign name" required hint="Internal only — callers never hear it.">
-            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} autoFocus required />
+            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} data-autofocus required />
           </Field>
         )}
 
@@ -748,19 +759,19 @@ function CampaignWizard({ mode, onClose, onCreated }: { mode: Mode; onClose: () 
 
         <DialogFooter start={step > 0 ? <span>Back to change anything before launch.</span> : undefined}>
           {step > 0 && (
-            <Button type="button" variant="ghost" onClick={() => setStep((s) => s - 1)} disabled={busy}>
+            <Button type="button" variant="ghost" touch onClick={() => setStep((s) => s - 1)} disabled={busy}>
               Back
             </Button>
           )}
           {step < STEPS.length - 1 ? (
-            <Button type="submit">Next</Button>
+            <Button type="submit" touch>Next</Button>
           ) : (
             <>
-              <Button type="button" variant="outline" onClick={() => void create(false)} disabled={busy}>
+              <Button type="button" variant="outline" touch onClick={() => void create(false)} disabled={busy}>
                 Save as draft
               </Button>
-              <Button type="button" onClick={() => void create(true)} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
+              <Button type="button" touch onClick={() => void create(true)} disabled={busy}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
                 {scheduleAt ? "Schedule" : "Start calling"}
               </Button>
             </>

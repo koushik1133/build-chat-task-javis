@@ -207,6 +207,26 @@ export async function syncAccount(accountId: string): Promise<SyncResult> {
   return result;
 }
 
+/**
+ * Claim an account for a sync by bumping `last_sync_at` first (conditional
+ * UPDATE), so the cron and a manual "Sync now" can never run the same mailbox
+ * concurrently and ingest a message twice. `minGapMs` is how recently the last
+ * sync may have started for the claim to still succeed.
+ */
+export async function claimAccountForSync(accountId: string, minGapMs: number): Promise<boolean> {
+  const cutoff = new Date(Date.now() - Math.max(0, minGapMs)).toISOString();
+  const claimed = await queryOne<{ id: string }>(
+    `UPDATE mail_accounts SET last_sync_at = NOW()
+      WHERE id = $1 AND status <> 'disabled' AND (last_sync_at IS NULL OR last_sync_at < $2)
+      RETURNING id`,
+    [accountId, cutoff]
+  ).catch(() => null);
+  return Boolean(claimed);
+}
+
+/** How long a manual sync is assumed to run for; a second click inside this window is rejected. */
+export const MANUAL_SYNC_GAP_MS = 20_000;
+
 export interface SyncDueResult {
   claimed: number;
   imported: number;
@@ -233,13 +253,7 @@ export async function syncDueAccounts(limit = 20): Promise<SyncDueResult> {
   ).catch(() => []);
 
   for (const row of due) {
-    const claimed = await queryOne<{ id: string }>(
-      `UPDATE mail_accounts SET last_sync_at = NOW()
-        WHERE id = $1 AND (last_sync_at IS NULL OR last_sync_at < $2)
-        RETURNING id`,
-      [row.id, cutoff]
-    ).catch(() => null);
-    if (!claimed) continue;
+    if (!(await claimAccountForSync(row.id, SYNC_INTERVAL_MINUTES * 60_000))) continue;
     out.claimed++;
     const r = await syncAccount(row.id);
     out.imported += r.imported;

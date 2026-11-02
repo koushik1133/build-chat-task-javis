@@ -113,10 +113,10 @@ export default function AgencyClientsPage() {
       title="Client workspaces"
       description="Each client gets its own isolated workspace. Switch into one to work in it, invite their team, and roll numbers up here."
       tooltip="A client workspace is a separate organization owned by this agency. Its CRM, billing, calendar and helpdesk data stay separate; you see the totals on Reports."
-      eyebrow={<Link href="/agency" className="text-xs text-muted-foreground underline-offset-2 hover:underline">← Agency Command</Link>}
+      eyebrow={<Link href="/agency" className="text-xs text-muted-foreground underline-offset-2 hover:underline">← Agency command</Link>}
       actions={
         <>
-          <Button variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh">
+          <Button variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh client workspaces">
             {loading ? spinner : <RefreshCw className="h-4 w-4" aria-hidden />}
           </Button>
           {canEdit && !isClientOrg && (
@@ -138,6 +138,9 @@ export default function AgencyClientsPage() {
         </p>
         <Checkbox label="Show archived" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
       </div>
+      <p className="sr-only" role="status" aria-live="polite">
+        {loading ? "Loading client workspaces…" : data ? `${clients.length} client workspace${clients.length === 1 ? "" : "s"} shown` : ""}
+      </p>
 
       {loading && !data ? (
         <SkeletonList count={3} itemClassName="h-40" label="Loading client workspaces…" />
@@ -330,7 +333,7 @@ function InviteDialog({ client, onClose, onInvited }: { client: Client; onClose:
           <Field label="Role" hint="Admins manage their team; members and viewers get scoped access.">
             <Select value={role} onChange={(e) => setRole(e.target.value as Exclude<Role, "owner">)}>
               {ASSIGNABLE.filter((r) => canManageRole("owner", r)).map((r) => (
-                <option key={r} value={r}>{r}</option>
+                <option key={r} value={r}>{r[0].toUpperCase() + r.slice(1)}</option>
               ))}
             </Select>
           </Field>

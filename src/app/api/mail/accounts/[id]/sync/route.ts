@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { getMailAccount } from "@/lib/mail";
-import { syncAccount } from "@/lib/mail/sync";
+import { claimAccountForSync, MANUAL_SYNC_GAP_MS, syncAccount } from "@/lib/mail/sync";
 import { rateLimit } from "@/lib/request-limits";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +22,10 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   try {
     const account = await getMailAccount(scope.dataId, id);
     if (!account) return NextResponse.json({ error: "Account not found" }, { status: 404 });
+    // Same claim the cron uses: never run two syncs of one mailbox at the same time.
+    if (!(await claimAccountForSync(account.id, MANUAL_SYNC_GAP_MS))) {
+      return NextResponse.json({ error: "A sync for this mailbox is already running — try again in a moment." }, { status: 409 });
+    }
     const result = await syncAccount(account.id);
     return NextResponse.json({ ok: !result.error, ...result }, { status: result.error ? 502 : 200 });
   } catch (err) {

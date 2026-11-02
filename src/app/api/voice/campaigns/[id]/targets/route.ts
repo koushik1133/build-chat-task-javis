@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
-import { addTargets, getCampaign } from "@/lib/voice/campaigns";
+import { addTargets, getCampaign, hasFilterCriteria } from "@/lib/voice/campaigns";
 import { audienceSchema } from "@/lib/voice/schemas";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { id } = await ctx.params;
   const parsed = audienceSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid body" }, { status: 400 });
-  if (!parsed.data.contact_ids?.length && !parsed.data.filter && !parsed.data.phones?.length) {
+  if (!parsed.data.contact_ids?.length && !hasFilterCriteria(parsed.data.filter) && !parsed.data.phones?.length) {
     return NextResponse.json({ error: "Provide contact_ids, a filter or phones." }, { status: 400 });
   }
   try {

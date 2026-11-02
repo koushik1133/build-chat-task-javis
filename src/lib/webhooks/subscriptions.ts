@@ -4,12 +4,15 @@ import { EVENT_TYPES } from "@/lib/events/bus";
 import { generateWebhookSecret } from "./sign";
 import { isAllowedWebhookUrl } from "./url";
 
+/** Minimal env shape so callers (and tests) can pass a plain object instead of process.env. */
+type EnvLike = Record<string, string | undefined>;
+
 /**
  * Webhook subscriptions. The signing secret is encrypted at rest with
  * CREDENTIAL_ENCRYPTION_KEY (src/lib/secure-store). When that key is not
  * configured the secret is stored with a `plain:` prefix so deliveries keep
- * working in development.
- * TODO(ops): require CREDENTIAL_ENCRYPTION_KEY in production so `plain:` never appears there.
+ * working in development. In production the key is mandatory: creating or
+ * rotating a subscription without it fails instead of writing `plain:`.
  */
 
 export const WILDCARD = "*";
@@ -97,8 +100,12 @@ export function validateEventTypes(input: readonly string[] | undefined): string
 /** Known event types (for pickers); unknown types are still accepted so new lanes can add events freely. */
 export const KNOWN_EVENT_TYPES: readonly string[] = EVENT_TYPES;
 
-function sealSecret(plain: string): string {
-  return isEncryptionConfigured() ? encryptSecret(plain) : `plain:${plain}`;
+export function sealSecret(plain: string, env: EnvLike = process.env): string {
+  if (isEncryptionConfigured()) return encryptSecret(plain);
+  if (env.NODE_ENV === "production") {
+    throw new WebhookValidationError("Webhook signing secrets cannot be stored: set CREDENTIAL_ENCRYPTION_KEY.");
+  }
+  return `plain:${plain}`;
 }
 
 export function openSecret(stored: string): string | null {

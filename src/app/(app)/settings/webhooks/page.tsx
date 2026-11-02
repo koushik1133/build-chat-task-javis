@@ -10,6 +10,7 @@ import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
 import { Checkbox, Input } from "@/components/ui/input";
 import { Pill, StatusPill, type Tone } from "@/components/ui/pill";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
+import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { PageContainer } from "@/components/page-container";
 import type { SubscriptionDTO } from "@/lib/webhooks/subscriptions";
 import type { DeliveryDTO } from "@/lib/webhooks/dispatch";
@@ -108,22 +109,25 @@ export default function WebhooksSettingsPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SubscriptionDTO | null>(null);
   const drawerTitleId = useId();
+  const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
+    const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/webhooks", { cache: "no-store" });
+      const res = await fetch("/api/webhooks", { cache: "no-store", signal });
       if (!res.ok) throw new Error(await readError(res, "Could not load webhooks"));
       const data = await res.json();
       setSubs(data.subscriptions ?? []);
       setEventTypes(data.event_types ?? []);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load webhooks.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [nextSignal]);
 
   useEffect(() => {
     void load();
@@ -253,9 +257,14 @@ export default function WebhooksSettingsPage() {
       description="Get an HTTPS POST whenever something happens — new contacts, paid invoices, bookings, tickets and more."
       tooltip="Every delivery is signed with the subscription secret (X-KernelHub-Signature). Failed deliveries retry for ~15 hours; 20 failures in a row disable the endpoint."
       actions={
-        <Button type="button" size="sm" touch onClick={() => setCreating(true)}>
-          <Plus className="h-3.5 w-3.5" aria-hidden /> Add endpoint
-        </Button>
+        <>
+          <Button type="button" variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh webhooks">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+          </Button>
+          <Button type="button" touch onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" aria-hidden /> Add endpoint
+          </Button>
+        </>
       }
     >
       {error && (
@@ -279,6 +288,8 @@ export default function WebhooksSettingsPage() {
 
       {loading && subs.length === 0 ? (
         <Loading label="Loading webhooks…" />
+      ) : error && subs.length === 0 ? (
+        <ErrorState message={error} onRetry={() => void load()} />
       ) : subs.length === 0 ? (
         <Empty
           icon={<Webhook className="h-5 w-5" aria-hidden />}
@@ -291,7 +302,7 @@ export default function WebhooksSettingsPage() {
           }
         />
       ) : (
-        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card" aria-busy={loading || undefined}>
           {subs.map((s) => (
             <li key={s.id} className="p-4">
               <div className="flex flex-wrap items-start gap-3">
@@ -314,13 +325,14 @@ export default function WebhooksSettingsPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  <Button type="button" variant="outline" size="sm" touch onClick={() => openDrawer(s)}>
+                  <Button type="button" variant="outline" size="sm" touch onClick={() => openDrawer(s)} aria-label={`Deliveries for ${s.url}`}>
                     Deliveries
                   </Button>
                   <Button type="button" variant="outline" size="sm" touch onClick={() => void test(s.id)} disabled={busy === `test:${s.id}` || !s.active} aria-label={`Send test to ${s.url}`}>
                     {busy === `test:${s.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : <Send className="h-3.5 w-3.5" aria-hidden />} Test
                   </Button>
-                  <Button type="button" variant="outline" size="sm" touch onClick={() => void patch(s.id, { active: !s.active }, s.active ? "Endpoint disabled." : "Endpoint enabled.")} disabled={busy === `patch:${s.id}`}>
+                  <Button type="button" variant="outline" size="sm" touch onClick={() => void patch(s.id, { active: !s.active }, s.active ? "Endpoint disabled." : "Endpoint enabled.")} disabled={busy === `patch:${s.id}`} aria-label={`${s.active ? "Disable" : "Enable"} ${s.url}`}>
+                    {busy === `patch:${s.id}` && <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />}
                     {s.active ? "Disable" : "Enable"}
                   </Button>
                   <Button type="button" variant="ghost" size="sm" touch onClick={() => setDeleteTarget(s)} aria-label={`Delete ${s.url}`}>
@@ -371,14 +383,14 @@ export default function WebhooksSettingsPage() {
       )}
 
       {deleteTarget && (
-        <Dialog title="Delete this endpoint?" description="Pending deliveries are dropped and the subscriber stops receiving events." onClose={() => setDeleteTarget(null)} size="sm">
+        <Dialog title="Delete this endpoint?" description="Pending deliveries are dropped and the subscriber stops receiving events." onClose={() => busy !== `delete:${deleteTarget.id}` && setDeleteTarget(null)} size="sm">
           <p className="break-all text-sm">{deleteTarget.url}</p>
           <DialogFooter>
             <Button type="button" variant="ghost" touch onClick={() => setDeleteTarget(null)}>
               Cancel
             </Button>
             <Button type="button" variant="destructive" touch onClick={() => void remove()} disabled={busy === `delete:${deleteTarget.id}`}>
-              Delete
+              {busy === `delete:${deleteTarget.id}` && <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />} Delete
             </Button>
           </DialogFooter>
         </Dialog>
@@ -406,7 +418,7 @@ export default function WebhooksSettingsPage() {
                   <KeyRound className="h-3.5 w-3.5" aria-hidden /> Rotate secret
                 </Button>
               </div>
-              <Button type="button" variant="ghost" size="sm" touch onClick={() => void loadDeliveries(open.id)} aria-label="Refresh deliveries">
+              <Button type="button" variant="ghost" size="icon-sm" touch onClick={() => void loadDeliveries(open.id)} aria-label="Refresh deliveries">
                 <RefreshCw className="h-3.5 w-3.5" aria-hidden />
               </Button>
             </>
@@ -414,7 +426,17 @@ export default function WebhooksSettingsPage() {
         >
           {drawerError && <ErrorState message={drawerError} onRetry={() => void loadDeliveries(open.id)} />}
           {!drawerError && deliveries === null && <Loading label="Loading deliveries…" />}
-          {!drawerError && deliveries && deliveries.length === 0 && <Empty title="No deliveries yet" text="Send a test or wait for a matching event." />}
+          {!drawerError && deliveries && deliveries.length === 0 && (
+            <Empty
+              title="No deliveries yet"
+              text="Send a test or wait for a matching event."
+              action={
+                <Button type="button" variant="outline" touch onClick={() => void test(open.id)} disabled={busy === `test:${open.id}` || !open.active}>
+                  <Send className="h-3.5 w-3.5" aria-hidden /> Send test
+                </Button>
+              }
+            />
+          )}
           {!drawerError && deliveries && deliveries.length > 0 && (
             <TableScroller label="Deliveries">
               <table className="w-full min-w-[640px] text-sm">
@@ -447,7 +469,7 @@ export default function WebhooksSettingsPage() {
                         >
                           {expanded === d.id ? "Hide payload" : "Show payload"}
                         </button>
-                        {expanded === d.id && <pre className="mt-1 max-h-48 max-w-[280px] overflow-auto rounded-md bg-muted p-2 text-[11px]">{JSON.stringify(d.payload, null, 2)}</pre>}
+                        {expanded === d.id && <pre className="mt-1 max-h-48 max-w-[280px] overflow-auto rounded-md bg-muted p-2 text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0} aria-label={`Payload for ${d.event_type}`}>{JSON.stringify(d.payload, null, 2)}</pre>}
                       </td>
                       <td className="px-3 py-2 tabular-nums">
                         {d.attempts}

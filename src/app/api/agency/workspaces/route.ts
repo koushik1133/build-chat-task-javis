@@ -4,7 +4,7 @@ import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { dbUnavailableResponse } from "@/lib/api-db";
 import { recordAudit } from "@/lib/audit";
 import { parseBody } from "@/lib/money/http";
-import { createChildOrg, listChildOrgs, orgByDataId } from "@/lib/agency/orgs";
+import { AgencyForbiddenError, createChildOrg, listChildOrgs, orgByDataId } from "@/lib/agency/orgs";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
     void recordAudit(scope, { action: "create", entity: "client_workspace", entityId: client.id, after: { name: client.name, slug: client.slug }, req }).catch(() => undefined);
     return NextResponse.json({ client }, { status: 201 });
   } catch (err) {
+    if (err instanceof AgencyForbiddenError) return NextResponse.json({ error: "forbidden", detail: err.message }, { status: 403 });
     return dbUnavailableResponse(err, "agency/workspaces");
   }
 }

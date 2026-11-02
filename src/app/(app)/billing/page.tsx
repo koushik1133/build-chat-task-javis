@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Send, FileCheck2, Link2, Ban, Trash2, X, Copy, Receipt, FileDown, XCircle, Sparkles } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { Ban, Copy, FileCheck2, FileDown, Link2, Loader2, Plus, Receipt, RefreshCw, Send, Sparkles, Trash2, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Textarea } from "@/components/ui/input";
+import { Input, Select, Textarea } from "@/components/ui/input";
+import { Dialog, DialogFooter } from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
+import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { TabPanel, Tabs } from "@/components/ui/tabs";
+import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { PageContainer } from "@/components/page-container";
-import { cn } from "@/lib/utils";
 import { fmtDate, fmtMoney } from "@/lib/money/format";
 import { StatusPill, computeTotalsClient, type LineItem } from "@/components/billing/shared";
 
@@ -21,11 +25,14 @@ interface Invoice {
 interface ProviderInfo { id: string; configured: boolean; active: boolean }
 
 type Tab = "quotes" | "invoices";
+type Notice = { tone: "success" | "info" | "error"; text: string };
+
+const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.detail?.formErrors?.[0] ?? data?.detail ?? data?.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw new Error(data?.detail?.formErrors?.[0] ?? (typeof data?.detail === "string" ? data.detail : null) ?? data?.error ?? `Request failed (${res.status})`);
   return data as T;
 }
 
@@ -36,36 +43,66 @@ export default function BillingPage() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [dialog, setDialog] = useState<null | "quote" | "invoice">(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null);
+    const signal = nextSignal();
+    setLoading(true);
+    setError(null);
     try {
-      const [q, i] = await Promise.all([api<{ quotes: Quote[] }>("/api/quotes"), api<{ invoices: Invoice[]; providers: ProviderInfo[] }>("/api/invoices")]);
-      setQuotes(q.quotes); setInvoices(i.invoices); setProviders(i.providers);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not load billing."); }
-    finally { setLoading(false); }
+      const [q, i] = await Promise.all([api<{ quotes: Quote[] }>("/api/quotes", { signal }), api<{ invoices: Invoice[]; providers: ProviderInfo[] }>("/api/invoices", { signal })]);
+      setQuotes(q.quotes);
+      setInvoices(i.invoices);
+      setProviders(i.providers);
+    } catch (e) {
+      if (isAbortError(e)) return;
+      setError(e instanceof Error ? e.message : "Could not load billing.");
+    } finally {
+      if (!signal.aborted) setLoading(false);
+    }
+  }, [nextSignal]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const act = useCallback(
+    async (id: string, fn: () => Promise<string | void>) => {
+      setBusyId(id);
+      setNotice(null);
+      try {
+        const msg = await fn();
+        if (msg) setNotice({ tone: "success", text: msg });
+        await load();
+      } catch (e) {
+        setNotice({ tone: "error", text: e instanceof Error ? e.message : "Action failed." });
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [load]
+  );
+
+  const copy = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice({ tone: "success", text: "Link copied to clipboard." });
+    } catch {
+      setNotice({ tone: "info", text });
+    }
   }, []);
-  useEffect(() => { void load(); }, [load]);
 
-  async function act(id: string, fn: () => Promise<string | void>) {
-    setBusyId(id); setError(null); setNotice(null);
-    try {
-      const msg = await fn();
-      if (msg) setNotice(msg);
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "Action failed."); }
-    finally { setBusyId(null); }
-  }
-
-  async function copy(text: string) {
-    try { await navigator.clipboard.writeText(text); setNotice("Link copied to clipboard."); }
-    catch { setNotice(text); }
-  }
-
+  const tabs = useMemo(
+    () => [
+      { id: "quotes" as const, label: "Quotes", count: quotes.length },
+      { id: "invoices" as const, label: "Invoices", count: invoices.length },
+    ],
+    [quotes.length, invoices.length]
+  );
   const active = providers.find((p) => p.active);
+  const empty = quotes.length === 0 && invoices.length === 0;
 
   return (
     <PageContainer
@@ -73,152 +110,306 @@ export default function BillingPage() {
       title="Billing"
       description="Quotes your clients can accept online, invoices they can pay, and the money that came in."
       tooltip="Send a quote, get it accepted with email verification, convert it to an invoice and collect payment through a share link."
-    >
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 rounded-lg border border-border p-1">
-          {(["quotes", "invoices"] as Tab[]).map((t) => (
-            <button key={t} type="button" onClick={() => setTab(t)}
-              className={cn("rounded-md px-3 py-1.5 text-sm capitalize transition-colors", tab === t ? "bg-primary text-primary-foreground" : "hover:bg-secondary/60")}>
-              {t}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          {active && (
-            <span className="text-xs text-muted-foreground">
-              Payments: <span className="font-medium capitalize">{active.id}</span>{!active.configured && " (not configured)"}
-            </span>
-          )}
-          <Button variant="outline" onClick={() => void load()} disabled={loading} aria-label="Refresh">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+      className="pb-24"
+      actions={
+        <>
+          <Button variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh billing">
+            {loading ? spinner : <RefreshCw className="h-4 w-4" aria-hidden />}
           </Button>
-          <Button onClick={() => setDialog(tab === "quotes" ? "quote" : "invoice")}>
+          <Button touch onClick={() => setDialog(tab === "quotes" ? "quote" : "invoice")}>
             <Plus className="h-4 w-4" aria-hidden /> New {tab === "quotes" ? "quote" : "invoice"}
           </Button>
-        </div>
+        </>
+      }
+    >
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Tabs id="billing" label="Document type" tabs={tabs} value={tab} onChange={setTab} className="w-fit max-w-full" />
+        {active && (
+          <p className="text-xs text-muted-foreground">
+            Payments: <span className="font-medium capitalize">{active.id}</span>
+            {!active.configured && " (not configured)"}
+          </p>
+        )}
       </div>
 
-      {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
-      {notice && <Banner tone="info" onDismiss={() => setNotice(null)}>{notice}</Banner>}
-
-      {loading && quotes.length === 0 && invoices.length === 0 ? (
-        <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading…</div>
-      ) : tab === "quotes" ? (
-        <QuoteList quotes={quotes} busyId={busyId}
-          onSend={(q) => act(q.id, async () => { const r = await api<{ url: string }>(`/api/quotes/${q.id}/send`, { method: "POST", body: "{}" }); return `Quote ${q.number} sent. Link: ${r.url}`; })}
-          onConvert={(q) => act(q.id, async () => { const r = await api<{ invoice: Invoice }>(`/api/quotes/${q.id}/convert`, { method: "POST" }); setTab("invoices"); return `Created invoice ${r.invoice.number}.`; })}
-          onDelete={(q) => act(q.id, async () => { await api(`/api/quotes/${q.id}`, { method: "DELETE" }); return `Deleted ${q.number}.`; })}
-          onSuggest={(q) => act(q.id, async () => {
-            const r = await api<{ suggestion: { items: Array<{ description: string; basis: string; suggested_min_minor: number | null; suggested_max_minor: number | null; expectedWinProbability: number }> } }>(`/api/quotes/${q.id}/pricing-suggestion`);
-            const lines = r.suggestion.items.map((i) => i.basis === "history" && i.suggested_min_minor !== null && i.suggested_max_minor !== null
-              ? `${i.description}: ${fmtMoney(i.suggested_min_minor, q.currency)}–${fmtMoney(i.suggested_max_minor, q.currency)} (win now ${Math.round(i.expectedWinProbability * 100)}%)`
-              : `${i.description}: not enough history`);
-            return `Pricing for ${q.number} — ${lines.join(" · ")}. Full detail on Insights → Pricing.`;
-          })}
-          onDecline={(q) => { if (!window.confirm(`Decline quote ${q.number}? Any reserved stock is released.`)) return; act(q.id, async () => { await api(`/api/quotes/${q.id}/decline`, { method: "POST", body: "{}" }); return `Declined ${q.number}.`; }); }}
-        />
-      ) : (
-        <InvoiceList invoices={invoices} busyId={busyId} onCopy={copy}
-          onSend={(i) => act(i.id, async () => { const r = await api<{ url: string }>(`/api/invoices/${i.id}/send`, { method: "POST", body: "{}" }); return `Invoice ${i.number} sent. Link: ${r.url}`; })}
-          onPayLink={(i) => act(i.id, async () => { const r = await api<{ url: string }>(`/api/invoices/${i.id}/pay-link`, { method: "POST" }); await copy(r.url); return `Pay link for ${i.number}: ${r.url}`; })}
-          onVoid={(i) => act(i.id, async () => { await api(`/api/invoices/${i.id}/void`, { method: "POST" }); return `Voided ${i.number}.`; })}
-        />
+      {error && !empty && (
+        <Banner tone="error" onDismiss={() => setError(null)}>
+          {error}
+        </Banner>
+      )}
+      {notice && (
+        <Banner tone={notice.tone} onDismiss={() => setNotice(null)}>
+          {notice.text}
+        </Banner>
       )}
 
+      <TabPanel id="billing" value={tab}>
+        <div aria-busy={loading || undefined}>
+          {loading && empty ? (
+            <Loading label="Loading billing…" className="rounded-xl border border-border bg-card" />
+          ) : error && empty ? (
+            <ErrorState message={error} onRetry={() => void load()} />
+          ) : tab === "quotes" ? (
+            <QuoteList
+              quotes={quotes}
+              busyId={busyId}
+              onNew={() => setDialog("quote")}
+              onSend={(q) =>
+                act(q.id, async () => {
+                  const r = await api<{ url: string }>(`/api/quotes/${q.id}/send`, { method: "POST", body: "{}" });
+                  return `Quote ${q.number} sent. Link: ${r.url}`;
+                })
+              }
+              onConvert={(q) =>
+                act(q.id, async () => {
+                  const r = await api<{ invoice: Invoice }>(`/api/quotes/${q.id}/convert`, { method: "POST" });
+                  setTab("invoices");
+                  return `Created invoice ${r.invoice.number}.`;
+                })
+              }
+              onDelete={(q) =>
+                act(q.id, async () => {
+                  await api(`/api/quotes/${q.id}`, { method: "DELETE" });
+                  return `Deleted ${q.number}.`;
+                })
+              }
+              onSuggest={(q) =>
+                act(q.id, async () => {
+                  const r = await api<{ suggestion: { items: Array<{ description: string; basis: string; suggested_min_minor: number | null; suggested_max_minor: number | null; expectedWinProbability: number }> } }>(`/api/quotes/${q.id}/pricing-suggestion`);
+                  const lines = r.suggestion.items.map((i) =>
+                    i.basis === "history" && i.suggested_min_minor !== null && i.suggested_max_minor !== null
+                      ? `${i.description}: ${fmtMoney(i.suggested_min_minor, q.currency)}–${fmtMoney(i.suggested_max_minor, q.currency)} (win now ${Math.round(i.expectedWinProbability * 100)}%)`
+                      : `${i.description}: not enough history`
+                  );
+                  return `Pricing for ${q.number} — ${lines.join(" · ")}. Full detail on Insights → Pricing.`;
+                })
+              }
+              onDecline={(q) => {
+                if (!window.confirm(`Decline quote ${q.number}? Any reserved stock is released.`)) return;
+                void act(q.id, async () => {
+                  await api(`/api/quotes/${q.id}/decline`, { method: "POST", body: "{}" });
+                  return `Declined ${q.number}.`;
+                });
+              }}
+            />
+          ) : (
+            <InvoiceList
+              invoices={invoices}
+              busyId={busyId}
+              onNew={() => setDialog("invoice")}
+              onCopy={copy}
+              onSend={(i) =>
+                act(i.id, async () => {
+                  const r = await api<{ url: string }>(`/api/invoices/${i.id}/send`, { method: "POST", body: "{}" });
+                  return `Invoice ${i.number} sent. Link: ${r.url}`;
+                })
+              }
+              onPayLink={(i) =>
+                act(i.id, async () => {
+                  const r = await api<{ url: string }>(`/api/invoices/${i.id}/pay-link`, { method: "POST" });
+                  await copy(r.url);
+                  return `Pay link for ${i.number}: ${r.url}`;
+                })
+              }
+              onVoid={(i) => {
+                if (!window.confirm(`Void invoice ${i.number}? This cannot be undone.`)) return;
+                void act(i.id, async () => {
+                  await api(`/api/invoices/${i.id}/void`, { method: "POST" });
+                  return `Voided ${i.number}.`;
+                });
+              }}
+            />
+          )}
+        </div>
+      </TabPanel>
+
       {dialog && (
-        <NewDocDialog kind={dialog} onClose={() => setDialog(null)}
-          onCreated={(msg) => { setDialog(null); setNotice(msg); void load(); }} />
+        <NewDocDialog
+          kind={dialog}
+          onClose={() => setDialog(null)}
+          onCreated={(msg) => {
+            setDialog(null);
+            setNotice({ tone: "success", text: msg });
+            void load();
+          }}
+        />
       )}
     </PageContainer>
   );
 }
 
-function Banner({ tone, children, onDismiss }: { tone: "error" | "info" | "warn"; children: React.ReactNode; onDismiss?: () => void }) {
-  const cls = tone === "error" ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300"
-    : tone === "warn" ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-    : "border-border bg-secondary/40";
-  return (
-    <div className={cn("mb-4 flex items-start justify-between gap-3 rounded-lg border px-3 py-2 text-sm break-all", cls)} role={tone === "error" ? "alert" : "status"}>
-      <div>{children}</div>
-      {onDismiss && <button type="button" onClick={onDismiss} aria-label="Dismiss" className="shrink-0 opacity-70 hover:opacity-100"><X className="h-4 w-4" /></button>}
-    </div>
-  );
-}
+/* ───────────────────────── lists ───────────────────────── */
 
-function QuoteList({ quotes, busyId, onSend, onConvert, onDelete, onDecline, onSuggest }: {
-  quotes: Quote[]; busyId: string | null;
+function QuoteList({ quotes, busyId, onNew, onSend, onConvert, onDelete, onDecline, onSuggest }: {
+  quotes: Quote[]; busyId: string | null; onNew: () => void;
   onSend: (q: Quote) => void; onConvert: (q: Quote) => void; onDelete: (q: Quote) => void; onDecline: (q: Quote) => void; onSuggest: (q: Quote) => void;
 }) {
-  if (quotes.length === 0) return <Empty icon={<Receipt className="h-6 w-6" />} text="No quotes yet. Create one to send to a client." />;
+  if (quotes.length === 0) {
+    return (
+      <Empty
+        icon={<Receipt className="h-5 w-5" />}
+        title="No quotes yet"
+        text="Create a quote, send the share link and your client can accept and sign it online."
+        action={
+          <Button touch onClick={onNew}>
+            <Plus className="h-4 w-4" aria-hidden /> New quote
+          </Button>
+        }
+      />
+    );
+  }
   return (
-    <ul className="divide-y divide-border rounded-lg border border-border">
-      {quotes.map((q) => {
-        const busy = busyId === q.id;
-        const canSend = ["draft", "sent", "viewed"].includes(q.status);
-        return (
-          <li key={q.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2"><span className="font-mono text-sm">{q.number}</span><StatusPill status={q.status} /></div>
-              <p className="truncate text-sm text-muted-foreground">
-                {q.contact_name ?? "No contact"}{q.contact_email ? ` · ${q.contact_email}` : ""} · {q.items.length} item{q.items.length === 1 ? "" : "s"} · {fmtDate(q.created_at)}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="tabular-nums font-medium">{fmtMoney(q.total_minor, q.currency)}</span>
-              {canSend && q.items.length > 0 && <Button size="sm" variant="outline" disabled={busy} onClick={() => onSuggest(q)} title="Compare these prices with past accepted and declined quotes"><Sparkles className="h-3.5 w-3.5" /> Suggest pricing</Button>}
-              {canSend && <Button size="sm" variant="outline" disabled={busy} onClick={() => onSend(q)} title="Email a share link"><Send className="h-3.5 w-3.5" /> Send</Button>}
-              {q.status !== "draft" && <Button size="sm" variant="outline" disabled={busy} onClick={() => onConvert(q)} title="Create an invoice from this quote"><FileCheck2 className="h-3.5 w-3.5" /> Invoice</Button>}
-              <Button asChild size="sm" variant="outline" title={q.status === "accepted" ? "Download the signed PDF" : "Download PDF"}>
-                <a href={`/api/quotes/${q.id}/pdf`} target="_blank" rel="noopener" aria-label={`Download PDF for ${q.number}`}><FileDown className="h-3.5 w-3.5" /> PDF</a>
-              </Button>
-              {["sent", "viewed"].includes(q.status) && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDecline(q)} aria-label={`Decline ${q.number}`} title="Mark as declined and release reserved stock"><XCircle className="h-3.5 w-3.5" /></Button>}
-              {q.status === "draft" && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDelete(q)} aria-label="Delete draft"><Trash2 className="h-3.5 w-3.5" /></Button>}
-              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            </div>
-          </li>
-        );
-      })}
+    <ul className="divide-y divide-border rounded-xl border border-border bg-card" aria-label="Quotes">
+      {quotes.map((q) => (
+        <QuoteRow key={q.id} q={q} busy={busyId === q.id} onSend={onSend} onConvert={onConvert} onDelete={onDelete} onDecline={onDecline} onSuggest={onSuggest} />
+      ))}
     </ul>
   );
 }
 
-function InvoiceList({ invoices, busyId, onSend, onPayLink, onVoid, onCopy }: {
-  invoices: Invoice[]; busyId: string | null;
+const QuoteRow = memo(function QuoteRow({ q, busy, onSend, onConvert, onDelete, onDecline, onSuggest }: {
+  q: Quote; busy: boolean;
+  onSend: (q: Quote) => void; onConvert: (q: Quote) => void; onDelete: (q: Quote) => void; onDecline: (q: Quote) => void; onSuggest: (q: Quote) => void;
+}) {
+  const canSend = ["draft", "sent", "viewed"].includes(q.status);
+  return (
+    <li className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between" aria-busy={busy || undefined}>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm">{q.number}</span>
+            <StatusPill status={q.status} />
+          </div>
+          <p className="mt-0.5 truncate text-sm text-muted-foreground">
+            {q.contact_name ?? "No contact"}
+            {q.contact_email ? ` · ${q.contact_email}` : ""} · {q.items.length} item{q.items.length === 1 ? "" : "s"} · {fmtDate(q.created_at)}
+          </p>
+        </div>
+        <span className="shrink-0 font-medium tabular-nums lg:hidden">{fmtMoney(q.total_minor, q.currency)}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-1 hidden font-medium tabular-nums lg:inline">{fmtMoney(q.total_minor, q.currency)}</span>
+        {canSend && q.items.length > 0 && (
+          <Button size="sm" variant="outline" touch disabled={busy} onClick={() => onSuggest(q)} title="Compare these prices with past accepted and declined quotes">
+            <Sparkles className="h-3.5 w-3.5" aria-hidden /> Suggest pricing
+          </Button>
+        )}
+        {canSend && (
+          <Button size="sm" variant="outline" touch disabled={busy} onClick={() => onSend(q)} title="Email a share link">
+            <Send className="h-3.5 w-3.5" aria-hidden /> Send
+          </Button>
+        )}
+        {q.status !== "draft" && (
+          <Button size="sm" variant="outline" touch disabled={busy} onClick={() => onConvert(q)} title="Create an invoice from this quote">
+            <FileCheck2 className="h-3.5 w-3.5" aria-hidden /> Invoice
+          </Button>
+        )}
+        <Button asChild size="sm" variant="outline" touch title={q.status === "accepted" ? "Download the signed PDF" : "Download PDF"}>
+          <a href={`/api/quotes/${q.id}/pdf`} target="_blank" rel="noopener" aria-label={`Download PDF for ${q.number}`}>
+            <FileDown className="h-3.5 w-3.5" aria-hidden /> PDF
+          </a>
+        </Button>
+        {["sent", "viewed"].includes(q.status) && (
+          <Button size="sm" variant="ghost" touch disabled={busy} onClick={() => onDecline(q)} aria-label={`Decline ${q.number}`} title="Mark as declined and release reserved stock">
+            <XCircle className="h-3.5 w-3.5" aria-hidden />
+          </Button>
+        )}
+        {q.status === "draft" && (
+          <Button size="sm" variant="ghost" touch disabled={busy} onClick={() => onDelete(q)} aria-label={`Delete draft ${q.number}`}>
+            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          </Button>
+        )}
+        {busy && (
+          <span role="status" className="inline-flex items-center">
+            {spinner}
+            <span className="sr-only">Working…</span>
+          </span>
+        )}
+      </div>
+    </li>
+  );
+});
+
+function InvoiceList({ invoices, busyId, onNew, onSend, onPayLink, onVoid, onCopy }: {
+  invoices: Invoice[]; busyId: string | null; onNew: () => void;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
 }) {
-  if (invoices.length === 0) return <Empty icon={<Receipt className="h-6 w-6" />} text="No invoices yet. Convert an accepted quote or create one directly." />;
+  if (invoices.length === 0) {
+    return (
+      <Empty
+        icon={<Receipt className="h-5 w-5" />}
+        title="No invoices yet"
+        text="Convert an accepted quote into an invoice, or create one directly and share a pay link."
+        action={
+          <Button touch onClick={onNew}>
+            <Plus className="h-4 w-4" aria-hidden /> New invoice
+          </Button>
+        }
+      />
+    );
+  }
   return (
-    <ul className="divide-y divide-border rounded-lg border border-border">
-      {invoices.map((i) => {
-        const busy = busyId === i.id;
-        const open = !["paid", "void"].includes(i.status);
-        return (
-          <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2"><span className="font-mono text-sm">{i.number}</span><StatusPill status={i.status} /></div>
-              <p className="truncate text-sm text-muted-foreground">
-                {i.contact_name ?? "No contact"}{i.contact_email ? ` · ${i.contact_email}` : ""} · due {fmtDate(i.due_at)}
-                {i.paid_minor > 0 && ` · paid ${fmtMoney(i.paid_minor, i.currency)}`}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="tabular-nums font-medium">{fmtMoney(i.total_minor, i.currency)}</span>
-              {open && <Button size="sm" variant="outline" disabled={busy} onClick={() => onSend(i)}><Send className="h-3.5 w-3.5" /> Send</Button>}
-              {open && <Button size="sm" variant="outline" disabled={busy} onClick={() => onPayLink(i)} title="Create and copy a payment link"><Link2 className="h-3.5 w-3.5" /> Pay link</Button>}
-              {open && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onVoid(i)} aria-label="Void invoice"><Ban className="h-3.5 w-3.5" /></Button>}
-              <Button size="sm" variant="ghost" onClick={() => onCopy(i.number)} aria-label="Copy invoice number"><Copy className="h-3.5 w-3.5" /></Button>
-              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            </div>
-          </li>
-        );
-      })}
+    <ul className="divide-y divide-border rounded-xl border border-border bg-card" aria-label="Invoices">
+      {invoices.map((i) => (
+        <InvoiceRow key={i.id} i={i} busy={busyId === i.id} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} />
+      ))}
     </ul>
   );
 }
 
-function Empty({ icon, text }: { icon: React.ReactNode; text: string }) {
-  return <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-14 text-center text-sm text-muted-foreground">{icon}<p>{text}</p></div>;
-}
+const InvoiceRow = memo(function InvoiceRow({ i, busy, onSend, onPayLink, onVoid, onCopy }: {
+  i: Invoice; busy: boolean;
+  onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
+}) {
+  const open = !["paid", "void"].includes(i.status);
+  return (
+    <li className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between" aria-busy={busy || undefined}>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm">{i.number}</span>
+            <StatusPill status={i.status} />
+          </div>
+          <p className="mt-0.5 truncate text-sm text-muted-foreground">
+            {i.contact_name ?? "No contact"}
+            {i.contact_email ? ` · ${i.contact_email}` : ""} · due {fmtDate(i.due_at)}
+            {i.paid_minor > 0 && ` · paid ${fmtMoney(i.paid_minor, i.currency)}`}
+          </p>
+        </div>
+        <span className="shrink-0 font-medium tabular-nums lg:hidden">{fmtMoney(i.total_minor, i.currency)}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-1 hidden font-medium tabular-nums lg:inline">{fmtMoney(i.total_minor, i.currency)}</span>
+        {open && (
+          <Button size="sm" variant="outline" touch disabled={busy} onClick={() => onSend(i)}>
+            <Send className="h-3.5 w-3.5" aria-hidden /> Send
+          </Button>
+        )}
+        {open && (
+          <Button size="sm" variant="outline" touch disabled={busy} onClick={() => onPayLink(i)} title="Create and copy a payment link">
+            <Link2 className="h-3.5 w-3.5" aria-hidden /> Pay link
+          </Button>
+        )}
+        {open && (
+          <Button size="sm" variant="ghost" touch disabled={busy} onClick={() => onVoid(i)} aria-label={`Void invoice ${i.number}`}>
+            <Ban className="h-3.5 w-3.5" aria-hidden />
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" touch onClick={() => onCopy(i.number)} aria-label={`Copy invoice number ${i.number}`}>
+          <Copy className="h-3.5 w-3.5" aria-hidden />
+        </Button>
+        {busy && (
+          <span role="status" className="inline-flex items-center">
+            {spinner}
+            <span className="sr-only">Working…</span>
+          </span>
+        )}
+      </div>
+    </li>
+  );
+});
+
+/* ───────────────────────── new quote / invoice ───────────────────────── */
 
 const BLANK: LineItem = { description: "", qty: 1, unit_minor: 0, tax_rate_bp: 0 };
 
@@ -233,7 +424,12 @@ function NewDocDialog({ kind, onClose, onCreated }: { kind: "quote" | "invoice";
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/crm/contacts").then((r) => r.json()).then((d) => setContacts(d.contacts ?? [])).catch(() => setContacts([]));
+    const ctrl = new AbortController();
+    fetch("/api/crm/contacts", { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((d) => setContacts(d.contacts ?? []))
+      .catch(() => setContacts([]));
+    return () => ctrl.abort();
   }, []);
 
   const totals = useMemo(() => computeTotalsClient(items), [items]);
@@ -242,8 +438,10 @@ function NewDocDialog({ kind, onClose, onCreated }: { kind: "quote" | "invoice";
     setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   }
 
-  async function submit() {
-    setSaving(true); setError(null);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
     try {
       const clean = items.filter((it) => it.description.trim());
       if (clean.length === 0) throw new Error("Add at least one line item.");
@@ -252,70 +450,92 @@ function NewDocDialog({ kind, onClose, onCreated }: { kind: "quote" | "invoice";
       const path = kind === "quote" ? "/api/quotes" : "/api/invoices";
       const r = await api<{ quote?: { number: string }; invoice?: { number: string } }>(path, { method: "POST", body: JSON.stringify(body) });
       onCreated(`Created ${r.quote?.number ?? r.invoice?.number ?? kind}.`);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not create."); }
-    finally { setSaving(false); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={`New ${kind}`}>
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-xl bg-background p-5 shadow-xl sm:rounded-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">New {kind}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="opacity-70 hover:opacity-100"><X className="h-5 w-5" /></button>
-        </div>
-
+    <Dialog title={kind === "quote" ? "New quote" : "New invoice"} onClose={onClose} size="lg">
+      <form onSubmit={submit} className="space-y-4">
+        {error && (
+          <Banner tone="error" onDismiss={() => setError(null)}>
+            {error}
+          </Banner>
+        )}
         <div className="grid gap-3 sm:grid-cols-3">
-          <label className="text-sm sm:col-span-2">
-            <span className="mb-1 block font-medium">Contact</span>
-            <select value={contactId} onChange={(e) => setContactId(e.target.value)} className="flex h-9 w-full rounded-md border border-border bg-secondary/40 px-3 text-sm">
-              <option value="">— none —</option>
-              {contacts.map((c) => <option key={c.id} value={c.id}>{c.full_name}{c.company ? ` (${c.company})` : ""}{c.email ? ` · ${c.email}` : ""}</option>)}
-            </select>
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block font-medium">Currency</span>
-            <Input value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
-          </label>
-          <label className="text-sm sm:col-span-3">
-            <span className="mb-1 block font-medium">{kind === "quote" ? "Valid until" : "Due date"}</span>
+          <Field label="Contact" className="sm:col-span-2">
+            <Select value={contactId} onChange={(e) => setContactId(e.target.value)}>
+              <option value="">No contact</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.full_name}
+                  {c.company ? ` (${c.company})` : ""}
+                  {c.email ? ` · ${c.email}` : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Currency" hint="Three-letter code">
+            <Input value={currency} maxLength={3} autoCapitalize="characters" onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+          </Field>
+          <Field label={kind === "quote" ? "Valid until" : "Due date"} className="sm:col-span-3">
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
+          </Field>
         </div>
 
-        <div className="mt-4">
-          <div className="mb-1 grid grid-cols-12 gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-            <span className="col-span-6">Description</span><span className="col-span-2">Qty</span><span className="col-span-2">Unit price</span><span className="col-span-2">Tax %</span>
+        <fieldset className="min-w-0">
+          <legend className="mb-2 text-xs font-medium">Line items</legend>
+          <div className="space-y-3">
+            {items.map((it, i) => {
+              const srOnly = i > 0 ? "[&>label]:sr-only" : "";
+              return (
+                <div key={i} className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_5rem_7rem_5rem_2.75rem]">
+                  <Field label="Description" className={`col-span-2 sm:col-span-1 ${srOnly}`}>
+                    <Input placeholder="Service or product" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} />
+                  </Field>
+                  <Field label="Qty" className={srOnly}>
+                    <Input type="number" inputMode="decimal" min={0} step="0.01" value={it.qty} onChange={(e) => setItem(i, { qty: Number(e.target.value) || 0 })} />
+                  </Field>
+                  <Field label="Unit price" className={srOnly}>
+                    <Input type="number" inputMode="decimal" min={0} step="0.01" value={(it.unit_minor / 100).toString()} onChange={(e) => setItem(i, { unit_minor: Math.round((Number(e.target.value) || 0) * 100) })} />
+                  </Field>
+                  <Field label="Tax %" className={srOnly}>
+                    <Input type="number" inputMode="decimal" min={0} max={100} step="0.01" value={(it.tax_rate_bp / 100).toString()} onChange={(e) => setItem(i, { tax_rate_bp: Math.round((Number(e.target.value) || 0) * 100) })} />
+                  </Field>
+                  <Button type="button" variant="ghost" size="icon" touch className="justify-self-end" onClick={() => setItems((p) => p.filter((_, idx) => idx !== i))} aria-label={`Remove line ${i + 1}`} disabled={items.length === 1}>
+                    <X className="h-4 w-4" aria-hidden />
+                  </Button>
+                </div>
+              );
+            })}
           </div>
-          {items.map((it, i) => (
-            <div key={i} className="mb-2 grid grid-cols-12 gap-2">
-              <Input className="col-span-6" placeholder="Service or product" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} />
-              <Input className="col-span-2" type="number" min={0} step="0.01" value={it.qty} onChange={(e) => setItem(i, { qty: Number(e.target.value) || 0 })} />
-              <Input className="col-span-2" type="number" min={0} step="0.01" value={(it.unit_minor / 100).toString()} onChange={(e) => setItem(i, { unit_minor: Math.round((Number(e.target.value) || 0) * 100) })} />
-              <div className="col-span-2 flex gap-1">
-                <Input type="number" min={0} max={100} step="0.01" value={(it.tax_rate_bp / 100).toString()} onChange={(e) => setItem(i, { tax_rate_bp: Math.round((Number(e.target.value) || 0) * 100) })} />
-                <button type="button" onClick={() => setItems((p) => p.filter((_, idx) => idx !== i))} aria-label="Remove line" className="opacity-60 hover:opacity-100" disabled={items.length === 1}><X className="h-4 w-4" /></button>
-              </div>
-            </div>
-          ))}
-          <Button size="sm" variant="ghost" onClick={() => setItems((p) => [...p, { ...BLANK }])}><Plus className="h-3.5 w-3.5" /> Add line</Button>
-        </div>
+          <Button type="button" size="sm" variant="outline" touch className="mt-3" onClick={() => setItems((p) => [...p, { ...BLANK }])} disabled={items.length >= 100}>
+            <Plus className="h-3.5 w-3.5" aria-hidden /> Add line
+          </Button>
+        </fieldset>
 
-        <label className="mt-4 block text-sm">
-          <span className="mb-1 block font-medium">Notes</span>
-          <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Visible to the client" />
-        </label>
+        <Field label="Notes" hint="Visible to the client">
+          <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </Field>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <div className="text-sm text-muted-foreground">
-            Subtotal {fmtMoney(totals.subtotal_minor, currency)} · Tax {fmtMoney(totals.tax_minor, currency)} · <span className="font-semibold text-foreground">Total {fmtMoney(totals.total_minor, currency)}</span>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-            <Button onClick={() => void submit()} disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />} Create {kind}</Button>
-          </div>
-        </div>
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-      </div>
-    </div>
+        <DialogFooter
+          start={
+            <span className="tabular-nums">
+              Subtotal {fmtMoney(totals.subtotal_minor, currency)} · Tax {fmtMoney(totals.tax_minor, currency)} · <span className="font-semibold text-foreground">Total {fmtMoney(totals.total_minor, currency)}</span>
+            </span>
+          }
+        >
+          <Button type="button" variant="ghost" touch onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" touch disabled={saving}>
+            {saving && spinner} Create {kind}
+          </Button>
+        </DialogFooter>
+      </form>
+    </Dialog>
   );
 }

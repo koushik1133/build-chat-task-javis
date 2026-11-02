@@ -41,11 +41,25 @@ describe("keyset SQL", () => {
   it("appends a tuple predicate with two params", () => {
     const params: unknown[] = ["user"];
     const sql = keysetClause({ created_at: "2026-01-01T00:00:00.000Z", id: "z" }, params, { alias: "q." });
-    expect(sql).toBe(" AND (q.created_at < $2 OR (q.created_at = $2 AND q.id::text < $3))");
+    expect(sql).toBe(
+      " AND (date_trunc('milliseconds', q.created_at) < $2 OR (date_trunc('milliseconds', q.created_at) = $2 AND q.id::text < $3))"
+    );
     expect(params).toEqual(["user", "2026-01-01T00:00:00.000Z", "z"]);
     expect(keysetClause(null, params)).toBe("");
     expect(params).toHaveLength(3);
-    expect(keysetOrder("t.")).toBe("t.created_at DESC, t.id DESC");
+    expect(keysetOrder("t.")).toBe("date_trunc('milliseconds', t.created_at) DESC, t.id DESC");
+  });
+  it("compares and orders at the same precision as the cursor (milliseconds)", () => {
+    // pg Dates carry milliseconds; the column keeps microseconds. Predicate and ORDER BY
+    // must both truncate, otherwise rows sharing the cursor's millisecond are skipped.
+    const params: unknown[] = [];
+    const clause = keysetClause({ created_at: "2026-01-01T00:00:00.500Z", id: "a" }, params);
+    const order = keysetOrder();
+    const ts = "date_trunc('milliseconds', created_at)";
+    expect(clause).toContain(`${ts} < $1`);
+    expect(clause).toContain(`${ts} = $1`);
+    expect(order.startsWith(`${ts} DESC`)).toBe(true);
+    expect(clause).not.toMatch(/\(created_at [<=]/);
   });
 });
 

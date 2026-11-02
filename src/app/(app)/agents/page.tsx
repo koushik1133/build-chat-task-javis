@@ -1,14 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Plus, Search, Bot, Play, Pause, Trash2, CheckCircle2, Loader2,
+  Plus, Bot, Play, Pause, Trash2, CheckCircle2, Loader2,
   Sparkles, Pencil, ChevronLeft, ChevronRight, Zap, ShieldCheck, Store, Coins, FlaskConical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dispatchNotificationRefresh } from "@/components/notification-bell";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { PageContainer } from "@/components/page-container";
+import { Dialog } from "@/components/ui/dialog";
+import { Empty } from "@/components/ui/feedback";
+import { SearchField } from "@/components/ui/search-field";
+import { useDebouncedValue } from "@/components/ui/hooks";
 
 
 type AgentTemplate = {
@@ -405,47 +410,42 @@ export default function AgentsPage() {
     }
   }
 
-  const filtered = agents.filter(a =>
-    a.name.toLowerCase().includes(query.toLowerCase()) ||
-    a.role.toLowerCase().includes(query.toLowerCase())
+  const search = useDebouncedValue(query.trim().toLowerCase(), 200);
+  const filtered = useMemo(
+    () => agents.filter(a => a.name.toLowerCase().includes(search) || a.role.toLowerCase().includes(search)),
+    [agents, search]
   );
 
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
-      <div className="mx-auto w-full max-w-4xl space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl flex items-center gap-2">
-              AI Agents
-              <InfoTooltip text="Set up AI workers that run tasks on a schedule or on-demand — like a virtual employee that never sleeps." />
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Pick a pre-built agent, customize its system prompt, and deploy.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild size="sm" variant="outline">
-              <Link href="/marketplace"><Store className="h-3.5 w-3.5" aria-hidden /> Marketplace</Link>
-            </Button>
-            <Button size="sm" onClick={openDeploy}>
-              <Plus className="h-3.5 w-3.5" /> Deploy New Agent
-            </Button>
-          </div>
-        </div>
+    <PageContainer
+      wide
+      title="AI agents"
+      description="Pick a pre-built agent, customise its system prompt, and deploy."
+      tooltip="Set up AI workers that run tasks on a schedule or on demand — like a virtual employee that never sleeps."
+      actions={
+        <>
+          <Button asChild variant="outline" touch>
+            <Link href="/marketplace"><Store className="h-4 w-4" aria-hidden /> Marketplace</Link>
+          </Button>
+          <Button touch onClick={openDeploy}>
+            <Plus className="h-4 w-4" aria-hidden /> Deploy new agent
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-6">
 
         {/* Deploy modal */}
         {showDeploy && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowDeploy(false)}>
-            <div
-              className="bg-card border border-border rounded-xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto"
-              onClick={e => e.stopPropagation()}
-            >
+          <Dialog
+            title={deployStep === "pick" ? "Choose an agent template" : `Deploy ${selectedTemplate?.name ?? "agent"}`}
+            description={deployStep === "pick" ? "Pre-built roles with smart defaults — you can edit the system prompt next." : selectedTemplate?.desc}
+            onClose={() => setShowDeploy(false)}
+            size="lg"
+          >
+            <div>
               {deployStep === "pick" ? (
                 <>
-                  <h2 className="font-semibold mb-1">Choose an agent template</h2>
-                  <p className="text-xs text-muted-foreground mb-4">
-                    Pre-built roles with smart defaults — you can edit the system prompt next.
-                  </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {templates.map(t => (
                       <button
@@ -455,7 +455,7 @@ export default function AgentsPage() {
                         className="text-left rounded-xl border border-border p-4 hover:border-primary/50 hover:bg-primary/5 transition-colors"
                       >
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-lg">{t.emoji}</span>
+                          <span className="text-lg" aria-hidden>{t.emoji}</span>
                           <span className="font-medium text-sm">{t.name}</span>
                         </div>
                         <p className="text-xs text-muted-foreground leading-relaxed">{t.desc}</p>
@@ -468,17 +468,10 @@ export default function AgentsPage() {
                   <button
                     type="button"
                     onClick={() => setDeployStep("pick")}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-3"
+                    className="mb-3 inline-flex min-h-11 items-center gap-1 rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
                   >
                     <ChevronLeft className="h-3.5 w-3.5" /> Back to templates
                   </button>
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="text-xl">{selectedTemplate.emoji}</span>
-                    <div>
-                      <h2 className="font-semibold">{selectedTemplate.name}</h2>
-                      <p className="text-xs text-muted-foreground">{selectedTemplate.desc}</p>
-                    </div>
-                  </div>
 
                   <div className="space-y-3">
                     <div>
@@ -501,7 +494,7 @@ export default function AgentsPage() {
                           disabled={suggesting}
                           onClick={() => fetchSuggestions(selectedTemplate.id, form.system_prompt, setSuggestions, setSuggesting)}
                         >
-                          {suggesting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                          {suggesting ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden /> : <Sparkles className="h-3 w-3" />}
                           AI suggest
                         </Button>
                       </div>
@@ -536,25 +529,19 @@ export default function AgentsPage() {
                   <div className="flex gap-2 mt-5">
                     <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowDeploy(false)}>Cancel</Button>
                     <Button size="sm" className="flex-1" onClick={deploy} disabled={deploying || !form.name.trim()}>
-                      {deploying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <>Deploy <ChevronRight className="h-3.5 w-3.5" /></>}
+                      {deploying ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : <>Deploy <ChevronRight className="h-3.5 w-3.5" /></>}
                     </Button>
                   </div>
                 </>
               )}
             </div>
-          </div>
+          </Dialog>
         )}
 
         {/* Edit prompt modal */}
         {editAgent && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setEditAgent(null)}>
-            <div
-              className="bg-card border border-border rounded-xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto"
-              onClick={e => e.stopPropagation()}
-            >
-              <h2 className="font-semibold mb-1">Edit agent</h2>
-              <p className="text-xs text-muted-foreground mb-4">{editAgent.role}</p>
-
+          <Dialog title="Edit agent" description={editAgent.role} onClose={() => setEditAgent(null)} size="lg">
+            <div>
               <div className="space-y-3">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Agent name</label>
@@ -580,7 +567,7 @@ export default function AgentsPage() {
                         setEditSuggesting
                       )}
                     >
-                      {editSuggesting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                      {editSuggesting ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden /> : <Sparkles className="h-3 w-3" />}
                       AI suggest
                     </Button>
                   </div>
@@ -612,36 +599,32 @@ export default function AgentsPage() {
               <div className="flex gap-2 mt-5">
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => setEditAgent(null)}>Cancel</Button>
                 <Button size="sm" className="flex-1" onClick={saveEdit} disabled={saving || !editForm.name.trim()}>
-                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save changes"}
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : "Save changes"}
                 </Button>
               </div>
             </div>
-          </div>
+          </Dialog>
         )}
 
         {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search agents..."
-            className="w-full rounded-lg border border-border bg-card pl-9 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-          />
-        </div>
+        <SearchField value={query} onChange={setQuery} label="Search agents" placeholder="Search agents by name or role" />
 
         {/* Agent grid */}
         {filtered.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-12 text-center">
-            <Bot className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-            <p className="text-sm font-medium mb-1">No agents deployed</p>
-            <p className="text-xs text-muted-foreground mb-4">
-              Start with a template like Lead Generator — customize the prompt, then deploy.
-            </p>
-            <Button size="sm" variant="outline" onClick={openDeploy}>
-              <Plus className="h-3.5 w-3.5" /> Deploy your first agent
-            </Button>
-          </div>
+          <Empty
+            icon={<Bot className="h-5 w-5" />}
+            title={search ? "No agents match" : "No agents deployed"}
+            text={search ? "Try a different name or role." : "Start with a template like Lead Generator — customise the prompt, then deploy."}
+            action={
+              search ? (
+                <Button variant="outline" onClick={() => setQuery("")}>Clear search</Button>
+              ) : (
+                <Button onClick={openDeploy}>
+                  <Plus className="h-4 w-4" aria-hidden /> Deploy your first agent
+                </Button>
+              )
+            }
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filtered.map((agent) => {
@@ -685,11 +668,16 @@ export default function AgentsPage() {
                     {agent.outcome_event && Number(agent.outcome_price_credits) > 0 && (
                       <span className="inline-flex items-center gap-1" title="Outcome pricing: charged once per run in which this event fires">
                         <Coins className="h-3 w-3" aria-hidden />
-                        {Number(agent.outcome_price_credits).toLocaleString()} cr / {agent.outcome_event}
+                        <span className="sr-only">Outcome pricing: </span>
+                        {Number(agent.outcome_price_credits).toLocaleString()} credits per {agent.outcome_event}
                       </span>
                     )}
-                    <Link href={`/agents/${agent.id}/evals`} className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline">
-                      <FlaskConical className="h-3 w-3" aria-hidden /> Evals & memory
+                    <Link
+                      href={`/agents/${agent.id}/evals`}
+                      aria-label={`Evals and memory for ${agent.name}`}
+                      className="inline-flex min-h-11 items-center gap-1 rounded underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
+                    >
+                      <FlaskConical className="h-3 w-3" aria-hidden /> Evals &amp; memory
                     </Link>
                   </div>
                   <div className="mb-4 space-y-2">
@@ -776,7 +764,7 @@ export default function AgentsPage() {
 
           {playbooksLoading && playbooks.length === 0 ? (
             <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading playbooks…
+              <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> Loading playbooks…
             </div>
           ) : playbooksError ? (
             <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-xs text-destructive flex items-center justify-between gap-3">
@@ -814,7 +802,7 @@ export default function AgentsPage() {
                       disabled={playbookBusy === pb.id}
                       onClick={() => runPlaybookNow(pb)}
                     >
-                      {playbookBusy === pb.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                      {playbookBusy === pb.id ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden /> : <Play className="h-3 w-3" />}
                       Run now
                     </Button>
                   </div>
@@ -892,13 +880,9 @@ export default function AgentsPage() {
 
         {/* Confirmation and denial popup with right-side aligned action buttons */}
         {confirmRunAgent && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setConfirmRunAgent(null)}>
-            <div
-              className="bg-card border border-border rounded-xl p-6 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-150"
-              onClick={e => e.stopPropagation()}
-            >
-              <h2 className="font-semibold text-base mb-2">Run Agent Confirmation</h2>
-              <p className="text-xs text-muted-foreground mb-6 leading-relaxed font-sans">
+          <Dialog title="Run this agent now?" onClose={() => setConfirmRunAgent(null)} size="sm">
+            <div>
+              <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
                 Are you sure you want to trigger a manual test run for agent <strong className="text-foreground font-semibold">{confirmRunAgent.name}</strong> ({confirmRunAgent.role})? This will start the agent job immediately.
               </p>
               <div className="flex justify-end gap-2.5">
@@ -911,30 +895,26 @@ export default function AgentsPage() {
                   disabled={runningAgentId !== null}
                 >
                   {runningAgentId === confirmRunAgent.id ? (
-                    <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Running...</>
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> Running…</>
                   ) : (
-                    "Confirm Run"
+                    "Run agent"
                   )}
                 </Button>
               </div>
             </div>
-          </div>
+          </Dialog>
         )}
 
         {/* Correction modal */}
         {correctingRun && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setCorrectingRun(null)}>
-            <div
-              className="bg-card border border-border rounded-xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col"
-              onClick={e => e.stopPropagation()}
-            >
-              <h2 className="font-semibold mb-1">Correct Agent Output</h2>
-              <p className="text-xs text-muted-foreground mb-4">
-                Teach the {correctingRun.agent_name} agent how it should have responded. 
-                It will use this feedback in future runs.
-              </p>
-
-              <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+          <Dialog
+            title="Correct agent output"
+            description={`Teach the ${correctingRun.agent_name} agent how it should have responded. It will use this feedback in future runs.`}
+            onClose={() => setCorrectingRun(null)}
+            size="lg"
+          >
+            <div className="flex flex-col">
+              <div className="space-y-4">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">What the agent did (Original)</label>
                   <div className="w-full rounded-lg border border-border/50 bg-secondary/30 px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap font-sans opacity-70">
@@ -957,13 +937,13 @@ export default function AgentsPage() {
               <div className="flex gap-2 mt-5 shrink-0">
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => setCorrectingRun(null)}>Cancel</Button>
                 <Button size="sm" className="flex-1" onClick={submitCorrection} disabled={savingCorrection || !correctionText.trim()}>
-                  {savingCorrection ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Correction"}
+                  {savingCorrection ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : "Save correction"}
                 </Button>
               </div>
             </div>
-          </div>
+          </Dialog>
         )}
       </div>
-    </div>
+    </PageContainer>
   );
 }

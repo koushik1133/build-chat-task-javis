@@ -4,6 +4,9 @@ import type { Role } from "@/lib/auth/roles";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { appOrigin } from "@/lib/share-tokens";
 
+/** Minimal env shape so callers (and tests) can pass a plain object instead of process.env. */
+type EnvLike = Record<string, string | undefined>;
+
 /**
  * Team invites, shared by /api/team/invite, agency client invites and SCIM
  * provisioning. A pending membership row holds the SHA-256 of a one-time
@@ -32,6 +35,17 @@ export class AlreadyMemberError extends Error {
 
 export function invitePath(token: string): string {
   return `/invite/${token}`;
+}
+
+/**
+ * Origin for invite links. When NEXT_PUBLIC_APP_URL is configured it always
+ * wins: the request origin comes from the Host header, which an attacker can
+ * set to make the emailed link point at a look-alike domain.
+ */
+export function inviteOrigin(requestOrigin?: string | null, env: EnvLike = process.env): string {
+  const configured = env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+  if (configured) return configured;
+  return (requestOrigin ?? appOrigin()).replace(/\/$/, "");
 }
 
 /**
@@ -74,7 +88,7 @@ export async function createInvite(
     );
   }
 
-  const origin = (input.origin ?? appOrigin()).replace(/\/$/, "");
+  const origin = inviteOrigin(input.origin);
   return { membershipId, email, role: input.role, token, inviteUrl: `${origin}${invitePath(token)}`, reissued };
 }
 

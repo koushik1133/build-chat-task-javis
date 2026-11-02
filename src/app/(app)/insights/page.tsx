@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, Lightbulb, Loader2, Plus, RefreshCw, Sparkles, Trash2, TrendingUp, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -158,14 +159,14 @@ function CashflowTab() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end gap-3">
-        <Field label="Horizon">
-          <Select value={String(weeks)} onChange={(e) => setWeeks(Number(e.target.value))} className="w-36">
+      <div className="grid grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap">
+        <Field label="Horizon" className="col-span-2 sm:col-span-1">
+          <Select value={String(weeks)} onChange={(e) => setWeeks(Number(e.target.value))} className="w-full sm:w-36">
             {[4, 8, 12, 26, 52].map((w) => <option key={w} value={w}>{w} weeks</option>)}
           </Select>
         </Field>
-        <Field label={`Cash on hand (${ccy})`} hint="Optional. Balances are relative when empty.">
-          <Input type="number" inputMode="decimal" step="0.01" value={opening} onChange={(e) => setOpening(e.target.value)} className="w-44" placeholder="0.00" />
+        <Field label={`Cash on hand (${ccy})`} hint="Optional. Balances are relative when empty." className="col-span-2 sm:col-span-1">
+          <Input type="number" inputMode="decimal" step="0.01" value={opening} onChange={(e) => setOpening(e.target.value)} className="w-full sm:w-44" placeholder="0.00" />
         </Field>
         <Button variant="outline" size="icon" touch onClick={() => void load(false)} disabled={loading} aria-label="Refresh forecast">
           {loading ? spinner : <RefreshCw className="h-4 w-4" aria-hidden />}
@@ -178,8 +179,18 @@ function CashflowTab() {
         <ErrorState message={error} onRetry={() => void load(false)} />
       ) : data && s ? (
         <div aria-busy={loading || undefined} className="space-y-5">
+          <p className="sr-only" role="status" aria-live="polite">{loading ? "Updating the forecast…" : `Forecast for ${weeks} weeks ready.`}</p>
           {noData ? (
-            <Empty icon={<Wallet className="h-5 w-5" />} title="Nothing to forecast yet" text="Send invoices, log expenses and create quotes — the forecast builds itself from them." />
+            <Empty
+              icon={<Wallet className="h-5 w-5" />}
+              title="Nothing to forecast yet"
+              text="Send invoices, log expenses and create quotes — the forecast builds itself from them."
+              action={
+                <Button asChild variant="outline" touch>
+                  <Link href="/billing">Go to billing</Link>
+                </Button>
+              }
+            />
           ) : (
             <>
               <section aria-label="Summary" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -193,7 +204,7 @@ function CashflowTab() {
               </section>
               {data.risks.length > 0 && (
                 <section aria-labelledby="risks-heading" className="rounded-xl border border-border bg-card p-4 sm:p-5">
-                  <h2 id="risks-heading" className="flex items-center gap-2 text-sm font-semibold"><AlertTriangle className="h-4 w-4 text-amber-600" aria-hidden /> Risk flags</h2>
+                  <h2 id="risks-heading" className="flex items-center gap-2 text-sm font-semibold"><AlertTriangle className="h-4 w-4 text-amber-700 dark:text-amber-300" aria-hidden /> Risk flags</h2>
                   <ul className="mt-3 space-y-2">
                     {data.risks.map((r, i) => (
                       <li key={i} className="flex items-start gap-2 text-sm">
@@ -209,7 +220,7 @@ function CashflowTab() {
           <NarrativeCard state={narrative} onGenerate={() => void load(true)} busy={loading} />
           {!noData && (
             <details className="rounded-xl border border-border bg-card">
-              <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Weekly table and assumptions</summary>
+              <summary className="cursor-pointer rounded-xl px-4 py-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Weekly table and assumptions</summary>
               <div className="space-y-4 px-4 pb-4">
                 <TableScroller label="Weekly forecast">
                   <table className="w-full min-w-[40rem] text-sm">
@@ -295,14 +306,14 @@ function CapacityTab() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="grid grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap">
         <Field label="Plan ahead">
-          <Select value={String(weeks)} onChange={(e) => setWeeks(Number(e.target.value))} className="w-36">
+          <Select value={String(weeks)} onChange={(e) => setWeeks(Number(e.target.value))} className="w-full sm:w-36">
             {[4, 8, 12, 26].map((w) => <option key={w} value={w}>{w} weeks</option>)}
           </Select>
         </Field>
         <Field label="Target utilisation">
-          <Select value={String(target)} onChange={(e) => setTarget(Number(e.target.value))} className="w-28">
+          <Select value={String(target)} onChange={(e) => setTarget(Number(e.target.value))} className="w-full sm:w-28">
             {[70, 75, 80, 85, 90, 100].map((t) => <option key={t} value={t}>{t}%</option>)}
           </Select>
         </Field>
@@ -317,8 +328,18 @@ function CapacityTab() {
         <ErrorState message={error} onRetry={() => void load(false)} />
       ) : data && sug ? (
         <div aria-busy={loading || undefined} className="space-y-5">
+          <p className="sr-only" role="status" aria-live="polite">{loading ? "Updating the capacity plan…" : `Capacity plan for ${weeks} weeks ready.`}</p>
           {sug.kind === "no_data" ? (
-            <Empty icon={<Users className="h-5 w-5" />} title="No bookings or logged time yet" text="Confirmed bookings and time entries feed the plan. Availability comes from your calendar rules." />
+            <Empty
+              icon={<Users className="h-5 w-5" />}
+              title="No bookings or logged time yet"
+              text="Confirmed bookings and time entries feed the plan. Availability comes from your calendar rules."
+              action={
+                <Button asChild variant="outline" touch>
+                  <Link href="/calendar">Go to calendar</Link>
+                </Button>
+              }
+            />
           ) : (
             <>
               <section aria-label="Summary" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -342,7 +363,7 @@ function CapacityTab() {
           <NarrativeCard state={narrative} onGenerate={() => void load(true)} busy={loading} />
           {sug.kind !== "no_data" && data.members.length > 0 && (
             <details className="rounded-xl border border-border bg-card">
-              <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Per member (look-back)</summary>
+              <summary className="cursor-pointer rounded-xl px-4 py-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Per member (look-back)</summary>
               <div className="px-4 pb-4">
                 <TableScroller label="Utilisation by member">
                   <table className="w-full min-w-[32rem] text-sm">
@@ -415,7 +436,10 @@ function PricingTab() {
     setData(null);
   }
 
-  const items = rows.filter((r) => r.description.trim()).map((r) => ({ description: r.description.trim(), qty: Number(r.qty) || 1, unit_minor: Math.round((Number(r.price) || 0) * 100) }));
+  const items = useMemo(
+    () => rows.filter((r) => r.description.trim()).map((r) => ({ description: r.description.trim(), qty: Number(r.qty) || 1, unit_minor: Math.round((Number(r.price) || 0) * 100) })),
+    [rows]
+  );
 
   const run = useCallback(
     async (narrate: boolean) => {
@@ -439,8 +463,7 @@ function PricingTab() {
         if (!signal.aborted) setLoading(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nextSignal, JSON.stringify(items)]
+    [nextSignal, items]
   );
 
   return (
@@ -449,8 +472,8 @@ function PricingTab() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <h2 id="pricing-form-heading" className="text-sm font-semibold">Line items to price</h2>
           {quotes.length > 0 && (
-            <Field label="Load from a quote">
-              <Select defaultValue="" onChange={(e) => loadQuote(e.target.value)} className="w-56">
+            <Field label="Load from a quote" className="w-full sm:w-auto">
+              <Select defaultValue="" onChange={(e) => loadQuote(e.target.value)} className="w-full sm:w-56">
                 <option value="">Choose a quote…</option>
                 {quotes.map((q) => <option key={q.id} value={q.id}>{q.number} · {q.status} · {q.items.length} item{q.items.length === 1 ? "" : "s"}</option>)}
               </Select>
@@ -498,6 +521,7 @@ function PricingTab() {
 
       {data && (
         <div aria-busy={loading || undefined} className="space-y-5">
+          <p className="sr-only" role="status" aria-live="polite">{loading ? "Computing the suggestion…" : "Pricing suggestion ready."}</p>
           <section aria-label="Summary" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Stat label="Decided quotes" value={String(data.overall.quotes)} />
             <Stat label="Won" value={String(data.overall.won)} />
@@ -505,13 +529,22 @@ function PricingTab() {
             <Stat label="Overall win rate" value={pct(data.overall.winRate)} />
           </section>
           {data.overall.quotes === 0 && (
-            <Empty icon={<TrendingUp className="h-5 w-5" />} title="No decided quotes yet" text="Suggestions need accepted and declined quotes to learn from. Keep sending quotes; this fills in as clients respond." />
+            <Empty
+              icon={<TrendingUp className="h-5 w-5" />}
+              title="No decided quotes yet"
+              text="Suggestions need accepted and declined quotes to learn from. Keep sending quotes; this fills in as clients respond."
+              action={
+                <Button asChild variant="outline" touch>
+                  <Link href="/billing">Go to quotes</Link>
+                </Button>
+              }
+            />
           )}
           {data.items.map((it, i) => (
-            <section key={i} aria-labelledby={`item-${i}`} className="rounded-xl border border-border bg-card p-4 sm:p-5">
+            <section key={i} aria-labelledby={`pricing-item-${i}`} className="rounded-xl border border-border bg-card p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h3 id={`item-${i}`} className="truncate text-sm font-semibold">{it.description}</h3>
+                  <h3 id={`pricing-item-${i}`} className="truncate text-sm font-semibold">{it.description}</h3>
                   <p className="text-xs text-muted-foreground">Now {fmtMoney(it.current_unit_minor, currency)} · win probability {pct(it.expectedWinProbability)} · {it.matches} matching line{it.matches === 1 ? "" : "s"}</p>
                 </div>
                 {it.basis === "history" ? <Pill tone="success">From history</Pill> : <Pill tone="neutral">Not enough history</Pill>}

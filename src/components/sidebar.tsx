@@ -50,6 +50,9 @@ export function Sidebar({
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [switchingOrg, setSwitchingOrg] = useState(false);
+  const isClientWorkspace = (o: OrgOption) => o.role === "owner" && o.isOwner === false;
+  const ownWorkspaces = orgs.filter((o) => !isClientWorkspace(o));
+  const clientWorkspaces = orgs.filter(isClientWorkspace);
   const [channels, setChannels] = useState<ChannelNavItem[]>(initialChannels);
   const [dark, setDark] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -218,32 +221,41 @@ export function Sidebar({
             type="button"
             aria-label="Close sidebar"
             onClick={onClose}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground lg:hidden"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none lg:hidden"
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
       </div>
 
       {orgs.length > 1 && (
         <div className="border-b border-border px-3 py-2">
-          <label className="relative flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-within:ring-1 focus-within:ring-primary/40">
+          <label className="relative flex min-h-11 items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-within:ring-2 focus-within:ring-ring lg:min-h-0">
             <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <span className="sr-only">Workspace</span>
             <select
               value={activeOrgId ?? ""}
               disabled={switchingOrg}
               onChange={(e) => void switchOrg(e.target.value)}
-              className="min-w-0 flex-1 appearance-none truncate bg-transparent pr-5 text-xs font-medium outline-none disabled:opacity-60"
+              className="min-w-0 flex-1 appearance-none truncate rounded bg-transparent pr-5 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 [&>optgroup]:bg-card [&>option]:bg-card"
               aria-label="Switch workspace"
+              aria-busy={switchingOrg || undefined}
             >
               {/* Agency mode: a workspace the user owns by membership but not by owner_user_id is a client workspace. */}
-              {orgs.filter((o) => !(o.role === "owner" && o.isOwner === false)).map((o) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-              {orgs.some((o) => o.role === "owner" && o.isOwner === false) && (
+              {ownWorkspaces.length > 0 && clientWorkspaces.length > 0 ? (
+                <optgroup label="Your workspaces">
+                  {ownWorkspaces.map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </optgroup>
+              ) : (
+                ownWorkspaces.map((o) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))
+              )}
+              {clientWorkspaces.length > 0 && (
                 <optgroup label="Client workspaces">
-                  {orgs.filter((o) => o.role === "owner" && o.isOwner === false).map((o) => (
+                  {clientWorkspaces.map((o) => (
                     <option key={o.id} value={o.id}>{o.name}</option>
                   ))}
                 </optgroup>

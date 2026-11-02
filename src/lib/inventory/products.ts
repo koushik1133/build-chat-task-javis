@@ -4,7 +4,7 @@ import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { likeContains } from "@/lib/like";
 import { CurrencySchema } from "@/lib/money/items";
-import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /**
  * Pricebook / inventory products. Money is minor units; `tax_rate_bp` is basis
@@ -148,7 +148,7 @@ export async function listProducts(dataId: string, opts: ListProductsOpts = {}):
   if (opts.low) sql += ` AND track_stock = TRUE AND (stock_on_hand - stock_reserved) <= reorder_point`;
   if (opts.order === "created") sql += keysetClause(opts.cursor, params);
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 500));
-  sql += opts.order === "created" ? ` ORDER BY created_at DESC, id DESC LIMIT $${params.length}` : ` ORDER BY name ASC LIMIT $${params.length}`;
+  sql += opts.order === "created" ? ` ORDER BY ${keysetOrder()} LIMIT $${params.length}` : ` ORDER BY name ASC LIMIT $${params.length}`;
   return (await query<ProductRow>(sql, params)).map(toProductDTO);
 }
 

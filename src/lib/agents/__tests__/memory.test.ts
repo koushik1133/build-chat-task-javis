@@ -8,6 +8,7 @@ vi.mock("@/lib/dsql", () => ({
 }));
 const searchChunks = vi.fn();
 vi.mock("@/lib/pinecone", () => ({
+  CORRECTION_FILE_PREFIX: "corr:",
   searchChunks: (...args: unknown[]) => searchChunks(...args),
   upsertChunks: vi.fn(),
   deleteFile: vi.fn(),

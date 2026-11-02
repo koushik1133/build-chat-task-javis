@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { PageContainer } from "@/components/page-container";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogFooter } from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
+import { Banner, Empty } from "@/components/ui/feedback";
+import { Input, Select, Textarea } from "@/components/ui/input";
 import {
   MessageSquare,
   Bot,
@@ -14,7 +18,6 @@ import {
   Send,
   Loader2,
   FlaskConical,
-  X,
   Clock,
   ArrowLeft,
 } from "lucide-react";
@@ -166,13 +169,13 @@ export default function MessagingPage() {
       wide
     >
       <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => setShowSimulate(true)}>
-          <FlaskConical className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+        <Button type="button" variant="outline" touch onClick={() => setShowSimulate(true)}>
+          <FlaskConical className="h-4 w-4" aria-hidden />
           Simulate inbound message
         </Button>
       </div>
 
-      <div className="flex h-[calc(100vh-14rem)] min-h-[450px] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="flex h-[calc(100dvh-14rem)] min-h-[450px] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         {/* Left List Pane */}
         <div
           className={cn(
@@ -198,8 +201,10 @@ export default function MessagingPage() {
                 <button
                   key={conv.id}
                   onClick={() => setSelectedConvId(conv.id)}
+                  type="button"
+                  aria-current={active ? "true" : undefined}
                   className={cn(
-                    "w-full text-left p-4 flex flex-col gap-1.5 transition-colors hover:bg-secondary/40",
+                    "w-full text-left p-4 flex flex-col gap-1.5 transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
                     active && "bg-secondary/70 hover:bg-secondary/70"
                   )}
                 >
@@ -219,9 +224,8 @@ export default function MessagingPage() {
                     {hasPending && (
                       <span
                         className="text-[9px] px-1.5 py-0.5 rounded-full font-medium shrink-0 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                        title="A drafted reply is waiting for approval"
                       >
-                        Pending
+                        Pending<span className="sr-only"> — a drafted reply is waiting for approval</span>
                       </span>
                     )}
                     <ChannelChip channel={conv.channel} />
@@ -231,14 +235,17 @@ export default function MessagingPage() {
             })}
 
             {conversations.length === 0 && !loading && (
-              <div className="text-center py-12 px-4 text-xs text-muted-foreground">
-                <MessageSquare className="h-6 w-6 text-muted-foreground/40 mx-auto mb-3" />
-                <p className="font-medium text-muted-foreground/80 mb-1">No messages yet</p>
-                <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
-                  When customers text or call your Twilio number, or email a connected mailbox, conversations
-                  appear here. Try &ldquo;Simulate inbound message&rdquo; to see the receptionist in action.
-                </p>
-              </div>
+              <Empty
+                className="m-3 py-10"
+                icon={<MessageSquare className="h-5 w-5" />}
+                title="No messages yet"
+                text="When customers text or call your Twilio number, or email a connected mailbox, conversations appear here."
+                action={
+                  <Button variant="outline" onClick={() => setShowSimulate(true)}>
+                    <FlaskConical className="h-4 w-4" aria-hidden /> Simulate inbound message
+                  </Button>
+                }
+              />
             )}
           </div>
         </div>
@@ -254,7 +261,7 @@ export default function MessagingPage() {
                     type="button"
                     onClick={() => setSelectedConvId(null)}
                     aria-label="Back to conversations"
-                    className="sm:hidden rounded-md p-1 hover:bg-secondary"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:hidden"
                   >
                     <ArrowLeft className="h-4 w-4" aria-hidden />
                   </button>
@@ -356,11 +363,11 @@ export default function MessagingPage() {
               {/* Composer */}
               <form onSubmit={sendReply} className="p-3 bg-card border-t border-border shrink-0">
                 {notice && (
-                  <p role="status" className="mb-2 text-[11px] text-amber-600 dark:text-amber-400">{notice}</p>
+                  <Banner tone="warn" className="mb-2" onDismiss={() => setNotice(null)}>{notice}</Banner>
                 )}
                 <div className="flex items-end gap-2">
                   <label htmlFor="reply-composer" className="sr-only">Reply</label>
-                  <textarea
+                  <Textarea
                     id="reply-composer"
                     value={reply}
                     onChange={(e) => setReply(e.target.value)}
@@ -379,13 +386,13 @@ export default function MessagingPage() {
                           ? "Reply by email…"
                           : `Reply via ${selectedConv.channel.toUpperCase()}…`
                     }
-                    className="flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="flex-1 resize-none"
                   />
-                  <Button type="submit" size="sm" disabled={sending || !reply.trim()} aria-label="Send reply">
-                    {sending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+                  <Button type="submit" size="icon" touch disabled={sending || !reply.trim()} aria-label="Send reply">
+                    {sending ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
                   </Button>
                 </div>
-                <p className="mt-1.5 text-[10px] text-muted-foreground">
+                <p className="mt-1.5 text-xs text-muted-foreground">
                   Enter to send, Shift+Enter for a new line.{" "}
                   {selectedConv.channel === "email"
                     ? "Email replies go out through the mailbox that received the thread."
@@ -431,12 +438,6 @@ function SimulateDialog({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -457,68 +458,42 @@ function SimulateDialog({
     }
   }
 
-  const inputClass =
-    "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="simulate-title"
-      onClick={onClose}
+    <Dialog
+      title="Simulate an inbound message"
+      description="Runs the AI receptionist exactly as a real webhook would — no phone number required."
+      onClose={onClose}
+      size="sm"
     >
-      <form
-        onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto rounded-xl border border-border bg-card p-6"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 id="simulate-title" className="text-lg font-semibold">Simulate an inbound message</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Runs the AI receptionist exactly as a real Twilio webhook would — no phone number required.
-            </p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="opacity-70 hover:opacity-100">
-            <X className="h-4 w-4" aria-hidden />
-          </button>
-        </div>
-
-        {err && (
-          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-            {err}
-          </p>
-        )}
+      <form onSubmit={submit} className="space-y-4">
+        {err && <Banner tone="error" className="mb-0">{err}</Banner>}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label htmlFor="sim-from" className="mb-1 block text-sm font-medium">From number</label>
-            <input id="sim-from" required value={fromNumber} onChange={(e) => setFromNumber(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label htmlFor="sim-channel" className="mb-1 block text-sm font-medium">Channel</label>
-            <select id="sim-channel" value={channel} onChange={(e) => setChannel(e.target.value as Channel)} className={inputClass}>
+          <Field label="From number" required>
+            <Input id="sim-from" required value={fromNumber} onChange={(e) => setFromNumber(e.target.value)} data-autofocus />
+          </Field>
+          <Field label="Channel">
+            <Select id="sim-channel" value={channel} onChange={(e) => setChannel(e.target.value as Channel)}>
               <option value="sms">SMS</option>
               <option value="whatsapp">WhatsApp</option>
               <option value="voice">Voice (transcript)</option>
-            </select>
-          </div>
+              <option value="email">Email</option>
+            </Select>
+          </Field>
         </div>
 
-        <div>
-          <label htmlFor="sim-text" className="mb-1 block text-sm font-medium">Message</label>
-          <textarea id="sim-text" required rows={4} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} className={cn(inputClass, "resize-none")} />
-        </div>
+        <Field label="Message" required>
+          <Textarea id="sim-text" required rows={4} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} className="resize-none" />
+        </Field>
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy || !text.trim() || !fromNumber.trim()}>
-            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
+        <DialogFooter>
+          <Button type="button" variant="outline" touch onClick={onClose}>Cancel</Button>
+          <Button type="submit" touch disabled={busy || !text.trim() || !fromNumber.trim()}>
+            {busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}
             {busy ? "Running…" : "Send to receptionist"}
           </Button>
-        </div>
+        </DialogFooter>
       </form>
-    </div>
+    </Dialog>
   );
 }

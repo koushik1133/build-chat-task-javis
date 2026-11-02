@@ -11,6 +11,7 @@ import { Banner, Empty, ErrorState, Loading, SkeletonList } from "@/components/u
 import { Field } from "@/components/ui/field";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { Pill, type Tone } from "@/components/ui/pill";
+import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { TabPanel, Tabs } from "@/components/ui/tabs";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
 import { PASS_THRESHOLD, type CaseResult, type EvalCase, type ScoreSummary } from "@/lib/evals/score";
@@ -86,21 +87,24 @@ export default function AgentEvalsPage() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [loadingAgent, setLoadingAgent] = useState(true);
+  const nextSignal = useAbortable();
 
   const loadAgent = useCallback(async () => {
+    const signal = nextSignal();
     setLoadingAgent(true);
     setAgentError(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}`, { cache: "no-store" });
+      const res = await fetch(`/api/agents/${agentId}`, { cache: "no-store", signal });
       const data = await readJson(res);
       if (!res.ok) throw new Error(res.status === 404 ? "Agent not found." : data?.error ?? "Could not load agent.");
       setAgent({ id: String(data.agent.id), name: String(data.agent.name ?? "Agent"), role: String(data.agent.role ?? "") });
     } catch (err) {
+      if (isAbortError(err)) return;
       setAgentError(err instanceof Error ? err.message : "Could not load agent.");
     } finally {
-      setLoadingAgent(false);
+      if (!signal.aborted) setLoadingAgent(false);
     }
-  }, [agentId]);
+  }, [agentId, nextSignal]);
 
   useEffect(() => {
     void loadAgent();
@@ -115,7 +119,7 @@ export default function AgentEvalsPage() {
         </Link>
       }
       icon={<FlaskConical className="h-5 w-5" aria-hidden />}
-      title={agent ? `${agent.name} · Evals & memory` : "Agent evals & memory"}
+      title={agent ? `${agent.name} · Evals and memory` : "Agent evals and memory"}
       description={agent?.role ? `${agent.role}. Test the agent against fixed cases, review what you have corrected, and price its outcomes.` : "Test the agent against fixed cases, review corrections, and price outcomes."}
       tooltip="Evals run the agent in a sandbox: read tools run for real, writes are simulated. A judge model scores each case 0–100."
     >
@@ -155,23 +159,26 @@ function EvalsPanel({ agentId }: { agentId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
+    const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}/evals`, { cache: "no-store" });
+      const res = await fetch(`/api/agents/${agentId}/evals`, { cache: "no-store", signal });
       const data = await readJson(res);
       if (!res.ok) throw new Error(data?.error ?? "Could not load evals.");
       const list = (data.evals ?? []) as EvalItem[];
       setEvals(list);
       setSelectedId((cur) => cur && list.some((e) => e.id === cur) ? cur : list[0]?.id ?? null);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load evals.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [agentId]);
+  }, [agentId, nextSignal]);
 
   useEffect(() => {
     void load();
@@ -185,6 +192,7 @@ function EvalsPanel({ agentId }: { agentId: string }) {
       {notice && <Banner tone="success" onDismiss={() => setNotice(null)}>{notice}</Banner>}
 
       {loading && !evals && <SkeletonList count={3} label="Loading evals…" />}
+      {!loading && !evals && error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {evals && evals.length === 0 && (
         <Empty
@@ -204,7 +212,7 @@ function EvalsPanel({ agentId }: { agentId: string }) {
           <aside className="rounded-xl border border-border bg-card p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">Evals</h2>
-              <Button size="sm" variant="outline" onClick={() => setCreating(true)} aria-label="New eval">
+              <Button size="sm" variant="outline" touch onClick={() => setCreating(true)} aria-label="New eval">
                 <Plus className="h-4 w-4" aria-hidden /> New
               </Button>
             </div>
@@ -244,7 +252,7 @@ function EvalsPanel({ agentId }: { agentId: string }) {
               }}
             />
           ) : (
-            <Loading />
+            <Loading label="Loading eval…" />
           )}
         </div>
       )}
@@ -298,14 +306,14 @@ function CreateEvalDialog({ agentId, onClose, onCreated }: { agentId: string; on
     <Dialog title="New eval" description="A named set of test cases for this agent." onClose={onClose} size="sm">
       <form onSubmit={submit} className="space-y-4">
         <Field label="Name" required error={error}>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Weekly brief regression" maxLength={120} autoFocus />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Weekly brief regression" maxLength={120} data-autofocus />
         </Field>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+          <Button type="button" variant="outline" touch onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />} Create
+          <Button type="submit" touch disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />} Create
           </Button>
         </DialogFooter>
       </form>
@@ -324,20 +332,23 @@ function EvalEditor({ item, onChanged, onDeleted }: { item: EvalItem; onChanged:
   const [runsLoading, setRunsLoading] = useState(true);
   const [activeRunId, setActiveRunId] = useState<string | null>(item.latest_run?.id ?? null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const nextRunsSignal = useAbortable();
 
   const loadRuns = useCallback(async () => {
+    const signal = nextRunsSignal();
     setRunsLoading(true);
     try {
-      const res = await fetch(`/api/evals/${item.id}`, { cache: "no-store" });
+      const res = await fetch(`/api/evals/${item.id}`, { cache: "no-store", signal });
       const data = await readJson(res);
       if (!res.ok) throw new Error(data?.error ?? "Could not load runs.");
       setRuns((data.runs ?? []) as RunSummary[]);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load runs.");
     } finally {
-      setRunsLoading(false);
+      if (!signal.aborted) setRunsLoading(false);
     }
-  }, [item.id]);
+  }, [item.id, nextRunsSignal]);
 
   useEffect(() => {
     void loadRuns();
@@ -428,13 +439,13 @@ function EvalEditor({ item, onChanged, onDeleted }: { item: EvalItem; onChanged:
           </Field>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" touch onClick={() => void save()} disabled={saving || !dirty}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />} Save
+              {saving ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />} Save
             </Button>
             <Button size="sm" touch onClick={() => void run("inline")} disabled={running !== null || saving} aria-label="Run eval now">
-              {running === "inline" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />} Run now
+              {running === "inline" ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />} Run now
             </Button>
             <Button variant="outline" size="sm" touch onClick={() => void run("queue")} disabled={running !== null || saving} aria-label="Queue eval for the worker">
-              {running === "queue" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} Queue
+              {running === "queue" ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : null} Queue
             </Button>
             <Button variant="ghost" size="sm" touch onClick={() => setConfirmDelete(true)} aria-label="Delete eval">
               <Trash2 className="h-4 w-4 text-destructive" aria-hidden />
@@ -452,6 +463,7 @@ function EvalEditor({ item, onChanged, onDeleted }: { item: EvalItem; onChanged:
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  touch
                   onClick={() => {
                     setCases((cs) => (cs.length === 1 ? [{ input: "" }] : cs.filter((_, i) => i !== idx)));
                     setDirty(true);
@@ -493,8 +505,8 @@ function EvalEditor({ item, onChanged, onDeleted }: { item: EvalItem; onChanged:
       <section className="rounded-xl border border-border bg-card p-4 sm:p-5" aria-labelledby={`runs-${item.id}`}>
         <div className="mb-3 flex items-center justify-between gap-2">
           <h3 id={`runs-${item.id}`} className="text-sm font-semibold">Runs</h3>
-          <Button variant="ghost" size="sm" onClick={() => void loadRuns()} disabled={runsLoading} aria-label="Refresh runs">
-            {runsLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+          <Button variant="ghost" size="icon-sm" touch onClick={() => void loadRuns()} disabled={runsLoading} aria-label="Refresh runs">
+            {runsLoading ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
           </Button>
         </div>
         {runsLoading && runs.length === 0 ? (
@@ -516,13 +528,9 @@ function EvalEditor({ item, onChanged, onDeleted }: { item: EvalItem; onChanged:
               </thead>
               <tbody className="divide-y divide-border">
                 {runs.map((r) => (
-                  <tr
-                    key={r.id}
-                    className={cn("cursor-pointer hover:bg-secondary/40", r.id === activeRunId && "bg-primary/5")}
-                    onClick={() => setActiveRunId(r.id)}
-                  >
+                  <tr key={r.id} className={cn("hover:bg-secondary/40", r.id === activeRunId && "bg-primary/5")} aria-selected={r.id === activeRunId}>
                     <td className="whitespace-nowrap px-3 py-2">
-                      <button type="button" className="underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setActiveRunId(r.id)} aria-label={`Open run from ${fmtDate(r.created_at)}`}>
+                      <button type="button" className="inline-flex min-h-11 items-center rounded underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0" onClick={() => setActiveRunId(r.id)} aria-current={r.id === activeRunId ? "true" : undefined} aria-label={`Open run from ${fmtDate(r.created_at)}`}>
                         {fmtDate(r.created_at)}
                       </button>
                     </td>
@@ -544,8 +552,8 @@ function EvalEditor({ item, onChanged, onDeleted }: { item: EvalItem; onChanged:
       {confirmDelete && (
         <Dialog title="Delete this eval?" description="Its runs and results are removed too. This cannot be undone." onClose={() => setConfirmDelete(false)} size="sm">
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => void remove()}>Delete</Button>
+            <Button variant="outline" touch onClick={() => setConfirmDelete(false)}>Cancel</Button>
+            <Button variant="destructive" touch onClick={() => void remove()}>Delete eval</Button>
           </DialogFooter>
         </Dialog>
       )}
@@ -593,14 +601,19 @@ function RunResults({ runId, onRefreshRuns }: { runId: string; onRefreshRuns: ()
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 id={`results-${run.id}`} className="text-sm font-semibold">Results · {fmtDate(run.created_at)}</h3>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
             {run.summary.judged} judged · {run.summary.passed} passed (≥ {PASS_THRESHOLD}) · {run.summary.errored} errored · {fmtUsd(run.cost_micros)}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {pending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />}
           <Pill tone={RUN_TONE[run.status]}>{run.status}</Pill>
-          {run.score !== null && <span className={cn("rounded-full px-3 py-1 text-lg font-semibold tabular-nums", run.score >= PASS_THRESHOLD ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-red-500/15 text-red-700 dark:text-red-300")} aria-label={`Overall score ${run.score}`}>{run.score}</span>}
+          {run.score !== null && (
+            <Pill tone={scoreTone(run.score)} className="px-3 py-1 text-lg font-semibold tabular-nums">
+              <span className="sr-only">Overall score </span>
+              {run.score}
+            </Pill>
+          )}
         </div>
       </div>
 
@@ -621,7 +634,7 @@ function RunResults({ runId, onRefreshRuns }: { runId: string; onRefreshRuns: ()
               <Pill tone={scoreTone(r.score)} className="text-sm">{r.score ?? "no score"}</Pill>
             </div>
             {r.reasons && <p className="mb-2 text-sm text-muted-foreground [overflow-wrap:anywhere]">{r.reasons}</p>}
-            {r.error && <p className="mb-2 text-sm text-red-700 dark:text-red-300 [overflow-wrap:anywhere]">{r.error}</p>}
+            {r.error && <Banner tone="error" className="mb-2">{r.error}</Banner>}
             <details className="group">
               <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 Output and transcript ({r.transcript.length} step{r.transcript.length === 1 ? "" : "s"}, {r.turns} turn{r.turns === 1 ? "" : "s"})
@@ -632,9 +645,9 @@ function RunResults({ runId, onRefreshRuns }: { runId: string; onRefreshRuns: ()
                   <ul className="space-y-1 text-xs">
                     {r.transcript.map((t, i) => (
                       <li key={i} className="rounded-md border border-border p-2 [overflow-wrap:anywhere]">
-                        <span className={cn("mr-2 rounded px-1.5 py-0.5 font-medium", t.kind === "would_call" ? "bg-amber-500/15 text-amber-800 dark:text-amber-300" : t.kind === "tool" ? "bg-blue-500/15 text-blue-700 dark:text-blue-300" : "bg-secondary text-muted-foreground")}>
+                        <Pill tone={t.kind === "would_call" ? "warning" : t.kind === "tool" ? "info" : "neutral"} className="mr-2">
                           {t.kind === "would_call" ? "would call" : t.kind}
-                        </span>
+                        </Pill>
                         <span className="font-mono">{t.name}</span>
                         {t.input && <span className="text-muted-foreground"> · {t.input}</span>}
                         {t.output && <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{t.output}</div>}
@@ -662,21 +675,24 @@ function CorrectionsPanel({ agentId }: { agentId: string }) {
   const [form, setForm] = useState({ original: "", corrected: "", note: "" });
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
+    const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}/corrections`, { cache: "no-store" });
+      const res = await fetch(`/api/agents/${agentId}/corrections`, { cache: "no-store", signal });
       const data = await readJson(res);
       if (!res.ok) throw new Error(data?.error ?? "Could not load corrections.");
       setItems((data.corrections ?? []) as Correction[]);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load corrections.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [agentId]);
+  }, [agentId, nextSignal]);
 
   useEffect(() => {
     void load();
@@ -743,8 +759,18 @@ function CorrectionsPanel({ agentId }: { agentId: string }) {
         </div>
 
         {loading && !items && <SkeletonList count={3} label="Loading corrections…" />}
+        {!loading && !items && error && <ErrorState message={error} onRetry={() => void load()} />}
         {items && items.length === 0 && (
-          <Empty icon={<Brain className="h-5 w-5" />} title="Nothing remembered yet" text="Edit an approval's payload before approving it, or add a correction by hand." />
+          <Empty
+            icon={<Brain className="h-5 w-5" />}
+            title="Nothing remembered yet"
+            text="Edit an approval's payload before approving it, or add a correction by hand."
+            action={
+              <Button onClick={() => setAdding(true)}>
+                <Plus className="h-4 w-4" aria-hidden /> Add correction
+              </Button>
+            }
+          />
         )}
         {items && items.length > 0 && (
           <ul className="divide-y divide-border" aria-label="Corrections">
@@ -752,12 +778,12 @@ function CorrectionsPanel({ agentId }: { agentId: string }) {
               <li key={c.id} className="flex items-start justify-between gap-3 py-3">
                 <div className="min-w-0 flex-1 space-y-1 text-sm">
                   <p className="[overflow-wrap:anywhere]"><span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Instead of</span> {c.original}</p>
-                  <p className="[overflow-wrap:anywhere]"><span className="text-xs font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Do</span> {c.corrected}</p>
+                  <p className="[overflow-wrap:anywhere]"><span className="text-xs font-medium uppercase tracking-wide text-accent-foreground">Do</span> {c.corrected}</p>
                   {c.note && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{c.note}</p>}
                   <p className="text-xs text-muted-foreground">{fmtDate(c.created_at)}{c.run_id ? " · from a run" : ""}</p>
                 </div>
-                <Button variant="ghost" size="icon-sm" touch onClick={() => void remove(c.id)} disabled={deleting === c.id} aria-label="Delete correction">
-                  {deleting === c.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4 text-destructive" aria-hidden />}
+                <Button variant="ghost" size="icon-sm" touch onClick={() => void remove(c.id)} disabled={deleting === c.id} aria-label={`Delete correction from ${fmtDate(c.created_at)}`}>
+                  {deleting === c.id ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Trash2 className="h-4 w-4 text-destructive" aria-hidden />}
                 </Button>
               </li>
             ))}
@@ -769,7 +795,7 @@ function CorrectionsPanel({ agentId }: { agentId: string }) {
         <Dialog title="Add a correction" description="Tell the agent what it did and what it should do instead." onClose={() => setAdding(false)}>
           <form onSubmit={submit} className="space-y-4">
             <Field label="What the agent did (original)" required>
-              <Textarea value={form.original} onChange={(e) => setForm({ ...form, original: e.target.value })} rows={3} maxLength={4000} autoFocus />
+              <Textarea value={form.original} onChange={(e) => setForm({ ...form, original: e.target.value })} rows={3} maxLength={4000} data-autofocus />
             </Field>
             <Field label="What it should do instead (corrected)" required>
               <Textarea value={form.corrected} onChange={(e) => setForm({ ...form, corrected: e.target.value })} rows={3} maxLength={4000} />
@@ -778,9 +804,9 @@ function CorrectionsPanel({ agentId }: { agentId: string }) {
               <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} maxLength={1000} />
             </Field>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setAdding(false)} disabled={busy}>Cancel</Button>
-              <Button type="submit" disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />} Save
+              <Button type="button" variant="outline" touch onClick={() => setAdding(false)} disabled={busy}>Cancel</Button>
+              <Button type="submit" touch disabled={busy}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />} Save
               </Button>
             </DialogFooter>
           </form>
@@ -800,12 +826,14 @@ function PricingPanel({ agentId }: { agentId: string }) {
   const [event, setEvent] = useState("");
   const [credits, setCredits] = useState("");
   const [saving, setSaving] = useState(false);
+  const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
+    const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}/pricing`, { cache: "no-store" });
+      const res = await fetch(`/api/agents/${agentId}/pricing`, { cache: "no-store", signal });
       const data = await readJson(res);
       if (!res.ok) throw new Error(data?.error ?? "Could not load outcome pricing.");
       const p = data.pricing as Pricing;
@@ -813,11 +841,12 @@ function PricingPanel({ agentId }: { agentId: string }) {
       setEvent(p.outcome_event ?? "");
       setCredits(p.outcome_price_credits == null ? "" : String(p.outcome_price_credits));
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load outcome pricing.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [agentId]);
+  }, [agentId, nextSignal]);
 
   useEffect(() => {
     void load();
@@ -878,7 +907,7 @@ function PricingPanel({ agentId }: { agentId: string }) {
             </Field>
             <div className="sm:col-span-2">
               <Button type="submit" touch disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />} Save pricing
+                {saving ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />} Save pricing
               </Button>
             </div>
           </form>

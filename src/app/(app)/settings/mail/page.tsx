@@ -36,7 +36,7 @@ export default function MailSettingsPage() {
   return (
     <Suspense
       fallback={
-        <PageContainer wide title="Email Inbox">
+        <PageContainer wide title="Email inbox">
           <Loading label="Loading mailboxes…" />
         </PageContainer>
       }
@@ -76,7 +76,7 @@ function MailSettingsInner() {
       if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load mailboxes.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [nextSignal]);
 
@@ -126,16 +126,18 @@ function MailSettingsInner() {
     }
   }
 
+  const simulated = providers.find((p) => p.id === "simulated" && p.configured) ?? null;
+
   return (
     <PageContainer
       wide
-      title="Email Inbox"
+      title="Email inbox"
       icon={<Mail className="h-5 w-5" aria-hidden />}
       description="Connect mailboxes so customer email lands in Messages next to SMS and WhatsApp, with the AI receptionist drafting replies."
       tooltip="Each connected mailbox is synced every 2 minutes. Threads become conversations in Messages; replies you type there go back out through the same mailbox."
       actions={
-        <Button asChild variant="outline" size="sm">
-          <Link href="/messaging">Open Messages</Link>
+        <Button asChild variant="outline" touch>
+          <Link href="/messaging">Open messages</Link>
         </Button>
       }
     >
@@ -173,7 +175,7 @@ function MailSettingsInner() {
                     </a>
                   </Button>
                 ) : (
-                  <p className="text-xs text-amber-700 dark:text-amber-300" role="note">
+                  <p className="text-xs text-amber-800 dark:text-amber-300" role="note">
                     {p.reason ?? "Not available."}
                   </p>
                 )}
@@ -188,42 +190,51 @@ function MailSettingsInner() {
           <h2 id="accounts-heading" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Connected mailboxes
           </h2>
-          <Button variant="ghost" size="sm" onClick={() => void load()} disabled={loading} aria-label="Refresh mailboxes">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+          <Button variant="ghost" size="sm" touch onClick={() => void load()} disabled={loading} aria-label="Refresh mailboxes">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
             Refresh
           </Button>
         </div>
 
-        {error ? (
+        {error && accounts.length === 0 ? (
           <ErrorState message={error} onRetry={() => void load()} />
         ) : loading && accounts.length === 0 ? (
           <Loading label="Loading mailboxes…" />
         ) : accounts.length === 0 ? (
           <Empty
-            icon={<Inbox className="h-5 w-5" />}
+            icon={<Inbox className="h-5 w-5" aria-hidden />}
             title="No mailboxes connected"
             text="Connect Gmail or Outlook above, or create a simulated inbox to try the flow without any credentials."
+            action={
+              simulated ? (
+                <Button asChild variant="outline" touch disabled={!migrated}>
+                  <a href={`/api/mail/connect/${simulated.id}`}>
+                    <Plug className="h-3.5 w-3.5" aria-hidden /> Create simulated inbox
+                  </a>
+                </Button>
+              ) : undefined
+            }
           />
         ) : (
           <TableScroller label="Connected mailboxes">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[720px] text-sm" aria-busy={loading || undefined}>
               <thead className={THEAD}>
                 <tr>
-                  <th className={TH}>Mailbox</th>
-                  <th className={TH}>Provider</th>
-                  <th className={TH}>Status</th>
-                  <th className={TH}>Messages</th>
-                  <th className={TH}>Last sync</th>
-                  <th className={`${TH} text-right`}>Actions</th>
+                  <th scope="col" className={TH}>Mailbox</th>
+                  <th scope="col" className={TH}>Provider</th>
+                  <th scope="col" className={TH}>Status</th>
+                  <th scope="col" className={TH}>Messages</th>
+                  <th scope="col" className={TH}>Last sync</th>
+                  <th scope="col" className={`${TH} text-right`}>Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {accounts.map((a) => (
                   <tr key={a.id}>
-                    <td className="px-3 py-2">
-                      <div className="font-medium">{a.email}</div>
+                    <th scope="row" className="px-3 py-2 text-left font-normal">
+                      <div className="font-medium [overflow-wrap:anywhere]">{a.email}</div>
                       {a.display_name && <div className="text-xs text-muted-foreground">{a.display_name}</div>}
-                    </td>
+                    </th>
                     <td className="px-3 py-2 capitalize">{a.provider}</td>
                     <td className="px-3 py-2">
                       <StatusPill status={a.status} map={STATUS_TONE} />
@@ -234,20 +245,20 @@ function MailSettingsInner() {
                       )}
                     </td>
                     <td className="px-3 py-2 tabular-nums">{a.message_count}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{a.last_sync_at ? timeAgo(a.last_sync_at) : "Never"}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{a.last_sync_at ? <time dateTime={a.last_sync_at}>{timeAgo(a.last_sync_at)}</time> : "Never"}</td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap justify-end gap-1.5">
                         {a.provider === "simulated" && (
-                          <Button size="sm" variant="outline" onClick={() => setTester(a)}>
+                          <Button size="sm" variant="outline" touch onClick={() => setTester(a)} aria-label={`Send a test email to ${a.email}`}>
                             <FlaskConical className="h-3.5 w-3.5" aria-hidden />
                             Test email
                           </Button>
                         )}
-                        <Button size="sm" variant="outline" onClick={() => void syncNow(a)} disabled={busy !== null} aria-label={`Sync ${a.email} now`}>
-                          {busy === `sync:${a.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                        <Button size="sm" variant="outline" touch onClick={() => void syncNow(a)} disabled={busy !== null} aria-label={`Sync ${a.email} now`}>
+                          {busy === `sync:${a.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
                           Sync now
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setDisconnect(a)} disabled={busy !== null} aria-label={`Disconnect ${a.email}`}>
+                        <Button size="sm" variant="ghost" touch onClick={() => setDisconnect(a)} disabled={busy !== null} aria-label={`Disconnect ${a.email}`}>
                           <Trash2 className="h-3.5 w-3.5" aria-hidden />
                           Disconnect
                         </Button>
@@ -262,13 +273,13 @@ function MailSettingsInner() {
       </section>
 
       {disconnect && (
-        <Dialog title={`Disconnect ${disconnect.email}?`} description="Synced messages for this mailbox are removed from the inbox. Existing conversations stay but can no longer be replied to by email." onClose={() => setDisconnect(null)} size="sm">
+        <Dialog title={`Disconnect ${disconnect.email}?`} description="Synced messages for this mailbox are removed from the inbox. Existing conversations stay but can no longer be replied to by email." onClose={() => busy === null && setDisconnect(null)} size="sm">
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDisconnect(null)}>
+            <Button variant="ghost" touch onClick={() => setDisconnect(null)} disabled={busy !== null}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void confirmDisconnect()} disabled={busy !== null}>
-              {busy === `del:${disconnect.id}` && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+            <Button variant="destructive" touch onClick={() => void confirmDisconnect()} disabled={busy !== null}>
+              {busy === `del:${disconnect.id}` && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}
               Disconnect
             </Button>
           </DialogFooter>
@@ -319,12 +330,12 @@ function SimulateMailDialog({ account, onClose, onDone }: { account: MailAccount
   }
 
   return (
-    <Dialog title="Send a test email" description={`Pushes an inbound email into ${account.email} and runs the receptionist, exactly like a real mailbox sync.`} onClose={onClose}>
+    <Dialog title="Send a test email" description={`Pushes an inbound email into ${account.email} and runs the receptionist, exactly like a real mailbox sync.`} onClose={() => !busy && onClose()}>
       <form onSubmit={submit} className="space-y-3">
         {err && <Banner tone="error">{err}</Banner>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="From" required>
-            <Input type="email" value={from} onChange={(e) => setFrom(e.target.value)} required maxLength={200} autoComplete="off" />
+            <Input data-autofocus type="email" inputMode="email" value={from} onChange={(e) => setFrom(e.target.value)} required maxLength={200} autoComplete="off" />
           </Field>
           <Field label="Thread id" hint="Optional — reuse one to append to an existing thread.">
             <Input value={thread} onChange={(e) => setThread(e.target.value)} maxLength={200} autoComplete="off" />
@@ -337,11 +348,11 @@ function SimulateMailDialog({ account, onClose, onDone }: { account: MailAccount
           <Textarea rows={6} value={body} onChange={(e) => setBody(e.target.value)} required maxLength={10_000} />
         </Field>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="ghost" touch onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || !from.trim() || !subject.trim() || !body.trim()}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          <Button type="submit" touch disabled={busy || !from.trim() || !subject.trim() || !body.trim()}>
+            {busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}
             {busy ? "Delivering…" : "Deliver to inbox"}
           </Button>
         </DialogFooter>

@@ -33,7 +33,9 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 function Code({ code, label, className }: { code: string; label: string; className?: string }) {
   return (
     <div className={cn("relative", className)}>
-      <pre className="overflow-x-auto rounded-md bg-muted p-3 pr-24 text-xs leading-relaxed">{code}</pre>
+      <pre className="overflow-x-auto rounded-md bg-muted p-3 pr-24 text-xs leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0} aria-label={label.replace(/^Copy /, "")}>
+        {code}
+      </pre>
       <div className="absolute right-2 top-2">
         <CopyButton text={code} label={label} />
       </div>
@@ -153,7 +155,7 @@ GET ${base}/webhooks/sample/invoice.paid`;
                 <dt className="text-xs text-muted-foreground">OpenAPI 3.1</dt>
                 <dd className="mt-0.5">
                   <a href="/api/v1/openapi.json" target="_blank" rel="noreferrer" className="rounded-sm font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    /api/v1/openapi.json
+                    /api/v1/openapi.json<span className="sr-only"> (opens in a new tab)</span>
                   </a>{" "}
                   <span className="text-xs text-muted-foreground">— import into Postman, Insomnia or an SDK generator</span>
                 </dd>
@@ -273,7 +275,7 @@ GET ${base}/webhooks/sample/invoice.paid`;
             {eventTypes === null ? (
               <SkeletonList count={2} itemClassName="h-6" label="Loading event types…" />
             ) : eventTypes.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Event catalogue unavailable — see <code className="rounded bg-muted px-1">src/lib/events/bus.ts</code>.</p>
+              <p className="text-xs text-muted-foreground" role="status">Event catalogue unavailable right now. Try again in a moment.</p>
             ) : (
               <div className="flex flex-wrap gap-1">
                 {eventTypes.map((t) => (
@@ -312,7 +314,7 @@ GET ${base}/webhooks/sample/invoice.paid`;
               ["zapier", "Zapier / Make"],
             ].map(([id, label]) => (
               <li key={id}>
-                <a href={`#${id}`} className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <a href={`#${id}`} className="block rounded-md px-2 py-1.5 text-muted-foreground hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   {label}
                 </a>
               </li>

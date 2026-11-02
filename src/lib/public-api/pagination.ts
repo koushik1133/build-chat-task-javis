@@ -1,8 +1,9 @@
 /**
  * Opaque keyset cursors for /api/v1 lists (client-safe, no DB).
  *
- * Lists are ordered `created_at DESC, id DESC`; the cursor is base64url of
- * `created_at|id` of the last row returned. Offsets are never exposed.
+ * Lists are ordered `created_at DESC, id DESC` (at millisecond precision, see
+ * `keysetTs`); the cursor is base64url of `created_at|id` of the last row
+ * returned. Offsets are never exposed.
  */
 
 export interface Cursor {
@@ -55,8 +56,22 @@ export function parseListParams(url: URL | string, defaults: { limit?: number } 
 }
 
 /**
+ * Timestamp expression used by both the keyset predicate and the ORDER BY.
+ *
+ * pg hands TIMESTAMPTZ back as a JS Date (millisecond precision) while the
+ * column itself keeps microseconds (`DEFAULT NOW()`). A cursor therefore only
+ * ever carries milliseconds, so the SQL side must compare — and order — at the
+ * same precision, otherwise rows that share the last row's millisecond but
+ * carry later microseconds are skipped on the next page.
+ */
+export function keysetTs(alias = "", col = "created_at"): string {
+  return `date_trunc('milliseconds', ${alias}${col})`;
+}
+
+/**
  * Append a keyset predicate to a parameterised query. Pushes the two cursor
  * values onto `params` and returns the SQL fragment (empty when no cursor).
+ * Always pair it with `keysetOrder()` so the ordering matches the predicate.
  *
  *   const params = [dataId];
  *   const where = `user_id = $1${keysetClause(cursor, params, { alias: "q." })}`;
@@ -67,13 +82,14 @@ export function keysetClause(cursor: Cursor | null | undefined, params: unknown[
   const a = opts.alias ?? "";
   const col = opts.col ?? "created_at";
   const id = opts.id ?? "id";
+  const ts = keysetTs(a, col);
   params.push(cursor.created_at, cursor.id);
   const n = params.length;
-  return ` AND (${a}${col} < $${n - 1} OR (${a}${col} = $${n - 1} AND ${a}${id}::text < $${n}))`;
+  return ` AND (${ts} < $${n - 1} OR (${ts} = $${n - 1} AND ${a}${id}::text < $${n}))`;
 }
 
 export function keysetOrder(alias = "", col = "created_at", id = "id"): string {
-  return `${alias}${col} DESC, ${alias}${id} DESC`;
+  return `${keysetTs(alias, col)} DESC, ${alias}${id} DESC`;
 }
 
 export interface Page<T> {

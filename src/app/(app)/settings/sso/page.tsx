@@ -72,6 +72,8 @@ export default function SsoSettingsPage() {
   const [domainInput, setDomainInput] = useState("");
   const [providerInput, setProviderInput] = useState("");
   const [addingDomain, setAddingDomain] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<TokenView | null>(null);
+  const [domainTarget, setDomainTarget] = useState<DomainRow | null>(null);
   const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
@@ -100,12 +102,12 @@ export default function SsoSettingsPage() {
   }, [load]);
 
   async function revoke(t: TokenView) {
-    if (!window.confirm(`Revoke "${t.name}"? Your identity provider will stop being able to provision users.`)) return;
     setBusyId(t.id);
     setError(null);
     try {
       await api(`/api/scim/tokens?id=${encodeURIComponent(t.id)}`, { method: "DELETE" });
       setNotice(`Revoked ${t.name}.`);
+      setRevokeTarget(null);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not revoke the token.");
@@ -134,11 +136,12 @@ export default function SsoSettingsPage() {
   }
 
   async function removeDomain(d: DomainRow) {
-    if (!window.confirm(`Remove ${d.domain}? Users with that email domain will no longer be offered SSO.`)) return;
     setBusyId(d.id);
     setError(null);
     try {
       await api(`/api/sso/domains?id=${encodeURIComponent(d.id)}`, { method: "DELETE" });
+      setNotice(`Removed ${d.domain}.`);
+      setDomainTarget(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not remove the domain.");
@@ -159,7 +162,7 @@ export default function SsoSettingsPage() {
       description="Let your identity provider sign people in and provision them automatically."
       tooltip="SCIM lets Okta, Entra ID or Google provision and deprovision members. SSO uses Supabase SAML so your team signs in with the company identity provider."
       actions={
-        <Button variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh">
+        <Button variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh SSO settings">
           {loading ? spinner : <RefreshCw className="h-4 w-4" aria-hidden />}
         </Button>
       }
@@ -172,7 +175,7 @@ export default function SsoSettingsPage() {
       ) : !data && error ? (
         <ErrorState message={error} onRetry={() => void load()} />
       ) : data ? (
-        <div className="space-y-8">
+        <div className="space-y-8" aria-busy={loading || undefined}>
           {/* SCIM */}
           <section aria-labelledby="scim-heading" className="rounded-xl border border-border bg-card p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -196,19 +199,31 @@ export default function SsoSettingsPage() {
 
             <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tokens</h3>
             {data.tokens.length === 0 ? (
-              <Empty className="mt-2 py-8" icon={<KeyRound className="h-5 w-5" />} title="No SCIM tokens yet" text="Generate one and paste it into your identity provider. It is shown only once." />
+              <Empty
+                className="mt-2 py-8"
+                icon={<KeyRound className="h-5 w-5" aria-hidden />}
+                title="No SCIM tokens yet"
+                text="Generate one and paste it into your identity provider. It is shown only once."
+                action={
+                  canEdit ? (
+                    <Button touch onClick={() => setCreating(true)}>
+                      <Plus className="h-4 w-4" aria-hidden /> Generate token
+                    </Button>
+                  ) : undefined
+                }
+              />
             ) : (
               <ul className="mt-2 divide-y divide-border rounded-lg border border-border">
                 {data.tokens.map((t) => (
                   <li key={t.id} className={cn("flex flex-wrap items-center justify-between gap-3 px-3 py-2.5", t.revoked_at && "opacity-60")}>
                     <div className="min-w-0">
-                      <p className="flex items-center gap-2 truncate text-sm font-medium">
+                      <p className="flex flex-wrap items-center gap-2 break-words text-sm font-medium">
                         {t.name} {t.revoked_at ? <Pill tone="neutral">Revoked</Pill> : <Pill tone="success">Active</Pill>}
                       </p>
                       <p className="text-xs text-muted-foreground">Created {fmtDate(t.created_at)} · Last used {fmtDate(t.last_used_at)}</p>
                     </div>
                     {canEdit && !t.revoked_at && (
-                      <Button size="sm" variant="ghost" touch disabled={busyId === t.id} onClick={() => void revoke(t)} aria-label={`Revoke ${t.name}`}>
+                      <Button size="sm" variant="ghost" touch disabled={busyId === t.id} onClick={() => setRevokeTarget(t)} aria-label={`Revoke ${t.name}`}>
                         {busyId === t.id ? spinner : <Trash2 className="h-3.5 w-3.5" aria-hidden />} Revoke
                       </Button>
                     )}
@@ -265,7 +280,7 @@ export default function SsoSettingsPage() {
               </form>
             )}
             {domains.length === 0 ? (
-              <Empty className="mt-3 py-8" icon={<Globe2 className="h-5 w-5" />} title="No domains mapped" text="Add your company email domain so the login page can route people to SSO." />
+              <Empty className="mt-3 py-8" icon={<Globe2 className="h-5 w-5" aria-hidden />} title="No domains mapped" text={canEdit ? "Add your company email domain above so the login page can route people to SSO." : "An admin needs to add your company email domain so the login page can route people to SSO."} />
             ) : (
               <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
                 {domains.map((d) => (
@@ -275,7 +290,7 @@ export default function SsoSettingsPage() {
                       <p className="text-xs text-muted-foreground">{d.provider_id ? `Provider ${d.provider_id}` : "Resolved by domain"} · added {fmtDate(d.created_at)}</p>
                     </div>
                     {canEdit && (
-                      <Button size="sm" variant="ghost" touch disabled={busyId === d.id} onClick={() => void removeDomain(d)} aria-label={`Remove ${d.domain}`}>
+                      <Button size="sm" variant="ghost" touch disabled={busyId === d.id} onClick={() => setDomainTarget(d)} aria-label={`Remove ${d.domain}`}>
                         {busyId === d.id ? spinner : <Trash2 className="h-3.5 w-3.5" aria-hidden />} Remove
                       </Button>
                     )}
@@ -296,6 +311,30 @@ export default function SsoSettingsPage() {
             void load();
           }}
         />
+      )}
+      {revokeTarget && (
+        <Dialog title={`Revoke “${revokeTarget.name}”?`} description="Your identity provider will stop being able to provision or deprovision users with this token. This cannot be undone." onClose={() => busyId !== revokeTarget.id && setRevokeTarget(null)} size="sm">
+          <DialogFooter>
+            <Button type="button" variant="ghost" touch onClick={() => setRevokeTarget(null)} disabled={busyId === revokeTarget.id}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" touch onClick={() => void revoke(revokeTarget)} disabled={busyId === revokeTarget.id}>
+              {busyId === revokeTarget.id && spinner} Revoke token
+            </Button>
+          </DialogFooter>
+        </Dialog>
+      )}
+      {domainTarget && (
+        <Dialog title={`Remove ${domainTarget.domain}?`} description="People with that email domain will no longer be offered single sign-on on the login page." onClose={() => busyId !== domainTarget.id && setDomainTarget(null)} size="sm">
+          <DialogFooter>
+            <Button type="button" variant="ghost" touch onClick={() => setDomainTarget(null)} disabled={busyId === domainTarget.id}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" touch onClick={() => void removeDomain(domainTarget)} disabled={busyId === domainTarget.id}>
+              {busyId === domainTarget.id && spinner} Remove domain
+            </Button>
+          </DialogFooter>
+        </Dialog>
       )}
       {newToken && (
         <Dialog title="Your SCIM token" description="Copy it now. For security it is never shown again." onClose={() => setNewToken(null)} size="sm">

@@ -1,6 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import type { MailProviderId } from "./types";
 
+/** Minimal env shape so callers (and tests) can pass a plain object instead of process.env. */
+type EnvLike = Record<string, string | undefined>;
+
 /**
  * CSRF state for the mail OAuth dance. The state is random, bound to the
  * provider and signed so the callback can reject a forged or replayed value
@@ -10,8 +13,15 @@ import type { MailProviderId } from "./types";
 export const MAIL_STATE_COOKIE = "kh_mail_oauth";
 const TTL_MS = 10 * 60 * 1000;
 
+export function oauthStateSecret(env: EnvLike = process.env): string {
+  const configured = env.CREDENTIAL_ENCRYPTION_KEY?.trim() || env.CRON_SECRET?.trim();
+  if (configured) return configured;
+  if (env.NODE_ENV === "production") throw new Error("Mail OAuth needs CREDENTIAL_ENCRYPTION_KEY (or CRON_SECRET) to sign its CSRF state.");
+  return "mail-oauth-dev-secret";
+}
+
 function secret(): string {
-  return process.env.CREDENTIAL_ENCRYPTION_KEY?.trim() || process.env.CRON_SECRET?.trim() || "mail-oauth-dev-secret";
+  return oauthStateSecret();
 }
 
 function sign(payload: string): string {

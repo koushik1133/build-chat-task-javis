@@ -58,6 +58,7 @@ function LoginForm() {
   const [checking, setChecking] = useState(true);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [ssoEnabled, setSsoEnabled] = useState(false);
+  const [ssoBusy, setSsoBusy] = useState(false);
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
   const rules = passwordRules(password, email);
   const passwordValid = rules.every((rule) => rule.ok);
@@ -232,6 +233,7 @@ function LoginForm() {
       return;
     }
     setBusy(true);
+    setSsoBusy(true);
     setError(null);
     try {
       const res = await fetch("/api/auth/sso", {
@@ -240,14 +242,16 @@ function LoginForm() {
         body: JSON.stringify({ email: addr, next }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body.url) {
+      if (!res.ok || typeof body.url !== "string") {
         setBusy(false);
-        setError(body.error || "Single sign-on is not available for that email.");
+        setSsoBusy(false);
+        setError(typeof body.error === "string" ? body.error : "Single sign-on is not available for that email.");
         return;
       }
       window.location.assign(body.url);
     } catch {
       setBusy(false);
+      setSsoBusy(false);
       setError("Could not start single sign-on. Please try again.");
     }
   }
@@ -350,8 +354,9 @@ function LoginForm() {
                   autoComplete="current-password" placeholder="Password"
                   value={password} onChange={e => setPassword(e.target.value)} className="pr-10" />
                 <button type="button" onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  aria-label={showPw ? "Hide password" : "Show password"} aria-pressed={showPw}
+                  className="absolute right-0 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  {showPw ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
                 </button>
               </div>
               <Button type="submit" className="w-full" disabled={busy || !email || !password}>
@@ -393,8 +398,9 @@ function LoginForm() {
                   autoComplete="new-password" placeholder="Create a strong password"
                   value={password} onChange={e => setPassword(e.target.value)} className="pr-10" />
                 <button type="button" onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  aria-label={showPw ? "Hide password" : "Show password"} aria-pressed={showPw}
+                  className="absolute right-0 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  {showPw ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
                 </button>
               </div>
               <div className="rounded-lg border border-border bg-secondary/30 p-3 text-[11px] text-muted-foreground">
@@ -441,7 +447,7 @@ function LoginForm() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <Button onClick={googleSignIn} variant="outline" className="w-full" disabled={busy}>
+            <Button type="button" onClick={googleSignIn} variant="outline" touch className="w-full" disabled={busy}>
               <svg className="mr-2 h-4 w-4 shrink-0" viewBox="0 0 24 24">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
                 <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -451,16 +457,34 @@ function LoginForm() {
               Continue with Google
             </Button>
             {ssoEnabled && (
-              <Button onClick={() => void ssoSignIn()} variant="outline" className="w-full" disabled={busy} title="Uses the email entered above">
-                <ShieldCheck className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-                Sign in with SSO
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  onClick={() => void ssoSignIn()}
+                  variant="outline"
+                  touch
+                  className="w-full"
+                  disabled={busy}
+                  aria-busy={ssoBusy || undefined}
+                  aria-describedby="sso-hint"
+                >
+                  {ssoBusy ? (
+                    <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+                  ) : (
+                    <ShieldCheck className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+                  )}
+                  {ssoBusy ? "Redirecting to your identity provider…" : "Sign in with SSO"}
+                </Button>
+                <p id="sso-hint" className="text-center text-[11px] text-muted-foreground">
+                  Uses the work email entered above.
+                </p>
+              </>
             )}
           </div>
         </div>
 
         {error && (
-          <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive">
+          <p role="alert" className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive">
             {error}
           </p>
         )}

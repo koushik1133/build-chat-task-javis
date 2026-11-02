@@ -6,7 +6,8 @@ import { KeyRound, Loader2, Plus, Copy, Check, Trash2, RefreshCw, ShieldCheck } 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
-import { Banner, Empty, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { Checkbox, Input } from "@/components/ui/input";
 import { Pill } from "@/components/ui/pill";
 import { PageContainer } from "@/components/page-container";
@@ -160,25 +161,28 @@ export default function ApiKeysPage() {
 
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyView | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const nextSignal = useAbortable();
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const mcpUrl = `${origin}/api/mcp`;
   const apiUrl = `${origin}/api/v1`;
 
   const load = useCallback(async () => {
+    const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/api-keys", { cache: "no-store" });
+      const res = await fetch("/api/api-keys", { cache: "no-store", signal });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? "Could not load API keys.");
       setKeys(Array.isArray(data?.keys) ? data.keys : []);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load API keys.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [nextSignal]);
 
   useEffect(() => {
     void load();
@@ -242,8 +246,8 @@ export default function ApiKeysPage() {
       description="Keys authenticate MCP clients (Claude, Cursor) and the REST API. Treat them like passwords."
       tooltip="Each key carries scopes: read/write per area, or full access for MCP clients. Revoking a key stops it immediately."
       actions={
-        <Button type="button" size="sm" touch onClick={() => setCreating(true)}>
-          <Plus className="h-3.5 w-3.5" aria-hidden /> New key
+        <Button type="button" touch onClick={() => setCreating(true)}>
+          <Plus className="h-4 w-4" aria-hidden /> New key
         </Button>
       }
     >
@@ -286,16 +290,20 @@ export default function ApiKeysPage() {
         </section>
       </div>
 
-      <section className="mt-6">
+      <section className="mt-6" aria-labelledby="keys-heading" aria-busy={loading || undefined}>
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">Your keys</h2>
-          <Button type="button" variant="ghost" size="sm" touch onClick={() => void load()} disabled={loading} aria-label="Refresh keys">
+          <h2 id="keys-heading" className="text-sm font-semibold">
+            Your keys
+          </h2>
+          <Button type="button" variant="ghost" size="icon-sm" touch onClick={() => void load()} disabled={loading} aria-label="Refresh keys">
             <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin motion-reduce:animate-none")} aria-hidden />
           </Button>
         </div>
 
         {loading && keys.length === 0 ? (
           <Loading label="Loading keys…" />
+        ) : error && keys.length === 0 ? (
+          <ErrorState message={error} onRetry={() => void load()} />
         ) : active.length === 0 ? (
           <Empty
             icon={<KeyRound className="h-5 w-5" aria-hidden />}
@@ -313,11 +321,11 @@ export default function ApiKeysPage() {
               <li key={k.id} className="flex flex-wrap items-center gap-3 p-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-medium">{k.name}</span>
+                    <span className="break-words text-sm font-medium">{k.name}</span>
                     <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{k.key_prefix}…</code>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Created {fmtDate(k.created_at)} · Last used {fmtDate(k.last_used_at)}
+                    Created <time dateTime={k.created_at}>{fmtDate(k.created_at)}</time> · Last used {k.last_used_at ? <time dateTime={k.last_used_at}>{fmtDate(k.last_used_at)}</time> : "never"}
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {k.scopes.includes(FULL_ACCESS_SCOPE) ? (
@@ -382,7 +390,7 @@ export default function ApiKeysPage() {
       {newKey && (
         <Dialog title="Copy your new key" description="This is the only time the full key is shown. Store it somewhere safe." onClose={() => setNewKey(null)} size="lg">
           <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">{newKey.key}</code>
+            <code className="min-w-0 flex-1 break-all rounded-md bg-muted px-3 py-2 text-xs">{newKey.key}</code>
             <CopyButton text={newKey.key} label="Copy API key" />
           </div>
           <div className="mt-4 flex items-center justify-between gap-2">

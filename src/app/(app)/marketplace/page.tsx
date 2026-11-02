@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useId, useMemo, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bot, Boxes, Download, Loader2, RefreshCw, Star, Store, Trash2, Upload, Workflow, Zap, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { PageContainer } from "@/components/page-container";
 import { Dialog, DialogFooter, Drawer } from "@/components/ui/dialog";
 import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
-import { useDebouncedValue } from "@/components/ui/hooks";
+import { isAbortError, useAbortable, useDebouncedValue } from "@/components/ui/hooks";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { SearchField } from "@/components/ui/search-field";
@@ -40,7 +40,7 @@ function Rating({ avg, count }: { avg: number | null; count: number }) {
   if (avg === null) return <span className="text-xs text-muted-foreground">No reviews yet</span>;
   return (
     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" aria-label={`Rated ${avg} out of 5 from ${count} review${count === 1 ? "" : "s"}`}>
-      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" aria-hidden />
+      <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden />
       <span className="tabular-nums">{avg.toFixed(1)}</span>
       <span>({count})</span>
     </span>
@@ -77,13 +77,15 @@ function MarketplaceInner() {
   const [selected, setSelected] = useState<string | null>(params.get("id"));
   const [publishing, setPublishing] = useState(false);
   const tabsId = useId();
+  const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
+    const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
       if (tab === "mine") {
-        const r = await api<{ listings: ListingDTO[] }>("/api/marketplace/mine");
+        const r = await api<{ listings: ListingDTO[] }>("/api/marketplace/mine", { signal });
         setListings(r.listings);
       } else {
         const sp = new URLSearchParams();
@@ -91,15 +93,16 @@ function MarketplaceInner() {
         if (tab !== "all") sp.set("kind", tab);
         if (category) sp.set("category", category);
         sp.set("sort", sort);
-        const r = await api<{ listings: ListingDTO[] }>(`/api/marketplace?${sp.toString()}`);
+        const r = await api<{ listings: ListingDTO[] }>(`/api/marketplace?${sp.toString()}`, { signal });
         setListings(r.listings);
       }
     } catch (e) {
+      if (isAbortError(e)) return;
       setError(e instanceof Error ? e.message : "Could not load the marketplace.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [tab, dq, category, sort]);
+  }, [tab, dq, category, sort, nextSignal]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -120,11 +123,12 @@ function MarketplaceInner() {
     return listings.filter((l) => !needle || `${l.title} ${l.summary ?? ""}`.toLowerCase().includes(needle));
   }, [listings, tab, dq]);
 
-  function onChanged(msg: string | null, patch?: ListingDTO | null, removedId?: string) {
+  const onChanged = useCallback((msg: string | null, patch?: ListingDTO | null, removedId?: string) => {
     if (msg) setNotice(msg);
     if (removedId) setListings((xs) => xs.filter((x) => x.id !== removedId));
     else if (patch) setListings((xs) => (xs.some((x) => x.id === patch.id) ? xs.map((x) => (x.id === patch.id ? patch : x)) : [patch, ...xs]));
-  }
+  }, []);
+  const open = useCallback((id: string) => setSelected(id), []);
 
   return (
     <PageContainer
@@ -140,7 +144,7 @@ function MarketplaceInner() {
             <span className="hidden sm:inline">Publish from my workspace</span>
             <span className="sm:hidden">Publish</span>
           </Button>
-          <Button variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh">
+          <Button variant="outline" size="icon" touch onClick={() => void load()} disabled={loading} aria-label="Refresh listings">
             {loading ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
           </Button>
         </>
@@ -185,6 +189,10 @@ function MarketplaceInner() {
         </div>
       </div>
 
+      <p className="sr-only" role="status" aria-live="polite">
+        {loading ? "Loading listings…" : `${visible.length} listing${visible.length === 1 ? "" : "s"} shown`}
+      </p>
+
       <TabPanel id={tabsId} value={tab}>
         {loading && listings.length === 0 ? (
           <SkeletonList count={6} itemClassName="h-36" label="Loading listings…" />
@@ -202,10 +210,10 @@ function MarketplaceInner() {
             <Empty icon={<Store className="h-5 w-5" />} title="No listings match" text="Try another search term, category or kind." action={<Button variant="outline" onClick={() => { setQ(""); setCategory(""); }}>Clear filters</Button>} />
           )
         ) : (
-          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy={loading}>
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy={loading || undefined}>
             {visible.map((l) => (
               <li key={l.id}>
-                <ListingCard listing={l} onOpen={() => setSelected(l.id)} />
+                <ListingCard listing={l} onOpen={open} />
               </li>
             ))}
           </ul>
@@ -228,12 +236,12 @@ function MarketplaceInner() {
   );
 }
 
-function ListingCard({ listing: l, onOpen }: { listing: ListingDTO; onOpen: () => void }) {
+const ListingCard = memo(function ListingCard({ listing: l, onOpen }: { listing: ListingDTO; onOpen: (id: string) => void }) {
   const Icon = KIND_ICON[l.kind];
   return (
     <button
       type="button"
-      onClick={onOpen}
+      onClick={() => onOpen(l.id)}
       aria-label={`Open ${l.title} (${KIND_LABELS[l.kind]})`}
       className="flex h-full w-full flex-col items-start gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-foreground/30 hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
     >
@@ -260,7 +268,7 @@ function ListingCard({ listing: l, onOpen }: { listing: ListingDTO; onOpen: () =
       </div>
     </button>
   );
-}
+});
 
 function ListingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: (msg: string | null, patch?: ListingDTO | null, removedId?: string) => void }) {
   const titleId = useId();
@@ -272,20 +280,24 @@ function ListingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
   const [rating, setRating] = useState(5);
   const [body, setBody] = useState("");
   const [installNote, setInstallNote] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
+    const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const r = await api<{ listing: ListingDTO; reviews: ReviewDTO[] }>(`/api/marketplace/${encodeURIComponent(id)}`);
+      const r = await api<{ listing: ListingDTO; reviews: ReviewDTO[] }>(`/api/marketplace/${encodeURIComponent(id)}`, { signal });
       setListing(r.listing);
       setReviews(r.reviews);
     } catch (e) {
+      if (isAbortError(e)) return;
       setError(e instanceof Error ? e.message : "Could not load the listing.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [id]);
+  }, [id, nextSignal]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -345,7 +357,8 @@ function ListingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
   }
 
   async function remove() {
-    if (!listing || !window.confirm(`Delete listing "${listing.title}"? Installed copies in other workspaces are not affected.`)) return;
+    if (!listing) return;
+    setConfirmDelete(false);
     setBusy("delete");
     setError(null);
     try {
@@ -432,8 +445,8 @@ function ListingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
           {listing.description_md ? <Markdown>{listing.description_md}</Markdown> : <p className="text-sm text-muted-foreground">No description.</p>}
 
           <details className="rounded-lg border border-border p-3 text-sm">
-            <summary className="cursor-pointer font-medium">Portable definition (JSON)</summary>
-            <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-secondary/40 p-2 text-xs">{JSON.stringify(listing.definition, null, 2)}</pre>
+            <summary className="cursor-pointer rounded font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Portable definition (JSON)</summary>
+            <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-secondary/40 p-2 text-xs" tabIndex={0}>{JSON.stringify(listing.definition, null, 2)}</pre>
           </details>
 
           {listing.owner && (
@@ -451,7 +464,7 @@ function ListingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
                     ))}
                   </Select>
                 </Field>
-                <Button variant="destructive" size="sm" touch onClick={() => void remove()} disabled={busy !== null}>
+                <Button variant="destructive" size="sm" touch onClick={() => setConfirmDelete(true)} disabled={busy !== null}>
                   {busy === "delete" ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />} Delete
                 </Button>
               </div>
@@ -470,7 +483,7 @@ function ListingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
                 {reviews.map((r) => (
                   <li key={r.id} className="rounded-lg border border-border p-3 text-sm">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span aria-label={`${r.rating} out of 5`} className="text-amber-500">
+                      <span role="img" aria-label={`${r.rating} out of 5 stars`} className="text-primary">
                         {"★".repeat(r.rating)}
                         <span className="text-muted-foreground/40">{"★".repeat(5 - r.rating)}</span>
                       </span>
@@ -503,6 +516,18 @@ function ListingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
             )}
           </section>
         </div>
+      )}
+      {confirmDelete && listing && (
+        <Dialog title="Delete this listing?" description={`"${listing.title}" is removed from the marketplace. Copies already installed in other workspaces are not affected.`} onClose={() => setConfirmDelete(false)} size="sm">
+          <DialogFooter>
+            <Button variant="outline" touch onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" touch onClick={() => void remove()}>
+              Delete listing
+            </Button>
+          </DialogFooter>
+        </Dialog>
       )}
     </Drawer>
   );

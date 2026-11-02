@@ -3,7 +3,7 @@ import { query, queryOne } from "@/lib/dsql";
 import { AUTO_DISABLE_AFTER, afterFailure, DELIVERY_TIMEOUT_MS, isSuccessStatus, shouldAutoDisable, type DeliveryStatus } from "./backoff";
 import { DELIVERY_HEADER, EVENT_HEADER, SIGNATURE_HEADER, signPayload } from "./sign";
 import { getSubscriptionRow, matchesEventType, openSecret, parseEventTypes, type SubscriptionRow } from "./subscriptions";
-import { isAllowedWebhookUrl } from "./url";
+import { isAllowedWebhookUrl, resolvesToPublicAddress, type HostLookup } from "./url";
 
 /**
  * Webhook fan-out + delivery.
@@ -224,13 +224,17 @@ export async function fanOutNewEvents(limit = 200): Promise<FanOutResult> {
     await query(`INSERT INTO webhook_cursors (name, last_event_at, last_event_id, updated_at) VALUES ($1, NOW(), '', NOW())`, [CURSOR_NAME]).catch(() => undefined);
     return { scanned: 0, created: 0 };
   }
-  const since = iso(cur.last_event_at) ?? new Date(0).toISOString();
-  const sinceId = cur.last_event_id ?? "";
+  // The watermark is compared and advanced entirely in SQL: events.created_at keeps
+  // microseconds while a JS Date only carries milliseconds, so a value that had been
+  // through `iso()` would re-select the trailing event on every tick.
   const events = await query<EventRow>(
-    `SELECT id, user_id, type, entity, entity_id, data, created_at FROM events
-      WHERE (created_at > $1 OR (created_at = $1 AND id > $2))
-      ORDER BY created_at ASC, id ASC LIMIT $3`,
-    [since, sinceId, Math.min(Math.max(limit, 1), 1000)]
+    `SELECT e.id, e.user_id, e.type, e.entity, e.entity_id, e.data, e.created_at
+       FROM events e, webhook_cursors c
+      WHERE c.name = $1
+        AND (e.created_at > COALESCE(c.last_event_at, 'epoch'::timestamptz)
+             OR (e.created_at = c.last_event_at AND e.id > COALESCE(c.last_event_id, '')))
+      ORDER BY e.created_at ASC, e.id ASC LIMIT $2`,
+    [CURSOR_NAME, Math.min(Math.max(limit, 1), 1000)]
   );
   if (events.length === 0) return { scanned: 0, created: 0 };
 
@@ -245,7 +249,10 @@ export async function fanOutNewEvents(limit = 200): Promise<FanOutResult> {
     if (subs.length) created += await fanOutEvent(evt, subs);
   }
   const last = events[events.length - 1];
-  await query(`UPDATE webhook_cursors SET last_event_at = $2, last_event_id = $3, updated_at = NOW() WHERE name = $1`, [CURSOR_NAME, iso(last.created_at), last.id]);
+  await query(
+    `UPDATE webhook_cursors SET last_event_at = (SELECT created_at FROM events WHERE id = $2), last_event_id = $2, updated_at = NOW() WHERE name = $1`,
+    [CURSOR_NAME, last.id]
+  );
   return { scanned: events.length, created };
 }
 
@@ -264,9 +271,13 @@ export async function sendWebhook(
   secret: string,
   payload: string,
   headers: { event: string; delivery: string },
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; now?: number } = {}
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; now?: number; lookup?: HostLookup } = {}
 ): Promise<SendOutcome> {
   if (!isAllowedWebhookUrl(url)) return { ok: false, status: 0, ms: 0, error: "endpoint URL not allowed" };
+  // Re-check at send time: the string guard cannot see where a hostname resolves (DNS rebinding).
+  if (!(await resolvesToPublicAddress(url, { lookup: opts.lookup }))) {
+    return { ok: false, status: 0, ms: 0, error: "endpoint host resolves to a private or unresolvable address" };
+  }
   const doFetch = opts.fetchImpl ?? fetch;
   const started = Date.now();
   try {
@@ -335,7 +346,7 @@ export interface DeliverResult {
 }
 
 /** Send every due delivery (oldest first). Safe to call concurrently: claims are conditional updates. */
-export async function deliverPending(limit = 50, opts: { fetchImpl?: typeof fetch } = {}): Promise<DeliverResult> {
+export async function deliverPending(limit = 50, opts: { fetchImpl?: typeof fetch; lookup?: HostLookup } = {}): Promise<DeliverResult> {
   const result: DeliverResult = { claimed: 0, delivered: 0, failed: 0, dead: 0 };
   const due = await query<{ id: string }>(
     `SELECT id FROM webhook_deliveries WHERE status IN ('queued', 'failed') AND next_attempt_at <= NOW() ORDER BY next_attempt_at ASC LIMIT $1`,
@@ -362,7 +373,7 @@ export async function deliverPending(limit = 50, opts: { fetchImpl?: typeof fetc
       result.dead++;
       continue;
     }
-    const out = await sendWebhook(sub.url, secret, d.payload, { event: d.event_type, delivery: d.id }, { fetchImpl: opts.fetchImpl });
+    const out = await sendWebhook(sub.url, secret, d.payload, { event: d.event_type, delivery: d.id }, { fetchImpl: opts.fetchImpl, lookup: opts.lookup });
     const status = await finishDelivery(d, sub, out);
     if (status === "delivered") result.delivered++;
     else if (status === "dead") result.dead++;
@@ -404,7 +415,7 @@ export async function retryDelivery(dataId: string, subscriptionId: string, deli
 }
 
 /** Send a `webhook.test` ping right now and record it as a delivery. */
-export async function sendTestPing(dataId: string, subscriptionId: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<DeliveryDTO> {
+export async function sendTestPing(dataId: string, subscriptionId: string, opts: { fetchImpl?: typeof fetch; lookup?: HostLookup } = {}): Promise<DeliveryDTO> {
   const sub = await getSubscriptionRow(dataId, subscriptionId);
   if (!sub) throw new Error("Webhook not found");
   const secret = openSecret(sub.secret);
@@ -416,7 +427,7 @@ export async function sendTestPing(dataId: string, subscriptionId: string, opts:
      VALUES ($1, $2, $3, NULL, 'webhook.test', $4, 'delivering', 1, NOW())`,
     [id, dataId, sub.id, payload]
   );
-  const out = await sendWebhook(sub.url, secret, payload, { event: "webhook.test", delivery: id }, { fetchImpl: opts.fetchImpl });
+  const out = await sendWebhook(sub.url, secret, payload, { event: "webhook.test", delivery: id }, { fetchImpl: opts.fetchImpl, lookup: opts.lookup });
   if (out.ok) {
     await query(`UPDATE webhook_deliveries SET status = 'delivered', response_status = $2, response_ms = $3, delivered_at = NOW() WHERE id = $1`, [id, out.status, out.ms]);
     await query(`UPDATE webhook_subscriptions SET last_success_at = NOW(), failure_count = 0 WHERE id = $1`, [sub.id]);

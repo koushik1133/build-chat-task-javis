@@ -175,6 +175,12 @@ interface ContactCandidate {
   tags: string | null;
 }
 
+/** True when the filter actually narrows the CRM; `{}` (or all-blank fields) selects nobody. */
+export function hasFilterCriteria(filter: AudienceFilter | null | undefined): filter is AudienceFilter {
+  if (!filter) return false;
+  return Boolean(filter.lifecycle?.trim() || filter.tag?.trim() || filter.q?.trim());
+}
+
 /** Contacts with a phone that match the filter (max 1000). */
 export async function resolveContacts(dataId: string, input: AudienceInput): Promise<ContactCandidate[]> {
   const out = new Map<string, ContactCandidate>();
@@ -185,19 +191,19 @@ export async function resolveContacts(dataId: string, input: AudienceInput): Pro
     );
     for (const r of rows) out.set(r.id, r);
   }
-  if (input.filter) {
+  if (hasFilterCriteria(input.filter)) {
     const params: unknown[] = [dataId];
     let sql = `SELECT id, full_name, phone, tags FROM crm_contacts WHERE user_id = $1 AND deleted_at IS NULL AND phone IS NOT NULL AND phone <> ''`;
-    if (input.filter.lifecycle) {
-      params.push(input.filter.lifecycle);
+    if (input.filter.lifecycle?.trim()) {
+      params.push(input.filter.lifecycle.trim());
       sql += ` AND lifecycle = $${params.length}`;
     }
-    if (input.filter.tag) {
-      params.push(`%"${escapeLike(input.filter.tag)}"%`);
+    if (input.filter.tag?.trim()) {
+      params.push(`%"${escapeLike(input.filter.tag.trim())}"%`);
       sql += ` AND tags LIKE $${params.length}`;
     }
-    if (input.filter.q) {
-      params.push(`%${escapeLike(input.filter.q)}%`);
+    if (input.filter.q?.trim()) {
+      params.push(`%${escapeLike(input.filter.q.trim())}%`);
       sql += ` AND (full_name ILIKE $${params.length} OR company ILIKE $${params.length} OR email ILIKE $${params.length})`;
     }
     sql += ` ORDER BY created_at DESC LIMIT 1000`;
@@ -273,9 +279,15 @@ export async function addTargets(dataId: string, campaignId: string, input: Audi
 /** Record an opt-out and mark every queued target with that phone as opted out. */
 export async function recordOptOut(dataId: string, input: { phone?: string | null; email?: string | null; contact_id?: string | null; channel?: string; reason?: string | null }): Promise<string> {
   const phone = input.phone ? normalizePhone(input.phone) : null;
+  // Only link a contact that belongs to this workspace; a foreign id is dropped rather than stored.
+  let contactId: string | null = null;
+  if (input.contact_id) {
+    const owned = await queryOne<{ id: string }>(`SELECT id FROM crm_contacts WHERE id = $1 AND user_id = $2`, [input.contact_id, dataId]).catch(() => null);
+    contactId = owned ? input.contact_id : null;
+  }
   const row = await queryOne<{ id: string }>(
     `INSERT INTO contact_optouts (user_id, contact_id, phone, email, channel, reason, created_at) VALUES ($1,$2,$3,$4,$5,$6,NOW()) RETURNING id`,
-    [dataId, input.contact_id ?? null, phone || null, input.email?.toLowerCase() ?? null, input.channel ?? "voice", input.reason ?? null]
+    [dataId, contactId, phone || null, input.email?.toLowerCase() ?? null, input.channel ?? "voice", input.reason ?? null]
   );
   if (phone) {
     await query(
@@ -283,14 +295,14 @@ export async function recordOptOut(dataId: string, input: { phone?: string | nul
       [dataId, phone]
     ).catch(() => undefined);
   }
-  if (input.contact_id) {
+  if (contactId) {
     // Tag the contact so future audiences exclude it even without the optouts table.
-    const c = await queryOne<{ tags: string | null }>(`SELECT tags FROM crm_contacts WHERE id = $1 AND user_id = $2`, [input.contact_id, dataId]).catch(() => null);
+    const c = await queryOne<{ tags: string | null }>(`SELECT tags FROM crm_contacts WHERE id = $1 AND user_id = $2`, [contactId, dataId]).catch(() => null);
     if (c) {
       const tags = parseTags(c.tags);
       if (!tags.includes("do_not_call")) {
         tags.push("do_not_call");
-        await query(`UPDATE crm_contacts SET tags = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`, [JSON.stringify(tags), input.contact_id, dataId]).catch(() => undefined);
+        await query(`UPDATE crm_contacts SET tags = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`, [JSON.stringify(tags), contactId, dataId]).catch(() => undefined);
       }
     }
   }
