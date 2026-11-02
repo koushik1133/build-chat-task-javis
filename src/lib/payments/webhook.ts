@@ -1,3 +1,4 @@
+import { handleCreditPaymentEvent } from "@/lib/credits/webhook";
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { applyPaymentEvent } from "@/lib/money/invoices";
@@ -12,7 +13,7 @@ import { getProvider, isProviderId } from "./index";
 export type WebhookOutcome =
   | { status: 401; body: { error: string } }
   | { status: 404; body: { error: string } }
-  | { status: 200; body: { ok: true; replay?: boolean; ignored?: boolean; invoiceId?: string; invoiceStatus?: string | null } }
+  | { status: 200; body: { ok: true; replay?: boolean; ignored?: boolean; invoiceId?: string; invoiceStatus?: string | null; creditPurchaseId?: string; credited?: boolean } }
   | { status: 500; body: { error: string } };
 
 export async function processWebhook(providerId: string, rawBody: string, headers: Headers): Promise<WebhookOutcome> {
@@ -42,6 +43,8 @@ export async function processWebhook(providerId: string, rawBody: string, header
   try {
     const applied = await applyPaymentEvent(providerId, evt);
     if (!applied) {
+      const credit = await handleCreditPaymentEvent(providerId, evt);
+      if (credit) return { status: 200, body: { ok: true, creditPurchaseId: credit.purchaseId, credited: credit.credited } };
       console.warn(`[payments] ${providerId} event ${evt.eventId} did not map to an invoice`);
       return { status: 200, body: { ok: true, ignored: true } };
     }

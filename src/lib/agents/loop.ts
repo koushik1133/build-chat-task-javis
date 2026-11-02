@@ -5,6 +5,7 @@ import { assertBudget } from "@/lib/llm/budgets";
 import { recordUsage } from "@/lib/llm/metering";
 import { parseModelJson } from "@/lib/model-json";
 import { getDefaultSystemPrompt } from "@/lib/agent-templates";
+import { formatCorrectionsBlock, recallCorrections } from "./memory";
 import { getTool, listTools, needsApproval } from "./registry";
 import { ensureToolsLoaded } from "./tools";
 import {
@@ -159,7 +160,13 @@ function autonomyDescription(level: AutonomyLevel): string {
   }
 }
 
-async function buildSystemPrompt(agent: AgentDefinition, tools: ToolSpec[], autonomy: AutonomyLevel): Promise<string> {
+export async function buildSystemPrompt(
+  agent: AgentDefinition,
+  tools: ToolSpec[],
+  autonomy: AutonomyLevel,
+  /** The run's task — used to recall the most relevant operator corrections. */
+  task?: string | null
+): Promise<string> {
   let system = agent.system_prompt?.trim() || getDefaultSystemPrompt(agent.role) || DEFAULT_SYSTEM;
 
   system += "\n\n## Runtime\n";
@@ -175,17 +182,9 @@ async function buildSystemPrompt(agent: AgentDefinition, tools: ToolSpec[], auto
     system += "\nNo tools are available for this run. Answer directly from the instructions.";
   }
 
-  const corrections = await query<{ original_text: string; corrected_text: string }>(
-    `SELECT original_text, corrected_text FROM agent_corrections WHERE user_id = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT 5`,
-    [agent.user_id, agent.id]
-  ).catch(() => []);
-
-  if (corrections.length > 0) {
-    system += "\n\nCRITICAL FEEDBACK FROM PAST RUNS (DO NOT REPEAT THESE MISTAKES):\n";
-    corrections.forEach((c, i) => {
-      system += `[Correction ${i + 1}]\nInstead of: "${c.original_text}"\nYou MUST do: "${c.corrected_text}"\n\n`;
-    });
-  }
+  // Corrections-as-memory: the top-k operator corrections most relevant to this task.
+  const corrections = await recallCorrections(agent.user_id, agent.id, 5, task).catch(() => []);
+  system += formatCorrectionsBlock(corrections);
   return system;
 }
 
@@ -336,7 +335,7 @@ export async function runAgentLoop(run: LoopRun, agent: AgentDefinition, opts: L
     turn = opts.resume.turn;
     pendingCalls = opts.resume.pendingCalls;
   } else {
-    const system = await buildSystemPrompt(agent, tools, autonomy);
+    const system = await buildSystemPrompt(agent, tools, autonomy, run.prompt);
     messages = [
       { role: "system", content: system },
       { role: "user", content: run.prompt },

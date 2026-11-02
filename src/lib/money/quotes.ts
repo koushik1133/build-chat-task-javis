@@ -3,7 +3,10 @@ import { query, queryOne, withRetry } from "@/lib/dsql";
 import { nextDocNumber } from "@/lib/docs/numbering";
 import { issueShareToken } from "@/lib/share-tokens";
 import { enqueueNotification } from "@/lib/notifications/outbox";
+import { releaseForQuote } from "@/lib/inventory/stock";
+import { emitEvent } from "@/lib/events/bus";
 import { computeTotals, formatMoney, parseItems, type LineItem } from "./items";
+import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
 
 export { computeTotals } from "./items";
 export type { LineItem } from "./items";
@@ -96,15 +99,16 @@ const SELECT_JOINED = `
     LEFT JOIN crm_contacts c ON c.id = q.contact_id
     LEFT JOIN quote_versions v ON v.quote_id = q.id AND v.version = q.current_version`;
 
-export async function listQuotes(dataId: string, opts: { status?: string; limit?: number } = {}): Promise<QuoteDTO[]> {
+export async function listQuotes(dataId: string, opts: { status?: string; limit?: number; cursor?: Cursor | null } = {}): Promise<QuoteDTO[]> {
   const params: unknown[] = [dataId];
   let sql = `${SELECT_JOINED} WHERE q.user_id = $1`;
   if (opts.status) {
     params.push(opts.status);
     sql += ` AND q.status = $${params.length}`;
   }
+  sql += keysetClause(opts.cursor, params, { alias: "q." });
   params.push(Math.min(Math.max(opts.limit ?? 100, 1), 500));
-  sql += ` ORDER BY q.created_at DESC LIMIT $${params.length}`;
+  sql += ` ORDER BY q.created_at DESC, q.id DESC LIMIT $${params.length}`;
   const rows = await query<JoinedRow>(sql, params);
   return rows.map(toDTO);
 }
@@ -159,6 +163,7 @@ export async function createQuote(dataId: string, input: CreateQuoteInput): Prom
   );
   const q = await getQuote(dataId, id);
   if (!q) throw new Error("Quote vanished after insert");
+  void emitEvent(dataId, { type: "quote.created", entity: "quote", entityId: id, data: { number, total_minor: totals.total_minor, currency, contact_id: input.contact_id ?? null } });
   return q;
 }
 
@@ -271,6 +276,7 @@ export async function sendQuote(
     data: { kind: "quote", quote_id: id, number: q.number, url: link.url },
   });
   const out = await getQuote(dataId, id);
+  void emitEvent(dataId, { type: "quote.sent", entity: "quote", entityId: id, data: { number: q.number, to, total_minor: q.total_minor, currency: q.currency } });
   return { quote: out ?? q, url: link.url, path: link.path };
 }
 
@@ -281,4 +287,114 @@ export async function markQuoteViewed(id: string): Promise<void> {
 
 export function quoteIsExpired(q: Pick<QuoteDTO, "valid_until" | "status">): boolean {
   return Boolean(q.valid_until && new Date(q.valid_until).getTime() < Date.now() && q.status !== "accepted");
+}
+
+/* ─── Lifecycle: decline / expiry ───────────────────────────────────────────
+ * Both paths release any stock reserved for the quote and emit an event so
+ * agent triggers / automations can react. `dataId === null` means the caller
+ * already proved ownership through a share token (public decline).
+ */
+
+export interface DeclineOptions {
+  /** Who declined — the client via the public link, or the owner from the app. */
+  by?: "client" | "owner";
+}
+
+export interface DeclineResult {
+  quote: QuoteDTO;
+  released: Array<{ product_id: string; qty: number }>;
+}
+
+export async function declineQuote(dataId: string | null, quoteId: string, reason?: string | null, opts: DeclineOptions = {}): Promise<DeclineResult> {
+  const q = dataId ? await getQuote(dataId, quoteId) : await getQuoteById(quoteId);
+  if (!q) throw new Error("Quote not found");
+  if (q.status === "accepted") throw new Error("An accepted quote cannot be declined");
+  if (q.status === "declined") throw new Error("This quote was already declined");
+  if (q.status === "expired") throw new Error("This quote has expired");
+  if (q.status === "draft" && !dataId) throw new Error("This quote has not been sent yet");
+
+  const owner = dataId ?? (await queryOne<{ user_id: string }>(`SELECT user_id FROM quotes WHERE id = $1`, [quoteId]))?.user_id ?? null;
+  if (!owner) throw new Error("Quote not found");
+  const by = opts.by ?? (dataId ? "owner" : "client");
+  const cleanReason = reason?.trim().slice(0, 2000) || null;
+
+  // Race-safe: only one caller flips the status. Column-less fallback keeps the
+  // flow working before the Phase 4 migration has been applied.
+  let flipped = await query<{ id: string }>(
+    `UPDATE quotes SET status = 'declined', declined_at = NOW(), decline_reason = $3, updated_at = NOW()
+      WHERE id = $1 AND user_id = $2 AND status IN ('draft','sent','viewed') RETURNING id`,
+    [quoteId, owner, cleanReason]
+  ).catch(() => null);
+  if (flipped === null) {
+    flipped = await query<{ id: string }>(
+      `UPDATE quotes SET status = 'declined', updated_at = NOW() WHERE id = $1 AND user_id = $2 AND status IN ('draft','sent','viewed') RETURNING id`,
+      [quoteId, owner]
+    );
+  }
+  if (flipped.length === 0) throw new Error("This quote can no longer be declined");
+
+  let released: DeclineResult["released"] = [];
+  try {
+    released = await releaseForQuote(owner, quoteId, "Quote declined");
+  } catch (err) {
+    console.error("[quotes.decline] stock release failed", err);
+  }
+  await emitEvent(owner, { type: "quote.declined", entity: "quote", entityId: quoteId, data: { number: q.number, by, reason: cleanReason, released } });
+  if (by === "client") {
+    await enqueueNotification(owner, {
+      channel: "in_app",
+      recipient: owner,
+      subject: `Quote ${q.number} declined`,
+      body: `${q.contact_name ?? "The client"} declined quote ${q.number}.${cleanReason ? ` Reason: ${cleanReason}` : ""}`,
+      data: { kind: "quote_declined", quote_id: quoteId, reason: cleanReason },
+    }).catch(() => undefined);
+  }
+  const out = dataId ? await getQuote(dataId, quoteId) : await getQuoteById(quoteId);
+  return { quote: out ?? { ...q, status: "declined" }, released };
+}
+
+export interface ExpireResult {
+  scanned: number;
+  expired: number;
+  released: number;
+}
+
+/**
+ * Sweep: sent/viewed quotes whose `valid_until` has passed become `expired`,
+ * reserved stock is released and `quote.expired` is emitted. Bounded by
+ * `limit`; safe to run from every cron tick (`expireQuotes(200)`).
+ */
+export async function expireQuotes(limit = 200): Promise<ExpireResult> {
+  const cap = Math.min(Math.max(Math.floor(limit), 1), 1000);
+  const due = await query<{ id: string; user_id: string; number: string; valid_until: string }>(
+    `SELECT id, user_id, number, valid_until FROM quotes
+      WHERE status IN ('sent','viewed') AND valid_until IS NOT NULL AND valid_until < NOW()
+      ORDER BY valid_until ASC LIMIT $1`,
+    [cap]
+  );
+  const result: ExpireResult = { scanned: due.length, expired: 0, released: 0 };
+  for (const row of due) {
+    let flipped = await query<{ id: string }>(
+      `UPDATE quotes SET status = 'expired', expired_at = NOW(), updated_at = NOW()
+        WHERE id = $1 AND status IN ('sent','viewed') RETURNING id`,
+      [row.id]
+    ).catch(() => null);
+    if (flipped === null) {
+      flipped = await query<{ id: string }>(
+        `UPDATE quotes SET status = 'expired', updated_at = NOW() WHERE id = $1 AND status IN ('sent','viewed') RETURNING id`,
+        [row.id]
+      ).catch(() => []);
+    }
+    if (flipped.length === 0) continue; // another worker got there first
+    result.expired++;
+    let released: Array<{ product_id: string; qty: number }> = [];
+    try {
+      released = await releaseForQuote(row.user_id, row.id, "Quote expired");
+      result.released += released.length;
+    } catch (err) {
+      console.error(`[quotes.expire] stock release failed for ${row.id}`, err);
+    }
+    await emitEvent(row.user_id, { type: "quote.expired", entity: "quote", entityId: row.id, data: { number: row.number, valid_until: row.valid_until, released } });
+  }
+  return result;
 }

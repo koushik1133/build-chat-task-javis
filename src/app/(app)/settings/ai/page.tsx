@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Gauge, Loader2, AlertTriangle, RefreshCw, X, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page-container";
+import { CreditsSection } from "@/components/credits/credits-section";
 import { cn } from "@/lib/utils";
 
 interface Totals { calls: number; promptTokens: number; completionTokens: number; costMicros: number }
@@ -139,6 +140,8 @@ export default function AiSettingsPage() {
           <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading AI usage…
         </div>
       )}
+
+      <CreditsSection />
 
       {usage && (
         <>

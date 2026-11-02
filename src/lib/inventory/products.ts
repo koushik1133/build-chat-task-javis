@@ -1,8 +1,10 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
+import { emitEvent } from "@/lib/events/bus";
 import { likeContains } from "@/lib/like";
 import { CurrencySchema } from "@/lib/money/items";
+import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
 
 /**
  * Pricebook / inventory products. Money is minor units; `tax_rate_bp` is basis
@@ -126,6 +128,9 @@ export interface ListProductsOpts {
   kind?: ProductKind;
   includeInactive?: boolean;
   limit?: number;
+  /** "name" (default) or "created" (newest first, cursor-friendly). */
+  order?: "name" | "created";
+  cursor?: Cursor | null;
 }
 
 export async function listProducts(dataId: string, opts: ListProductsOpts = {}): Promise<ProductDTO[]> {
@@ -141,8 +146,9 @@ export async function listProducts(dataId: string, opts: ListProductsOpts = {}):
     sql += ` AND (lower(name) LIKE $${params.length} OR lower(COALESCE(sku, '')) LIKE $${params.length} OR lower(COALESCE(description, '')) LIKE $${params.length})`;
   }
   if (opts.low) sql += ` AND track_stock = TRUE AND (stock_on_hand - stock_reserved) <= reorder_point`;
+  if (opts.order === "created") sql += keysetClause(opts.cursor, params);
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 500));
-  sql += ` ORDER BY name ASC LIMIT $${params.length}`;
+  sql += opts.order === "created" ? ` ORDER BY created_at DESC, id DESC LIMIT $${params.length}` : ` ORDER BY name ASC LIMIT $${params.length}`;
   return (await query<ProductRow>(sql, params)).map(toProductDTO);
 }
 
@@ -199,6 +205,7 @@ export async function createProduct(dataId: string, input: ProductInput, actorId
   }
   const p = await getProduct(dataId, id);
   if (!p) throw new Error("Product vanished after insert");
+  void emitEvent(dataId, { type: "product.created", entity: "product", entityId: id, data: { name: p.name, sku: p.sku, kind: p.kind } });
   return p;
 }
 

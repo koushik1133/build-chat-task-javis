@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne, withRetry } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { enqueueNotification } from "@/lib/notifications/outbox";
+import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
 import {
   computeDueTimes,
   isTicketPriority,
@@ -324,6 +325,9 @@ export interface ListTicketsOptions {
   contact_id?: string | null;
   priority?: string | null;
   limit?: number;
+  /** "priority" (default: open/urgent first) or "created" (newest first, cursor-friendly). */
+  order?: "priority" | "created";
+  cursor?: Cursor | null;
 }
 
 export async function listTickets(dataId: string, opts: ListTicketsOptions = {}): Promise<TicketRow[]> {
@@ -352,7 +356,15 @@ export async function listTickets(dataId: string, opts: ListTicketsOptions = {})
     where.push(`(subject ILIKE $${idx} OR requester_email ILIKE $${idx} OR requester_name ILIKE $${idx} OR number::text = $${idx + 1})`);
     params.push(q.replace(/^#/, ""));
   }
-  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 200);
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  if (opts.order === "created") {
+    const keyset = keysetClause(opts.cursor, params);
+    params.push(limit);
+    return query<TicketRow>(
+      `SELECT ${TICKET_COLS} FROM tickets WHERE ${where.join(" AND ")}${keyset} ORDER BY created_at DESC, id DESC LIMIT $${params.length}`,
+      params
+    );
+  }
   params.push(limit);
   return query<TicketRow>(
     `SELECT ${TICKET_COLS} FROM tickets WHERE ${where.join(" AND ")}
@@ -406,6 +418,14 @@ export async function addMessage(dataId: string, ticketId: string, input: AddMes
   const message = await queryOne<TicketMessageRow>(`SELECT ${MESSAGE_COLS} FROM ticket_messages WHERE id = $1`, [id]);
   const updated = await getTicketRow(dataId, ticketId);
   if (!message || !updated) throw new Error("message not found after insert");
+  if (!isInternal) {
+    void emitEvent(dataId, {
+      type: "ticket.replied",
+      entity: "ticket",
+      entityId: ticketId,
+      data: { number: updated.number, author_kind: input.author_kind, status: updated.status, message_id: id },
+    });
+  }
   return { message, ticket: updated };
 }
 

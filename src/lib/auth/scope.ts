@@ -19,6 +19,15 @@ import { AREAS, DEFAULT_MATRIX, isRole, type Area, type AreaPermission, type Rol
  *   await query("SELECT … WHERE user_id = $1", [scope.dataId]);
  *
  * Errors are thrown as ScopeError; convert with `scopeErrorResponse(err)`.
+ *
+ * Agency mode (Phase 4, src/lib/agency/orgs.ts): a client workspace is an
+ * org whose `owner_user_id` is a SYNTHETIC data id (the child org's own id),
+ * not a Supabase user. It is reachable only through an active membership, so
+ * the membership join below resolves it like any other org and `dataId`
+ * becomes that synthetic id. `ensurePersonalOrg()` looks up
+ * `owner_user_id = <auth user id>`, which can never equal a child org id, so
+ * it neither adopts nor duplicates a client workspace. Archiving a client
+ * suspends its memberships, which drops it out of this resolver and the switcher.
  */
 
 export const ORG_COOKIE = "kh_org";

@@ -8,7 +8,7 @@ import { getTool, listTools, needsApproval } from "@/lib/agents/registry";
 import type { RouterMessage, ToolContext, ToolSpec } from "@/lib/agents/types";
 
 /**
- * AI receptionist for inbound SMS / WhatsApp / voice.
+ * AI receptionist for inbound SMS / WhatsApp / voice / email.
  *
  * Classifies the intent, drafts a short reply (optionally using a few CRM and
  * task tools), meters spend under the "receptionist" feature, and decides
@@ -17,7 +17,7 @@ import type { RouterMessage, ToolContext, ToolSpec } from "@/lib/agents/types";
  * is always held for a human.
  */
 
-export type InboundChannel = "sms" | "whatsapp" | "voice";
+export type InboundChannel = "sms" | "whatsapp" | "voice" | "email";
 export type InboundIntent = "booking" | "quote" | "support" | "sales" | "spam" | "other";
 
 export interface InboundTurn {
@@ -98,11 +98,12 @@ async function insertApproval(
 }
 
 function systemPrompt(ctx: Awaited<ReturnType<typeof loadContext>>, channel: InboundChannel) {
-  const medium = channel === "voice" ? "a phone call (spoken aloud)" : `a ${channel.toUpperCase()} message`;
+  const medium =
+    channel === "voice" ? "a phone call (spoken aloud)" : channel === "email" ? "an email (reply in a short, plain-text email)" : `a ${channel.toUpperCase()} message`;
   return [
     `You are the AI receptionist for ${ctx.companyName}${ctx.industry ? ` (${ctx.industry})` : ""}.`,
     ctx.productDesc ? `About the business: ${ctx.productDesc.slice(0, 600)}` : "",
-    `You are answering ${medium}. Be warm, concise and professional — at most 2–3 short sentences, no markdown.`,
+    `You are answering ${medium}. Be warm, concise and professional — at most ${channel === "email" ? "4–5" : "2–3"} short sentences, no markdown.`,
     "If the caller wants to book, get a quote, or needs support, gather the one or two details a human would need next and reassure them someone will follow up.",
     "You may use tools to look up or create a contact and to create a follow-up task, but never invent facts about pricing or availability.",
     "For booking requests, use calendar.propose_slots to offer real times and calendar.book to confirm one the caller picked; never make up availability.",

@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   Plus, Search, Bot, Play, Pause, Trash2, CheckCircle2, Loader2,
-  Sparkles, Pencil, ChevronLeft, ChevronRight, Zap, ShieldCheck,
+  Sparkles, Pencil, ChevronLeft, ChevronRight, Zap, ShieldCheck, Store, Coins, FlaskConical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dispatchNotificationRefresh } from "@/components/notification-bell";
@@ -30,6 +31,8 @@ type Agent = {
   system_prompt?: string | null;
   template_id?: string | null;
   autonomy_level?: AutonomyLevel | null;
+  outcome_event?: string | null;
+  outcome_price_credits?: number | string | null;
 };
 
 type AutonomyLevel = "draft" | "approve" | "auto";
@@ -420,9 +423,14 @@ export default function AgentsPage() {
               Pick a pre-built agent, customize its system prompt, and deploy.
             </p>
           </div>
-          <Button size="sm" onClick={openDeploy}>
-            <Plus className="h-3.5 w-3.5" /> Deploy New Agent
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href="/marketplace"><Store className="h-3.5 w-3.5" aria-hidden /> Marketplace</Link>
+            </Button>
+            <Button size="sm" onClick={openDeploy}>
+              <Plus className="h-3.5 w-3.5" /> Deploy New Agent
+            </Button>
+          </div>
         </div>
 
         {/* Deploy modal */}
@@ -669,9 +677,20 @@ export default function AgentsPage() {
                       {agent.system_prompt}
                     </p>
                   )}
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
-                    <CheckCircle2 className="h-3 w-3 text-primary" />
-                    {agent.tasks_completed} tasks completed
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mb-2">
+                    <span className="inline-flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3 text-primary" />
+                      {agent.tasks_completed} tasks completed
+                    </span>
+                    {agent.outcome_event && Number(agent.outcome_price_credits) > 0 && (
+                      <span className="inline-flex items-center gap-1" title="Outcome pricing: charged once per run in which this event fires">
+                        <Coins className="h-3 w-3" aria-hidden />
+                        {Number(agent.outcome_price_credits).toLocaleString()} cr / {agent.outcome_event}
+                      </span>
+                    )}
+                    <Link href={`/agents/${agent.id}/evals`} className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline">
+                      <FlaskConical className="h-3 w-3" aria-hidden /> Evals & memory
+                    </Link>
                   </div>
                   <div className="mb-4 space-y-2">
                     <div className="flex items-center gap-2 text-xs">

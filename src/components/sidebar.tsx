@@ -26,7 +26,7 @@ import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 import { NavGroupLabel, NavLabel } from "@/components/i18n/nav-label";
 
 type Chat = { id: string; title: string; updated_at: string };
-type OrgOption = { id: string; name: string; slug: string; role: string };
+type OrgOption = { id: string; name: string; slug: string; role: string; isOwner?: boolean };
 
 type SidebarProps = {
   userEmail: string;
@@ -237,9 +237,17 @@ export function Sidebar({
               className="min-w-0 flex-1 appearance-none truncate bg-transparent pr-5 text-xs font-medium outline-none disabled:opacity-60"
               aria-label="Switch workspace"
             >
-              {orgs.map((o) => (
+              {/* Agency mode: a workspace the user owns by membership but not by owner_user_id is a client workspace. */}
+              {orgs.filter((o) => !(o.role === "owner" && o.isOwner === false)).map((o) => (
                 <option key={o.id} value={o.id}>{o.name}</option>
               ))}
+              {orgs.some((o) => o.role === "owner" && o.isOwner === false) && (
+                <optgroup label="Client workspaces">
+                  {orgs.filter((o) => o.role === "owner" && o.isOwner === false).map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
             <ChevronsUpDown className="pointer-events-none absolute right-2.5 h-3.5 w-3.5 text-muted-foreground" aria-hidden />
           </label>

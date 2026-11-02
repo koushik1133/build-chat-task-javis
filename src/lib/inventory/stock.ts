@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne, withRetry } from "@/lib/dsql";
 import type { LineItem } from "@/lib/money/items";
 import { getProduct, getProductsByIds, type ProductDTO } from "./products";
+import { emitEvent } from "@/lib/events/bus";
 
 /**
  * Stock ledger. Every change to `products.stock_on_hand` / `stock_reserved`
@@ -174,6 +175,12 @@ export async function adjustStock(dataId: string, productId: string, input: Adju
   await logMovement(dataId, { product_id: productId, kind: input.kind, qty, ref_kind: input.ref_kind ?? "manual", ref_id: input.ref_id ?? null, note: input.note ?? null, created_by: actorId ?? null });
   const p = await getProduct(dataId, productId);
   if (!p) throw new Error("Product not found");
+  void emitEvent(dataId, {
+    type: "product.stock_changed",
+    entity: "product",
+    entityId: productId,
+    data: { kind: input.kind, qty, stock_on_hand: p.stock_on_hand, stock_available: p.stock_available, low_stock: p.low_stock },
+  });
   return p;
 }
 

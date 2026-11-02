@@ -3,11 +3,13 @@ import { query, queryOne, withRetry } from "@/lib/dsql";
 import { nextDocNumber } from "@/lib/docs/numbering";
 import { issueShareToken } from "@/lib/share-tokens";
 import { enqueueNotification } from "@/lib/notifications/outbox";
+import { emitEvent } from "@/lib/events/bus";
 import { getProvider } from "@/lib/payments";
 import type { PaymentEvent } from "@/lib/payments/types";
 import { computeTotals, formatMoney, parseItems, type LineItem } from "./items";
 import { businessName, getQuote } from "./quotes";
 import { consumeForInvoice } from "@/lib/inventory/stock";
+import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
 
 export { computeTotals } from "./items";
 export type { LineItem } from "./items";
@@ -98,15 +100,16 @@ function toDTO(r: JoinedRow): InvoiceDTO {
   };
 }
 
-export async function listInvoices(dataId: string, opts: { status?: string; limit?: number } = {}): Promise<InvoiceDTO[]> {
+export async function listInvoices(dataId: string, opts: { status?: string; limit?: number; cursor?: Cursor | null } = {}): Promise<InvoiceDTO[]> {
   const params: unknown[] = [dataId];
   let sql = `${SELECT_JOINED} WHERE i.user_id = $1`;
   if (opts.status) {
     params.push(opts.status);
     sql += ` AND i.status = $${params.length}`;
   }
+  sql += keysetClause(opts.cursor, params, { alias: "i." });
   params.push(Math.min(Math.max(opts.limit ?? 100, 1), 500));
-  sql += ` ORDER BY i.created_at DESC LIMIT $${params.length}`;
+  sql += ` ORDER BY i.created_at DESC, i.id DESC LIMIT $${params.length}`;
   return (await query<JoinedRow>(sql, params)).map(toDTO);
 }
 
@@ -157,6 +160,7 @@ export async function createInvoice(dataId: string, input: CreateInvoiceInput): 
   );
   const inv = await getInvoice(dataId, id);
   if (!inv) throw new Error("Invoice vanished after insert");
+  void emitEvent(dataId, { type: "invoice.created", entity: "invoice", entityId: id, data: { number, total_minor: totals.total_minor, currency: inv.currency, contact_id: input.contact_id ?? null, quote_id: input.quote_id ?? null } });
   return inv;
 }
 
@@ -251,6 +255,7 @@ export async function recomputeInvoiceStatus(id: string): Promise<InvoiceStatus 
   if (!out) return null;
   const { next, row } = out;
   if (next === "paid" && row.status !== "paid") {
+    void emitEvent(row.user_id, { type: "invoice.paid", entity: "invoice", entityId: id, data: { total_minor: Number(row.total_minor), quote_id: row.quote_id } });
     // Stock lifecycle: goods leave the shelf once the invoice is paid. Idempotent
     // per invoice inside consumeForInvoice; a failure (insufficient stock, missing
     // table) must never undo or block the payment itself.
@@ -295,6 +300,7 @@ export async function sendInvoice(
     data: { kind: "invoice", invoice_id: id, number: inv.number, url: link.url },
   });
   const out = await getInvoice(dataId, id);
+  void emitEvent(dataId, { type: "invoice.sent", entity: "invoice", entityId: id, data: { number: inv.number, to, total_minor: inv.total_minor, currency: inv.currency } });
   return { invoice: out ?? inv, url: link.url, path: link.path };
 }
 

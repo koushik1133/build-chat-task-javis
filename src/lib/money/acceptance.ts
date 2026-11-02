@@ -4,6 +4,7 @@ import { enqueueNotification } from "@/lib/notifications/outbox";
 import { businessName, getQuoteById, quoteIsExpired, type QuoteDTO } from "./quotes";
 import { createInvoiceFromQuote } from "./invoices";
 import { reserveForQuote } from "@/lib/inventory/stock";
+import { fingerprintAcceptance } from "@/lib/pdf/documents";
 
 /**
  * Public quote acceptance: email OTP (6 digits, sha256-hashed, 10 min, 5
@@ -65,6 +66,8 @@ export interface AcceptInput {
   email: string;
   ip: string | null;
   userAgent: string | null;
+  /** Typed e-signature (defaults to `name`); stored alongside the document fingerprints. */
+  signatureText?: string | null;
 }
 
 export async function acceptQuote(quoteId: string, input: AcceptInput): Promise<{ quote: QuoteDTO; invoiceId: string | null }> {
@@ -101,6 +104,12 @@ export async function acceptQuote(quoteId: string, input: AcceptInput): Promise<
   let invoiceId: string | null = null;
   const owner = await ownerOf(quoteId);
   if (owner) {
+    // E-sign: fingerprint the unsigned document, render the stamped copy and store both hashes + the typed signature.
+    try {
+      await fingerprintAcceptance(owner, q, row.id, (input.signatureText ?? input.name).trim().slice(0, 200) || input.name);
+    } catch (err) {
+      console.error("[acceptance] document fingerprint failed", err);
+    }
     try {
       await reserveForQuote(owner, quoteId, q.items);
     } catch (err) {

@@ -6,6 +6,10 @@ import { promoteDueTriggers } from "@/lib/agents/triggers";
 import { ensureToolsLoaded } from "@/lib/agents/tools";
 import { drainOutbox } from "@/lib/notifications/outbox";
 import { runSlaSweep } from "@/lib/helpdesk/tickets";
+import { deliverPending, fanOutNewEvents } from "@/lib/webhooks/dispatch";
+import { expireQuotes } from "@/lib/money/quotes";
+import { syncDueAccounts } from "@/lib/mail/sync";
+import { dialNext } from "@/lib/voice/dialer";
 import type { JobRow } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -44,6 +48,12 @@ async function processJob(job: JobRow): Promise<"done" | "failed"> {
       if (out.status === "failed") throw new Error(out.error);
       return "done";
     }
+    case "eval": {
+      const { executeEvalRun } = await import("@/lib/evals/run");
+      const out = await executeEvalRun(payload.evalRunId);
+      if (out?.status === "failed") throw new Error(out.error ?? "eval failed");
+      return "done";
+    }
     case "playbook": {
       const mod = await loadPlaybooks();
       if (!mod?.runPlaybook) throw new Error("playbooks module not available");
@@ -71,7 +81,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -122,6 +132,12 @@ async function handleTick(req: Request) {
   } catch (err) {
     console.error("[cron/agents] SLA sweep failed:", err);
   }
+
+  try { counts.quotes_expired = (await expireQuotes(200)).expired; } catch (err) { console.error("[cron/agents] quote expiry sweep failed:", err); }
+  try { counts.webhooks_fanout = (await fanOutNewEvents(200)).created; } catch (err) { console.error("[cron/agents] webhook fan-out failed:", err); }
+  try { counts.webhooks = (await deliverPending(50)).delivered; } catch (err) { console.error("[cron/agents] webhook delivery failed:", err); }
+  try { counts.mail = (await syncDueAccounts(20)).claimed; } catch (err) { console.error("[cron/agents] mail sync failed:", err); }
+  try { counts.calls = (await dialNext(20)).dialed; } catch (err) { console.error("[cron/agents] dialer failed:", err); }
 
   counts.ms = Date.now() - tickStart;
   return NextResponse.json({ ok: true, worker: workerId, ...counts, server_time: new Date().toISOString() });

@@ -1449,3 +1449,406 @@ CREATE TABLE IF NOT EXISTS org_branding (
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+
+-- ==== PHASE 4 LANE A ====
+-- Phase 4 / Lane A: public REST API v1 + outbound webhooks
+-- DSQL rules: no FKs, JSON as TEXT, CREATE INDEX ASYNC, one DDL per transaction.
+
+-- Idempotency store for POST /api/v1/* with an `Idempotency-Key` header.
+-- Rows older than 24h are ignored and lazily deleted.
+CREATE TABLE IF NOT EXISTS api_idempotency (
+  id            TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id       TEXT        NOT NULL,
+  key           TEXT        NOT NULL,
+  request_hash  TEXT        NOT NULL,           -- sha256(method + path + body)
+  status        TEXT        NOT NULL DEFAULT 'pending', -- pending|completed
+  response_json TEXT,                           -- {"status":201,"body":{...}}
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS api_idempotency_user_key ON api_idempotency(user_id, key);
+
+CREATE INDEX ASYNC IF NOT EXISTS api_idempotency_created ON api_idempotency(created_at);
+
+-- Outbound webhook subscriptions (one row per endpoint).
+CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+  id              TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id         TEXT        NOT NULL,          -- org data id (owner_user_id)
+  url             TEXT        NOT NULL,
+  secret          TEXT        NOT NULL,          -- "v1:…" encrypted (secure-store) or "plain:…"
+  event_types     TEXT        NOT NULL DEFAULT '["*"]', -- JSON array; "*" = everything
+  active          BOOLEAN     NOT NULL DEFAULT TRUE,
+  description     TEXT,
+  created_by      TEXT,                          -- user id or "api_key:<id>"
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_success_at TIMESTAMPTZ,
+  last_failure_at TIMESTAMPTZ,
+  failure_count   INTEGER     NOT NULL DEFAULT 0, -- consecutive failures; 20 auto-disables
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS webhook_subscriptions_user ON webhook_subscriptions(user_id, active);
+
+-- One delivery attempt record per (subscription, event). Retried in place.
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id              TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id         TEXT        NOT NULL,
+  subscription_id TEXT        NOT NULL,
+  event_id        TEXT,                          -- events.id (NULL for test pings)
+  event_type      TEXT        NOT NULL,
+  payload         TEXT        NOT NULL,          -- JSON body exactly as signed/sent
+  status          TEXT        NOT NULL DEFAULT 'queued', -- queued|delivering|delivered|failed|dead
+  attempts        INTEGER     NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  response_status INTEGER,
+  response_ms     INTEGER,
+  error           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  delivered_at    TIMESTAMPTZ,
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS webhook_deliveries_due ON webhook_deliveries(status, next_attempt_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS webhook_deliveries_sub ON webhook_deliveries(subscription_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS webhook_deliveries_user ON webhook_deliveries(user_id, created_at);
+
+-- Fan-out watermark: the last `events` row turned into deliveries.
+CREATE TABLE IF NOT EXISTS webhook_cursors (
+  name               TEXT        NOT NULL,       -- 'events'
+  last_event_at      TIMESTAMPTZ,
+  last_event_id      TEXT,
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (name)
+);
+
+-- Keyset pagination for the public API reads (created_at DESC, id DESC).
+CREATE INDEX ASYNC IF NOT EXISTS crm_contacts_user_created ON crm_contacts(user_id, created_at, id);
+
+CREATE INDEX ASYNC IF NOT EXISTS events_user_created_id ON events(user_id, created_at, id);
+
+
+-- ==== PHASE 4 LANE B ====
+-- ── Phase 4 / Lane B: AI credits, outcome pricing, eval harness, corrections-as-memory ──
+-- DSQL dialect: TEXT ids, no FKs, CREATE INDEX ASYNC, no partial indexes.
+
+-- ── Credits ──────────────────────────────────────────────────────────────────
+
+-- One row per user; `balance` is the single source of truth for the current
+-- balance. Writers update it with `WHERE balance = <expected>` (optimistic
+-- concurrency) and only then append the ledger row, so two parallel charges
+-- can never both read the same starting balance and both win.
+CREATE TABLE IF NOT EXISTS ai_credit_accounts (
+  user_id     TEXT PRIMARY KEY,
+  balance     BIGINT NOT NULL DEFAULT 0,          -- credits; 1 credit = 1/1000 USD
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Append-only ledger. `credits` is signed (purchases/grants positive, usage/
+-- outcome negative); `balance_after` is the account balance once this row
+-- was applied, so the history is auditable without replaying it.
+CREATE TABLE IF NOT EXISTS ai_credit_ledger (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  kind           TEXT NOT NULL,                    -- purchase|grant|usage|outcome|refund|adjustment
+  credits        BIGINT NOT NULL,
+  balance_after  BIGINT NOT NULL,
+  ref_kind       TEXT,                             -- usage|run|purchase|signup|manual
+  ref_id         TEXT,
+  note           TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_ai_credit_ledger_user ON ai_credit_ledger (user_id, created_at);
+-- Idempotency: one ledger row per (kind, ref). Outcome charges key on the run
+-- id, purchases on the purchase id, the free grant on the user id.
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_ai_credit_ledger_ref ON ai_credit_ledger (user_id, kind, ref_kind, ref_id);
+
+-- Credit pack purchases. The pack catalog itself lives in code
+-- (src/lib/credits/packs.ts). `token_hash` is the sha256 of the public
+-- checkout token used by /p/credits/<token>, mirroring share_tokens.
+CREATE TABLE IF NOT EXISTS ai_credit_purchases (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  pack_id       TEXT NOT NULL,
+  credits       BIGINT NOT NULL,
+  amount_minor  BIGINT NOT NULL,
+  currency      TEXT NOT NULL DEFAULT 'USD',
+  provider      TEXT NOT NULL,                     -- simulated|stripe|razorpay
+  provider_ref  TEXT,
+  status        TEXT NOT NULL DEFAULT 'pending',   -- pending|paid|failed
+  token_hash    TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  paid_at       TIMESTAMPTZ
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_ai_credit_purchases_user ON ai_credit_purchases (user_id, created_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_ai_credit_purchases_ref ON ai_credit_purchases (provider, provider_ref);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_ai_credit_purchases_token ON ai_credit_purchases (token_hash);
+
+-- Enforcement toggle: when on, model calls stop once the balance is exhausted.
+ALTER TABLE ai_budgets ADD COLUMN IF NOT EXISTS credits_enforced BOOLEAN DEFAULT FALSE;
+
+-- Outcome pricing: charge `outcome_price_credits` once per run that ends with
+-- `outcome_event` (an events-bus type such as booking.created) having fired.
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS outcome_event TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS outcome_price_credits BIGINT;
+
+-- ── Evaluation harness ───────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS agent_evals (
+  id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id     TEXT NOT NULL,
+  agent_id    TEXT NOT NULL,                       -- agents.id (uuid as text)
+  name        TEXT NOT NULL,
+  cases       TEXT NOT NULL DEFAULT '[]',          -- JSON [{ input, expected, rubric }]
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_evals_agent ON agent_evals (user_id, agent_id, created_at);
+
+CREATE TABLE IF NOT EXISTS agent_eval_runs (
+  id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id      TEXT NOT NULL,
+  eval_id      TEXT NOT NULL,
+  agent_id     TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'queued',     -- queued|running|done|failed
+  score        INTEGER,                            -- 0..100 mean across cases
+  results      TEXT,                               -- JSON [{ idx, input, expected, output, score, reasons, transcript, cost_micros }]
+  model        TEXT,
+  cost_micros  BIGINT DEFAULT 0,
+  error        TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  finished_at  TIMESTAMPTZ
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_agent_eval_runs_eval ON agent_eval_runs (user_id, eval_id, created_at);
+
+-- ── Corrections-as-memory ────────────────────────────────────────────────────
+-- `agent_corrections` already exists (original_text / corrected_text / context);
+-- extend it with provenance and the vector reference.
+ALTER TABLE agent_corrections ADD COLUMN IF NOT EXISTS run_id TEXT;
+ALTER TABLE agent_corrections ADD COLUMN IF NOT EXISTS step_id TEXT;
+ALTER TABLE agent_corrections ADD COLUMN IF NOT EXISTS note TEXT;
+ALTER TABLE agent_corrections ADD COLUMN IF NOT EXISTS embedding_ref TEXT;   -- pinecone file id: corr:<id>
+
+
+-- ==== PHASE 4 LANE C ====
+-- ==== PHASE 4 LANE C: marketplace, e-sign / PDF fingerprints, quote lifecycle ====
+-- DSQL rules: no FKs, JSON stored as TEXT, CREATE INDEX ASYNC, one DDL per statement,
+-- no DEFAULT on ADD COLUMN (the app fills values).
+-- All tables are keyed by user_id = organizations.owner_user_id (requireScope().dataId).
+
+-- ── marketplace_listings: portable agents / playbooks / automations / record packs ──
+CREATE TABLE IF NOT EXISTS marketplace_listings (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,                 -- publisher org data id
+  kind           TEXT NOT NULL,                 -- agent|playbook|automation|pack
+  slug           TEXT NOT NULL,
+  title          TEXT NOT NULL,
+  summary        TEXT,
+  description_md TEXT,
+  category       TEXT,
+  tags           TEXT NOT NULL DEFAULT '[]',    -- JSON array of strings
+  definition     TEXT NOT NULL DEFAULT '{}',    -- JSON: the portable spec (see src/lib/marketplace/types.ts)
+  version        INTEGER NOT NULL DEFAULT 1,
+  visibility     TEXT NOT NULL DEFAULT 'private', -- private|org|public
+  install_count  INTEGER NOT NULL DEFAULT 0,
+  rating_sum     INTEGER NOT NULL DEFAULT 0,
+  rating_count   INTEGER NOT NULL DEFAULT 0,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ DEFAULT NOW(),
+  published_at   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_marketplace_listings_user_slug ON marketplace_listings (user_id, slug);
+CREATE INDEX ASYNC IF NOT EXISTS idx_marketplace_listings_visibility ON marketplace_listings (visibility, kind, published_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_marketplace_listings_user ON marketplace_listings (user_id, updated_at);
+
+-- ── marketplace_installs: which org installed what (idempotent per listing+version) ──
+CREATE TABLE IF NOT EXISTS marketplace_installs (
+  id                     TEXT PRIMARY KEY,
+  user_id                TEXT NOT NULL,         -- installing org data id
+  listing_id             TEXT NOT NULL,         -- marketplace_listings.id or a builtin:* id
+  version                INTEGER NOT NULL DEFAULT 1,
+  installed_entity_kind  TEXT NOT NULL,         -- agent|playbook|automation|pack
+  installed_entity_id    TEXT NOT NULL,
+  created_at             TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_marketplace_installs_user_listing ON marketplace_installs (user_id, listing_id, version);
+
+-- ── marketplace_reviews ─────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS marketplace_reviews (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,                    -- reviewing org data id
+  listing_id  TEXT NOT NULL,
+  rating      INTEGER NOT NULL,                 -- 1..5
+  body        TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_marketplace_reviews_listing ON marketplace_reviews (listing_id, created_at);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_marketplace_reviews_user_listing ON marketplace_reviews (user_id, listing_id);
+
+-- ── e-sign: typed signature + document fingerprints on acceptances ──────────
+ALTER TABLE quote_acceptances ADD COLUMN IF NOT EXISTS signature_text TEXT;
+ALTER TABLE quote_acceptances ADD COLUMN IF NOT EXISTS document_hash TEXT;         -- sha256 of the unsigned PDF bytes
+ALTER TABLE quote_acceptances ADD COLUMN IF NOT EXISTS signed_document_hash TEXT;  -- sha256 of the stamped PDF bytes
+
+-- ── quote lifecycle: decline / expiry bookkeeping ───────────────────────────
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ;
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS decline_reason TEXT;
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
+CREATE INDEX ASYNC IF NOT EXISTS idx_quotes_status_valid_until ON quotes (status, valid_until);
+
+
+-- ==== PHASE 4 LANE D ====
+-- ── Phase 4 / Lane D: email inbox sync + outbound voice campaigns ────────────
+-- DSQL: one DDL per statement, no FKs, JSON as TEXT, CREATE INDEX ASYNC.
+
+-- Mail accounts (OAuth / simulated). `auth` is encrypted via src/lib/secure-store.ts.
+CREATE TABLE IF NOT EXISTS mail_accounts (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id       TEXT NOT NULL,
+  provider      TEXT NOT NULL,                 -- gmail | outlook | imap | simulated
+  email         TEXT NOT NULL,
+  display_name  TEXT,
+  auth          TEXT,                          -- encrypted JSON: {access_token, refresh_token, expires_at} or imap creds
+  sync_cursor   TEXT,                          -- Gmail historyId / Graph deltaLink / IMAP uidnext
+  status        TEXT NOT NULL DEFAULT 'connected', -- connected | error | disabled
+  last_sync_at  TIMESTAMPTZ,
+  last_error    TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_mail_accounts_user ON mail_accounts (user_id);
+
+CREATE TABLE IF NOT EXISTS mail_messages (
+  id                  TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id             TEXT NOT NULL,
+  account_id          TEXT NOT NULL,
+  provider_message_id TEXT NOT NULL,
+  thread_id           TEXT,
+  conversation_id     TEXT,                    -- messaging_conversations.id
+  direction           TEXT NOT NULL DEFAULT 'in', -- in | out
+  from_addr           TEXT,
+  to_addrs            TEXT NOT NULL DEFAULT '[]', -- JSON array of addresses
+  subject             TEXT,
+  snippet             TEXT,
+  body_text           TEXT,
+  body_html           TEXT,
+  received_at         TIMESTAMPTZ,
+  is_read             BOOLEAN NOT NULL DEFAULT FALSE,
+  labels              TEXT NOT NULL DEFAULT '[]', -- JSON array
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_mail_messages_account_provider ON mail_messages (account_id, provider_message_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_mail_messages_user_received ON mail_messages (user_id, received_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_mail_messages_conversation ON mail_messages (conversation_id);
+
+-- Email threads map onto the unified inbox; these columns let a thread be found again.
+ALTER TABLE messaging_conversations ADD COLUMN IF NOT EXISTS thread_key TEXT;
+ALTER TABLE messaging_conversations ADD COLUMN IF NOT EXISTS contact_id TEXT;
+CREATE INDEX ASYNC IF NOT EXISTS idx_messaging_conv_thread ON messaging_conversations (user_id, thread_key);
+
+-- Outbound voice campaigns
+CREATE TABLE IF NOT EXISTS voice_campaigns (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id       TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  script        TEXT NOT NULL,                 -- supports {{first_name}} {{full_name}} {{company}}
+  voice         TEXT NOT NULL DEFAULT 'Polly.Joanna',
+  status        TEXT NOT NULL DEFAULT 'draft', -- draft | scheduled | running | paused | done
+  schedule_at   TIMESTAMPTZ,
+  window_start  TEXT NOT NULL DEFAULT '09:00', -- HH:MM local to `timezone`
+  window_end    TEXT NOT NULL DEFAULT '18:00',
+  timezone      TEXT NOT NULL DEFAULT 'UTC',
+  max_attempts  INTEGER NOT NULL DEFAULT 2,
+  created_by    TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_voice_campaigns_user_status ON voice_campaigns (user_id, status);
+
+CREATE TABLE IF NOT EXISTS voice_campaign_targets (
+  id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id         TEXT NOT NULL,
+  campaign_id     TEXT NOT NULL,
+  contact_id      TEXT,
+  phone           TEXT NOT NULL,
+  first_name      TEXT,
+  status          TEXT NOT NULL DEFAULT 'queued', -- queued | calling | answered | voicemail | no_answer | failed | opted_out | done
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at TIMESTAMPTZ,
+  call_sid        TEXT,
+  outcome         TEXT,                        -- JSON: {digits, answered_by, duration_s, simulated, ...}
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_voice_targets_campaign_status ON voice_campaign_targets (campaign_id, status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_voice_targets_user ON voice_campaign_targets (user_id);
+
+CREATE TABLE IF NOT EXISTS voice_calls (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id       TEXT NOT NULL,
+  campaign_id   TEXT,
+  target_id     TEXT,
+  call_sid      TEXT,
+  direction     TEXT NOT NULL DEFAULT 'outbound',
+  status        TEXT NOT NULL DEFAULT 'queued', -- queued | in_progress | completed | no_answer | busy | failed | simulated
+  duration_s    INTEGER,
+  recording_url TEXT,
+  transcript    TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_voice_calls_user_created ON voice_calls (user_id, created_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_voice_calls_campaign ON voice_calls (campaign_id);
+
+-- Do-not-call / do-not-contact list
+CREATE TABLE IF NOT EXISTS contact_optouts (
+  id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id     TEXT NOT NULL,
+  contact_id  TEXT,
+  phone       TEXT,
+  email       TEXT,
+  channel     TEXT NOT NULL DEFAULT 'voice',  -- voice | sms | email | all
+  reason      TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_contact_optouts_user_phone ON contact_optouts (user_id, phone);
+
+
+-- ==== PHASE 4 LANE E ====
+-- ==== PHASE 4 LANE E: agency mode, SCIM 2.0 / SSO readiness, optimization AI ====
+-- DSQL rules: no FKs, JSON stored as TEXT, CREATE INDEX ASYNC, one DDL per statement.
+
+-- ── organizations: agency hierarchy ─────────────────────────────────────────
+-- kind: standard | agency | client. A client org is owned by an agency org
+-- (parent_org_id) and its owner_user_id is a synthetic data id equal to the
+-- client org's own id (see src/lib/agency/orgs.ts). archived_at soft-deletes.
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS parent_org_id TEXT;
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'standard';
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+CREATE INDEX ASYNC IF NOT EXISTS idx_organizations_parent ON organizations (parent_org_id);
+
+-- ── scim_tokens: bearer tokens for the SCIM 2.0 provisioning endpoint ───────
+-- user_id is the org data id (organizations.owner_user_id). Only the SHA-256
+-- of the token is stored; the plaintext is shown once at creation.
+CREATE TABLE IF NOT EXISTS scim_tokens (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  token_hash   TEXT NOT NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  last_used_at TIMESTAMPTZ,
+  revoked_at   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_scim_tokens_hash ON scim_tokens (token_hash);
+CREATE INDEX ASYNC IF NOT EXISTS idx_scim_tokens_user ON scim_tokens (user_id, revoked_at);
+
+-- ── sso_domains: email domain → Supabase SAML provider id ───────────────────
+CREATE TABLE IF NOT EXISTS sso_domains (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  domain      TEXT NOT NULL,
+  provider_id TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_sso_domains_domain ON sso_domains (domain);
+CREATE INDEX ASYNC IF NOT EXISTS idx_sso_domains_user ON sso_domains (user_id);
+

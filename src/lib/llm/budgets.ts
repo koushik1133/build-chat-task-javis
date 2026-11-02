@@ -1,10 +1,13 @@
 import { query, queryOne } from "@/lib/dsql";
+import { getBalance, InsufficientCreditsError } from "@/lib/credits/ledger";
 
 /**
  * Per-user AI spend caps and model governance.
  *
  * `assertBudget` is called before EVERY model call the runtime makes, so a
- * runaway agent stops at the cap rather than at the invoice.
+ * runaway agent stops at the cap rather than at the invoice. When credits are
+ * enforced (`ai_budgets.credits_enforced`) it also refuses to start a call on
+ * an exhausted credit balance.
  */
 
 export class LlmBudgetExceededError extends Error {
@@ -21,6 +24,7 @@ export interface BudgetRow {
   monthly_cap_micros: string | number | null;
   hard_stop: boolean | null;
   model_allowlist: string | null;
+  credits_enforced?: boolean | null;
 }
 
 export interface BudgetView {
@@ -28,6 +32,8 @@ export interface BudgetView {
   hardStop: boolean;
   allowlist: string[] | null;
   spentMicros: number;
+  /** Stop model calls once the credit balance is exhausted. */
+  creditsEnforced: boolean;
 }
 
 function monthStart(): string {
@@ -36,10 +42,8 @@ function monthStart(): string {
 }
 
 export async function getBudget(userId: string): Promise<BudgetView> {
-  const row = await queryOne<BudgetRow>(
-    `SELECT user_id, monthly_cap_micros, hard_stop, model_allowlist FROM ai_budgets WHERE user_id = $1`,
-    [userId]
-  ).catch(() => null);
+  // SELECT * so a deployment that has not run the credits migration yet still reads its cap.
+  const row = await queryOne<BudgetRow>(`SELECT * FROM ai_budgets WHERE user_id = $1`, [userId]).catch(() => null);
 
   const spent = await queryOne<{ total: string | number | null }>(
     `SELECT COALESCE(SUM(cost_micros), 0) AS total FROM ai_usage WHERE user_id = $1 AND created_at >= $2`,
@@ -61,21 +65,30 @@ export async function getBudget(userId: string): Promise<BudgetView> {
     hardStop: row?.hard_stop !== false,
     allowlist,
     spentMicros: Number(spent?.total ?? 0) || 0,
+    creditsEnforced: row?.credits_enforced === true,
   };
 }
 
-/** Throws LlmBudgetExceededError when a hard cap is reached. */
+/**
+ * Throws LlmBudgetExceededError when a hard cap is reached, and
+ * InsufficientCreditsError when credits are enforced and the balance is gone.
+ */
 export async function assertBudget(userId: string): Promise<BudgetView> {
   const b = await getBudget(userId);
   if (b.capMicros != null && b.hardStop && b.spentMicros >= b.capMicros) {
     throw new LlmBudgetExceededError(b.spentMicros, b.capMicros);
+  }
+  if (b.creditsEnforced) {
+    // A ledger outage must not take every model call down: only a readable, exhausted balance blocks.
+    const balance = await getBalance(userId).catch(() => null);
+    if (balance !== null && balance <= 0) throw new InsufficientCreditsError(balance);
   }
   return b;
 }
 
 export async function setBudget(
   userId: string,
-  patch: { capMicros?: number | null; hardStop?: boolean; allowlist?: string[] | null }
+  patch: { capMicros?: number | null; hardStop?: boolean; allowlist?: string[] | null; creditsEnforced?: boolean }
 ): Promise<void> {
   const existing = await queryOne<BudgetRow>(`SELECT * FROM ai_budgets WHERE user_id = $1`, [userId]).catch(() => null);
   const cap = patch.capMicros !== undefined ? patch.capMicros : existing?.monthly_cap_micros ?? null;
@@ -95,5 +108,9 @@ export async function setBudget(
       `INSERT INTO ai_budgets (user_id, monthly_cap_micros, hard_stop, model_allowlist) VALUES ($1, $2, $3, $4)`,
       [userId, cap, hard, allow]
     );
+  }
+  // Own statement so a deployment without the credits column still saves the rest.
+  if (patch.creditsEnforced !== undefined) {
+    await query(`UPDATE ai_budgets SET credits_enforced = $2, updated_at = NOW() WHERE user_id = $1`, [userId, patch.creditsEnforced]);
   }
 }

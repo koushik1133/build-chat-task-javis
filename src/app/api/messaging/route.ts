@@ -5,6 +5,7 @@ import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { decryptSecret } from "@/lib/secure-store";
 import { parseConversation, saveConversation, type ConversationTurn } from "@/lib/twilio-webhook";
 import type { InboundChannel } from "@/lib/receptionist/inbound-agent";
+import { sendMailReply } from "@/lib/mail/send";
 
 export async function GET() {
   let scope;
@@ -93,12 +94,22 @@ export async function POST(req: NextRequest) {
     ).catch(() => null);
 
     const canSend =
-      conv.channel !== "voice" &&
+      conv.channel !== "voice" && conv.channel !== "email" &&
       !!creds?.twilio_sid && !!creds?.twilio_auth_token && !!creds?.twilio_from_number;
 
     let simulated = !canSend;
     let sendError: string | null = null;
-    if (canSend && creds) {
+    if (conv.channel === "email") {
+      // Email threads go back out through the mailbox that received them.
+      try {
+        const sent = await sendMailReply(scope.dataId, conv.id, parsed.data.text);
+        simulated = sent.simulated;
+      } catch (err) {
+        simulated = true;
+        sendError = err instanceof Error ? err.message : "Email send failed";
+        console.error("[messaging] email send failed:", sendError);
+      }
+    } else if (canSend && creds) {
       try {
         await sendViaTwilio(creds, conv.channel, conv.from_number, parsed.data.text);
       } catch (err) {

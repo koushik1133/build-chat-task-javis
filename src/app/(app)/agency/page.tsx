@@ -389,6 +389,9 @@ export default function AgencyPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/agency/clients"><Building2 className="h-3.5 w-3.5" /> Client workspaces</Link>
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowAddClient(true)}>
               <Plus className="h-3.5 w-3.5" /> Add Client
             </Button>

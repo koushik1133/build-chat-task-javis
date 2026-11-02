@@ -26,7 +26,7 @@ describe("getBudget", () => {
   it("returns defaults when no row exists", async () => {
     mockDb(null, 0);
     const b = await getBudget("u1");
-    expect(b).toEqual({ capMicros: null, hardStop: true, allowlist: null, spentMicros: 0 });
+    expect(b).toEqual({ capMicros: null, hardStop: true, allowlist: null, spentMicros: 0, creditsEnforced: false });
   });
 
   it("parses the allowlist and numeric columns", async () => {

@@ -23,6 +23,9 @@ import "./billing";
 import "./finance";
 import "./records";
 import "./helpdesk";
+import "./marketplace";
+import "./credits";
+import "./optimize";
 // END tool-module imports
 // ─────────────────────────────────────────────────────────────────────────────
 

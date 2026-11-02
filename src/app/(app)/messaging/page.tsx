@@ -10,6 +10,7 @@ import {
   User,
   MessageCircle,
   Phone,
+  Mail,
   Send,
   Loader2,
   FlaskConical,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react";
 import { cn, timeAgo } from "@/lib/utils";
 
-type Channel = "whatsapp" | "sms" | "voice";
+type Channel = "whatsapp" | "sms" | "voice" | "email";
 
 type Message = {
   role: "user" | "assistant";
@@ -58,6 +59,7 @@ const CHANNEL_STYLES: Record<Channel, string> = {
   whatsapp: "bg-emerald-500/10 text-emerald-500",
   sms: "bg-blue-500/10 text-blue-500",
   voice: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  email: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
 };
 
 function ChannelChip({ channel, className }: { channel: Channel; className?: string }) {
@@ -71,6 +73,7 @@ function ChannelChip({ channel, className }: { channel: Channel; className?: str
       )}
     >
       {channel === "voice" && <Phone className="h-2.5 w-2.5" aria-hidden />}
+      {channel === "email" && <Mail className="h-2.5 w-2.5" aria-hidden />}
       {channel}
     </span>
   );
@@ -142,8 +145,10 @@ export default function MessagingPage() {
       if (data.simulated) {
         setNotice(
           data.error
-            ? `Twilio send failed (${data.error}) — saved to the thread only.`
-            : "No Twilio credentials on file — reply saved to the thread but not delivered."
+            ? `Send failed (${data.error}) — saved to the thread only.`
+            : selectedConv.channel === "email"
+              ? "Simulated mailbox — reply saved to the thread but no email left the server."
+              : "No Twilio credentials on file — reply saved to the thread but not delivered."
         );
       }
     } catch (err) {
@@ -156,7 +161,7 @@ export default function MessagingPage() {
   return (
     <PageContainer
       title="Messages"
-      tooltip="View all incoming SMS, WhatsApp and voice conversations. The AI receptionist drafts replies; you approve or send."
+      tooltip="View all incoming SMS, WhatsApp, voice and email conversations. The AI receptionist drafts replies; you approve or send."
       description="Omnichannel customer inbox with an AI receptionist that drafts replies."
       wide
     >
@@ -230,8 +235,8 @@ export default function MessagingPage() {
                 <MessageSquare className="h-6 w-6 text-muted-foreground/40 mx-auto mb-3" />
                 <p className="font-medium text-muted-foreground/80 mb-1">No messages yet</p>
                 <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
-                  When customers text or call your Twilio number, conversations appear here. Try
-                  &ldquo;Simulate inbound message&rdquo; to see the receptionist in action.
+                  When customers text or call your Twilio number, or email a connected mailbox, conversations
+                  appear here. Try &ldquo;Simulate inbound message&rdquo; to see the receptionist in action.
                 </p>
               </div>
             )}
@@ -337,7 +342,7 @@ export default function MessagingPage() {
                           </div>
                         )}
                         {msg.simulated && !msg.pending && (
-                          <div className="mt-1 text-right text-[10px] text-muted-foreground">Saved only (no Twilio)</div>
+                          <div className="mt-1 text-right text-[10px] text-muted-foreground">Saved only (not delivered)</div>
                         )}
                       </div>
                     </div>
@@ -370,7 +375,9 @@ export default function MessagingPage() {
                     placeholder={
                       selectedConv.channel === "voice"
                         ? "Add a note to this call thread…"
-                        : `Reply via ${selectedConv.channel.toUpperCase()}…`
+                        : selectedConv.channel === "email"
+                          ? "Reply by email…"
+                          : `Reply via ${selectedConv.channel.toUpperCase()}…`
                     }
                     className="flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
@@ -379,7 +386,10 @@ export default function MessagingPage() {
                   </Button>
                 </div>
                 <p className="mt-1.5 text-[10px] text-muted-foreground">
-                  Enter to send, Shift+Enter for a new line. Replies go out through your Twilio number when it is connected.
+                  Enter to send, Shift+Enter for a new line.{" "}
+                  {selectedConv.channel === "email"
+                    ? "Email replies go out through the mailbox that received the thread."
+                    : "Replies go out through your Twilio number when it is connected."}
                 </p>
               </form>
             </>

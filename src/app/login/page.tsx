@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Sparkles, Loader2, Mail, Eye, EyeOff, UserPlus, LogIn } from "lucide-react";
+import { Sparkles, Loader2, Mail, Eye, EyeOff, UserPlus, LogIn, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
@@ -57,6 +57,7 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
   const rules = passwordRules(password, email);
   const passwordValid = rules.every((rule) => rule.ok);
@@ -82,6 +83,12 @@ function LoginForm() {
     if (urlError && urlError !== "missing_code") setError(decodeURIComponent(urlError));
 
     const supabase = createClient();
+
+    // "Sign in with SSO" only appears when the server has SSO_ENABLED=1.
+    fetch("/api/auth/sso", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (active && d?.enabled === true) setSsoEnabled(true); })
+      .catch(() => {});
 
     // Only auto-enter the app if the server can see the session cookie.
     // This avoids stale browser auth state bouncing /login <-> /chat.
@@ -215,6 +222,33 @@ function LoginForm() {
     } catch (err) {
       setBusy(false);
       setError(err instanceof Error ? err.message : "An error occurred during sign up.");
+    }
+  }
+
+  async function ssoSignIn() {
+    const addr = email.trim();
+    if (!addr.includes("@")) {
+      setError("Enter your work email first, then choose Sign in with SSO.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/sso", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: addr, next }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.url) {
+        setBusy(false);
+        setError(body.error || "Single sign-on is not available for that email.");
+        return;
+      }
+      window.location.assign(body.url);
+    } catch {
+      setBusy(false);
+      setError("Could not start single sign-on. Please try again.");
     }
   }
 
@@ -416,6 +450,12 @@ function LoginForm() {
               </svg>
               Continue with Google
             </Button>
+            {ssoEnabled && (
+              <Button onClick={() => void ssoSignIn()} variant="outline" className="w-full" disabled={busy} title="Uses the email entered above">
+                <ShieldCheck className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+                Sign in with SSO
+              </Button>
+            )}
           </div>
         </div>
 

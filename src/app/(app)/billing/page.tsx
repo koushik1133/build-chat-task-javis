@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Send, FileCheck2, Link2, Ban, Trash2, X, Copy, Receipt } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Send, FileCheck2, Link2, Ban, Trash2, X, Copy, Receipt, FileDown, XCircle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { PageContainer } from "@/components/page-container";
@@ -108,6 +108,14 @@ export default function BillingPage() {
           onSend={(q) => act(q.id, async () => { const r = await api<{ url: string }>(`/api/quotes/${q.id}/send`, { method: "POST", body: "{}" }); return `Quote ${q.number} sent. Link: ${r.url}`; })}
           onConvert={(q) => act(q.id, async () => { const r = await api<{ invoice: Invoice }>(`/api/quotes/${q.id}/convert`, { method: "POST" }); setTab("invoices"); return `Created invoice ${r.invoice.number}.`; })}
           onDelete={(q) => act(q.id, async () => { await api(`/api/quotes/${q.id}`, { method: "DELETE" }); return `Deleted ${q.number}.`; })}
+          onSuggest={(q) => act(q.id, async () => {
+            const r = await api<{ suggestion: { items: Array<{ description: string; basis: string; suggested_min_minor: number | null; suggested_max_minor: number | null; expectedWinProbability: number }> } }>(`/api/quotes/${q.id}/pricing-suggestion`);
+            const lines = r.suggestion.items.map((i) => i.basis === "history" && i.suggested_min_minor !== null && i.suggested_max_minor !== null
+              ? `${i.description}: ${fmtMoney(i.suggested_min_minor, q.currency)}–${fmtMoney(i.suggested_max_minor, q.currency)} (win now ${Math.round(i.expectedWinProbability * 100)}%)`
+              : `${i.description}: not enough history`);
+            return `Pricing for ${q.number} — ${lines.join(" · ")}. Full detail on Insights → Pricing.`;
+          })}
+          onDecline={(q) => { if (!window.confirm(`Decline quote ${q.number}? Any reserved stock is released.`)) return; act(q.id, async () => { await api(`/api/quotes/${q.id}/decline`, { method: "POST", body: "{}" }); return `Declined ${q.number}.`; }); }}
         />
       ) : (
         <InvoiceList invoices={invoices} busyId={busyId} onCopy={copy}
@@ -137,9 +145,9 @@ function Banner({ tone, children, onDismiss }: { tone: "error" | "info" | "warn"
   );
 }
 
-function QuoteList({ quotes, busyId, onSend, onConvert, onDelete }: {
+function QuoteList({ quotes, busyId, onSend, onConvert, onDelete, onDecline, onSuggest }: {
   quotes: Quote[]; busyId: string | null;
-  onSend: (q: Quote) => void; onConvert: (q: Quote) => void; onDelete: (q: Quote) => void;
+  onSend: (q: Quote) => void; onConvert: (q: Quote) => void; onDelete: (q: Quote) => void; onDecline: (q: Quote) => void; onSuggest: (q: Quote) => void;
 }) {
   if (quotes.length === 0) return <Empty icon={<Receipt className="h-6 w-6" />} text="No quotes yet. Create one to send to a client." />;
   return (
@@ -157,8 +165,13 @@ function QuoteList({ quotes, busyId, onSend, onConvert, onDelete }: {
             </div>
             <div className="flex items-center gap-2">
               <span className="tabular-nums font-medium">{fmtMoney(q.total_minor, q.currency)}</span>
+              {canSend && q.items.length > 0 && <Button size="sm" variant="outline" disabled={busy} onClick={() => onSuggest(q)} title="Compare these prices with past accepted and declined quotes"><Sparkles className="h-3.5 w-3.5" /> Suggest pricing</Button>}
               {canSend && <Button size="sm" variant="outline" disabled={busy} onClick={() => onSend(q)} title="Email a share link"><Send className="h-3.5 w-3.5" /> Send</Button>}
               {q.status !== "draft" && <Button size="sm" variant="outline" disabled={busy} onClick={() => onConvert(q)} title="Create an invoice from this quote"><FileCheck2 className="h-3.5 w-3.5" /> Invoice</Button>}
+              <Button asChild size="sm" variant="outline" title={q.status === "accepted" ? "Download the signed PDF" : "Download PDF"}>
+                <a href={`/api/quotes/${q.id}/pdf`} target="_blank" rel="noopener" aria-label={`Download PDF for ${q.number}`}><FileDown className="h-3.5 w-3.5" /> PDF</a>
+              </Button>
+              {["sent", "viewed"].includes(q.status) && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDecline(q)} aria-label={`Decline ${q.number}`} title="Mark as declined and release reserved stock"><XCircle className="h-3.5 w-3.5" /></Button>}
               {q.status === "draft" && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDelete(q)} aria-label="Delete draft"><Trash2 className="h-3.5 w-3.5" /></Button>}
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             </div>

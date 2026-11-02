@@ -22,7 +22,7 @@ export type RunStatus =
 
 export type TriggerKind = "manual" | "schedule" | "event" | "webhook" | "inbound" | "playbook" | "automation";
 
-export type JobKind = "run" | "resume" | "playbook" | "outbox";
+export type JobKind = "run" | "resume" | "playbook" | "outbox" | "eval";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "dead";
 
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
@@ -87,7 +87,8 @@ export type JobPayload =
   | { kind: "run"; runId: string }
   | { kind: "resume"; runId: string; approvalId: string }
   | { kind: "playbook"; playbookId: string; entityId?: string }
-  | { kind: "outbox"; outboxId: string };
+  | { kind: "outbox"; outboxId: string }
+  | { kind: "eval"; evalRunId: string };
 
 export interface JobRow {
   id: string;

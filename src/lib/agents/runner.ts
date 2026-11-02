@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { redactSecrets } from "@/lib/secure-store";
+import { settleRunOutcome } from "@/lib/credits/outcomes";
 import { enqueueJob } from "./queue";
 import {
   CHECKPOINT_STEP_NAME,
@@ -158,6 +159,8 @@ async function finalize(run: RunRow, outcome: LoopOutcome | { status: "failed"; 
       `UPDATE agents SET status = 'active', tasks_completed = COALESCE(tasks_completed, 0) + 1 WHERE id = $1 AND user_id = $2`,
       [run.agent_id, run.user_id]
     ).catch(() => {});
+    // Outcome pricing: charge once when the agent's outcome event fired during this run.
+    await settleRunOutcome(run).catch((err) => console.error(`[agent-runner] outcome settlement failed for ${run.id}:`, err));
     return { status: "done", output };
   }
   if (outcome.status === "awaiting_approval") {
@@ -222,6 +225,16 @@ async function loadCheckpoint(runId: string, approvalId: string): Promise<Checkp
   }
 }
 
+function parseApprovedInput(raw: string | null): unknown | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Continue a paused run after the human decided on `approvalId`. */
 export async function resumeRun(runId: string, approvalId: string, workerId = "inline"): Promise<RunOutcome> {
   ensureToolsLoaded();
@@ -253,16 +266,18 @@ export async function resumeRun(runId: string, approvalId: string, workerId = "i
       if (!spec) {
         content = JSON.stringify({ ok: false, error: `Tool ${cp.toolName} is no longer available.` });
       } else {
+        // The approvals row is authoritative: an operator may have edited the input before approving.
+        const input = parseApprovedInput(approval.input) ?? cp.input;
         const started = Date.now();
         const result = await executeTool(
           spec,
           { userId: run.user_id, runId: run.id, agentId: agent.id, autonomy: resolveAutonomy(agent.autonomy_level) },
-          cp.input
+          input
         );
         await persistStep(loopRun, {
           kind: "tool",
           name: spec.name,
-          input: JSON.stringify(cp.input),
+          input: JSON.stringify(input),
           output: result.ok ? JSON.stringify(result.data ?? result.summary).slice(0, 2000) : `error: ${result.error ?? result.summary}`,
           ms: Date.now() - started,
         });

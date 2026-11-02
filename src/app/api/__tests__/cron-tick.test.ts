@@ -19,6 +19,10 @@ vi.mock("@/lib/agents/tools", () => ({ ensureToolsLoaded: vi.fn() }));
 vi.mock("@/lib/agents/playbooks", () => ({ runPlaybookDetectors: vi.fn(async () => ({ queued: 0 })) }));
 vi.mock("@/lib/notifications/outbox", () => ({ drainOutbox: mocks.drainOutbox }));
 vi.mock("@/lib/helpdesk/tickets", () => ({ runSlaSweep: mocks.runSlaSweep }));
+vi.mock("@/lib/webhooks/dispatch", () => ({ fanOutNewEvents: vi.fn(async () => ({ scanned: 0, created: 0 })), deliverPending: vi.fn(async () => ({ claimed: 0, delivered: 0, failed: 0, dead: 0 })) }));
+vi.mock("@/lib/money/quotes", () => ({ expireQuotes: vi.fn(async () => ({ scanned: 0, expired: 0, released: 0 })) }));
+vi.mock("@/lib/mail/sync", () => ({ syncDueAccounts: vi.fn(async () => ({ claimed: 0 })) }));
+vi.mock("@/lib/voice/dialer", () => ({ dialNext: vi.fn(async () => ({ dialed: 0 })) }));
 
 import { GET } from "@/app/api/cron/agents/route";
 

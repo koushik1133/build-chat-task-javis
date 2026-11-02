@@ -10,6 +10,7 @@ import { PageContainer } from "@/components/page-container";
 import { cn } from "@/lib/utils";
 import { fmtMoney } from "@/lib/money/format";
 import { api, Banner, Empty, Field, Loading, todayLocalISODate } from "@/components/finance/shared";
+import { AgencyRollup } from "@/components/reports/agency-rollup";
 
 interface JobCost {
   key: string; job_kind: string; job_id: string; label: string; currency: string;
@@ -252,6 +253,8 @@ export default function ReportsPage() {
           )}
         </div>
       ) : null}
+
+      <AgencyRollup qs={qs()} />
 
       <section aria-labelledby="export-heading" className="mt-8 rounded-xl border border-border bg-card p-4 sm:p-5">
         <h2 id="export-heading" className="text-sm font-semibold">

@@ -11,6 +11,8 @@ const Body = z.object({
   otp: z.string().trim().regex(/^\d{6}$/, "6-digit code expected"),
   name: z.string().trim().min(1).max(200),
   email: z.string().trim().email().max(200),
+  /** Typed e-signature; defaults to `name` when omitted. */
+  signature_text: z.string().trim().min(1).max(200).optional(),
   accept_terms: z.literal(true).optional(),
 });
 
@@ -28,6 +30,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       email: body.data.email,
       ip: clientIp(req),
       userAgent: req.headers.get("user-agent"),
+      signatureText: body.data.signature_text ?? body.data.name,
     });
     return NextResponse.json({ quote: await toPublicQuote(out.quote, share.user_id, false), invoiceCreated: Boolean(out.invoiceId) });
   } catch (err) {

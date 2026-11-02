@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Boxes, Check, Download, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowRight, Boxes, Check, Download, Loader2, RefreshCw, Sparkles, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page-container";
 import { Banner, Empty, Skeleton, TypeIcon, api } from "@/components/records/shared";
@@ -84,6 +84,9 @@ export default function RecordsHomePage() {
       tooltip="Each record type is a board of records that move through stages. Packs give you ready-made types for your industry; every field and stage can be changed later."
       actions={
         <>
+          <Button asChild variant="outline" touch>
+            <Link href="/marketplace?kind=pack"><Store className="h-4 w-4" aria-hidden /> Marketplace</Link>
+          </Button>
           <Button variant="outline" touch onClick={() => void migrate()} disabled={busy !== null}>
             {busy === "migrate" ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
             <span className="hidden sm:inline">Import from old hubs</span>

@@ -3,6 +3,7 @@ import { query, queryOne, transaction } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { listSlots, wouldClash, zonedParts, type AvailabilityRule, type Interval } from "@/lib/calendar/slots";
+import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
 
 /**
  * Booking domain: calendars, availability, booking types, bookings.
@@ -411,6 +412,46 @@ export async function createBooking(dataId: string, input: CreateBookingInput): 
 
 export async function getBooking(dataId: string, id: string): Promise<BookingRow | null> {
   return queryOne<BookingRow>(`SELECT ${BOOKING_COLS} FROM bookings WHERE user_id = $1 AND id = $2`, [dataId, id]);
+}
+
+export interface ListBookingsOptions {
+  /** Bookings starting at/after this instant. */
+  from?: Date | null;
+  /** Bookings starting before this instant. */
+  to?: Date | null;
+  status?: BookingStatus | null;
+  limit?: number;
+  /** Newest first (created_at DESC, id DESC) — cursor-friendly. */
+  cursor?: Cursor | null;
+}
+
+/** Newest-first listing for the public API (the calendar UI queries by range in its own route). */
+export async function listBookings(dataId: string, opts: ListBookingsOptions = {}): Promise<BookingRow[]> {
+  const params: unknown[] = [dataId];
+  let sql = `SELECT ${BOOKING_COLS} FROM bookings WHERE user_id = $1`;
+  if (opts.from) {
+    params.push(opts.from.toISOString());
+    sql += ` AND starts_at >= $${params.length}`;
+  }
+  if (opts.to) {
+    params.push(opts.to.toISOString());
+    sql += ` AND starts_at < $${params.length}`;
+  }
+  if (opts.status) {
+    params.push(opts.status);
+    sql += ` AND status = $${params.length}`;
+  }
+  sql += keysetClause(opts.cursor, params);
+  params.push(Math.min(Math.max(opts.limit ?? 100, 1), 500));
+  sql += ` ORDER BY created_at DESC, id DESC LIMIT $${params.length}`;
+  return query<BookingRow>(sql, params);
+}
+
+export async function listBookingTypes(dataId: string, opts: { activeOnly?: boolean } = {}): Promise<BookingTypeRow[]> {
+  return query<BookingTypeRow>(
+    `SELECT ${BOOKING_TYPE_COLS} FROM booking_types WHERE user_id = $1${opts.activeOnly ? " AND active = TRUE" : ""} ORDER BY created_at ASC`,
+    [dataId]
+  );
 }
 
 export async function cancelBooking(dataId: string, id: string, reason?: string): Promise<BookingRow | null> {

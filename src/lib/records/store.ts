@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { likeContains } from "@/lib/like";
+import { keysetClause, type Cursor } from "@/lib/public-api/pagination";
 import {
   RESERVED_TYPE_SLUGS,
   RecordTypeInputSchema,
@@ -194,6 +195,9 @@ export interface ListRecordsOptions {
   q?: string | null;
   limit?: number;
   includeDeleted?: boolean;
+  /** "updated" (default) or "created" (newest first, cursor-friendly). */
+  order?: "updated" | "created";
+  cursor?: Cursor | null;
 }
 
 export async function listRecords(dataId: string, type: RecordType, opts: ListRecordsOptions = {}): Promise<RecordItem[]> {
@@ -209,8 +213,9 @@ export async function listRecords(dataId: string, type: RecordType, opts: ListRe
     const i = params.length;
     sql += ` AND (title ILIKE $${i} OR summary ILIKE $${i} OR data ILIKE $${i})`;
   }
+  if (opts.order === "created") sql += keysetClause(opts.cursor, params);
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 500));
-  sql += ` ORDER BY updated_at DESC LIMIT $${params.length}`;
+  sql += opts.order === "created" ? ` ORDER BY created_at DESC, id DESC LIMIT $${params.length}` : ` ORDER BY updated_at DESC LIMIT $${params.length}`;
   const rows = await query<RecordRow>(sql, params);
   return rows.map(recordFromRow);
 }
