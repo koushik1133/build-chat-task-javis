@@ -37,6 +37,8 @@ export const es: Messages = {
   "nav.settings.sso": "SSO y SCIM",
   "nav.insights": "Perspectivas",
   "nav.settings.webhooks": "Webhooks",
+  "nav.settings.privacy": "Privacidad y datos",
+  "nav.settings.system": "Estado del sistema",
   "nav.settings.developers": "Desarrolladores",
   "nav.settings.mail": "Bandeja de correo",
   "nav.voice": "Campañas de voz",

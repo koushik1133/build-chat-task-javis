@@ -107,6 +107,7 @@ export const ROUTES = {
   getWebhook: def({ id: "getWebhook", method: "GET", path: "/webhooks/{id}", summary: "Get a subscription", tag: "Webhooks", scope: "read:settings", params: S.IdParams, response: S.WebhookSubscription }),
   updateWebhook: def({ id: "updateWebhook", method: "PATCH", path: "/webhooks/{id}", summary: "Update a subscription", tag: "Webhooks", scope: "write:settings", params: S.IdParams, body: S.WebhookPatch, response: S.WebhookSubscription }),
   deleteWebhook: def({ id: "deleteWebhook", method: "DELETE", path: "/webhooks/{id}", summary: "Unsubscribe", tag: "Webhooks", scope: "write:settings", params: S.IdParams, response: S.Deleted }),
+  listWebhookEventTypes: def({ id: "listWebhookEventTypes", method: "GET", path: "/webhooks/event-types", summary: "Event type catalogue", description: "Every event type a subscription can receive, with a sample payload. No authentication required.", tag: "Webhooks", scope: null, response: S.WebhookEventTypeList }),
   sampleWebhook: def({ id: "getWebhookSample", method: "GET", path: "/webhooks/sample/{event}", summary: "Sample payload for an event type", description: "Use for Zapier 'perform list' so users can map fields before any real event fires.", tag: "Webhooks", scope: "read:settings", params: S.WebhookEventParams, response: S.WebhookSample }),
 } as const;
 

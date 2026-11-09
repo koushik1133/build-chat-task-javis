@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { authRateLimit, clientIp } from "@/lib/request-limits";
+import { authRateLimitAsync, clientIp } from "@/lib/request-limits";
 import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { passwordPolicyError } from "@/lib/auth/password-policy";
 
@@ -24,7 +24,7 @@ function safeNext(raw?: string): string {
  * Responses are intentionally generic so callers cannot enumerate accounts.
  */
 export async function POST(req: Request) {
-  const limit = authRateLimit("signup", req);
+  const limit = await authRateLimitAsync("signup", req);
   if (!limit.allowed) {
     return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
   }

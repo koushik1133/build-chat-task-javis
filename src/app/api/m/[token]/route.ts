@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { parseBody } from "@/lib/money/http";
 import { CrewActionError, getCrewDay, resolveCrewToken, runCrewAction } from "@/lib/crew";
 
@@ -17,7 +17,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
 
 /** GET /api/m/[token]?tz= — today's tasks and bookings for the crew link. */
 export async function GET(req: NextRequest, ctx: Ctx) {
-  if (!rateLimit(`crew:${ip(req)}`, 120, 60_000).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (!(await rateLimitAsync(`crew:${ip(req)}`, 120, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   try {
     const { token } = await ctx.params;
     const t = await resolveCrewToken(token);
@@ -39,7 +39,7 @@ const ActionBody = z.discriminatedUnion("action", [
 
 /** POST /api/m/[token] — {action: complete_task|add_note|clock_in|clock_out} */
 export async function POST(req: NextRequest, ctx: Ctx) {
-  if (!rateLimit(`crew:${ip(req)}`, 120, 60_000).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (!(await rateLimitAsync(`crew:${ip(req)}`, 120, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   const { token } = await ctx.params;
   const t = await resolveCrewToken(token).catch(() => null);
   if (!t) return NextResponse.json({ error: "not_found" }, { status: 404, headers: NO_STORE });

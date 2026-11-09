@@ -13,7 +13,7 @@ import { paramToken, parseBody, publicRateLimit } from "@/lib/money/http";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
-  const limited = publicRateLimit(req, "pay");
+  const limited = await publicRateLimit(req, "pay");
   if (limited) return limited;
   try {
     const share = await resolveShareToken("pay", await paramToken(ctx));
@@ -38,7 +38,7 @@ const Body = z.object({ outcome: z.enum(["success", "failure"]) });
  * external webhook would be, and runs it through the same verified path.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
-  const limited = publicRateLimit(req, "pay-sim", 20);
+  const limited = await publicRateLimit(req, "pay-sim", 20);
   if (limited) return limited;
   if (activeProviderId() !== "simulated") return NextResponse.json({ error: "not_simulated" }, { status: 400 });
   try {

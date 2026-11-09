@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { queryOne } from "@/lib/dsql";
-import { rateLimit, readCappedText } from "@/lib/request-limits";
+import { rateLimitAsync, readCappedText } from "@/lib/request-limits";
 import { startRun } from "@/lib/agents/runner";
 import { parseTriggerConfig } from "@/lib/agents/triggers";
 
@@ -31,7 +31,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   ).catch(() => null);
   if (!trigger) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const limit = rateLimit(`hook:${trigger.id}`, 60, 60_000);
+  const limit = await rateLimitAsync(`hook:${trigger.id}`, 60, 60_000);
   if (!limit.allowed) {
     return NextResponse.json({ error: "rate limited" }, { status: 429, headers: { "Retry-After": "60" } });
   }

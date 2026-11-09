@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { processInbound } from "@/lib/twilio-webhook";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 
 const bodySchema = z.object({
   fromNumber: z.string().trim().min(3).max(40),
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  if (!rateLimit(`msg-sim:${scope.dataId}`, 30, 60_000).allowed) {
+  if (!(await rateLimitAsync(`msg-sim:${scope.dataId}`, 30, 60_000)).allowed) {
     return NextResponse.json({ error: "Too many simulated messages — slow down." }, { status: 429 });
   }
 

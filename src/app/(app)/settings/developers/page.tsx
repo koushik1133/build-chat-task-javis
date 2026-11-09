@@ -64,7 +64,7 @@ const ROUTE_TABLE: ReadonlyArray<{ resource: string; routes: string; scope: stri
   { resource: "Tickets", routes: "GET/POST /tickets · GET /tickets/{id} · POST …/replies", scope: "helpdesk" },
   { resource: "Records", routes: "GET /record-types · GET/POST /records/{type} · GET/PATCH /records/{type}/{id} · POST …/move", scope: "crm" },
   { resource: "Events", routes: "GET /events?since=&type=", scope: "settings" },
-  { resource: "Webhooks", routes: "GET/POST /webhooks · GET/PATCH/DELETE /webhooks/{id} · GET /webhooks/sample/{event}", scope: "settings" },
+  { resource: "Webhooks", routes: "GET/POST /webhooks · GET/PATCH/DELETE /webhooks/{id} · GET /webhooks/sample/{event} · GET /webhooks/event-types (public)", scope: "settings" },
   { resource: "Me", routes: "GET /me", scope: "settings" },
 ];
 
@@ -73,11 +73,11 @@ export default function DevelopersPage() {
   const [eventTypes, setEventTypes] = useState<string[] | null>(null);
   useEffect(() => {
     setOrigin(window.location.origin);
-    // The event catalogue lives server-side (src/lib/events/bus.ts); the webhooks API exposes it.
+    // Public catalogue (no key needed): GET /api/v1/webhooks/event-types → { data: [{ type, entity, sample }] }.
     const ctrl = new AbortController();
-    fetch("/api/webhooks", { cache: "no-store", signal: ctrl.signal })
+    fetch("/api/v1/webhooks/event-types", { cache: "no-store", signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setEventTypes(Array.isArray(d?.event_types) ? d.event_types : []))
+      .then((d) => setEventTypes(Array.isArray(d?.data) ? d.data.map((e: { type: string }) => e.type) : []))
       .catch(() => setEventTypes([]));
     return () => ctrl.abort();
   }, []);

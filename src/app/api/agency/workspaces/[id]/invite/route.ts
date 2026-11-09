@@ -5,7 +5,7 @@ import { ROLES, canManageRole } from "@/lib/auth/roles";
 import { dbUnavailableResponse } from "@/lib/api-db";
 import { recordAudit } from "@/lib/audit";
 import { paramId, parseBody } from "@/lib/money/http";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { getChildOrg, inviteClientUser } from "@/lib/agency/orgs";
 import { AlreadyMemberError } from "@/lib/team";
 
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const limit = rateLimit(`agency-invite:${scope.userId}`, 30, 60 * 60 * 1000);
+  const limit = await rateLimitAsync(`agency-invite:${scope.userId}`, 30, 60 * 60 * 1000);
   if (!limit.allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
   const parsed = await parseBody(req, Body, 8_192);

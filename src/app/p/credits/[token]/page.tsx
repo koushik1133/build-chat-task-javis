@@ -34,7 +34,13 @@ export default function CreditsCheckoutPage() {
       const res = await fetch(`/api/p/credits/${token}`, { cache: "no-store" });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.error === "not_found" ? "This checkout link is invalid or has expired. Start a new checkout from Settings → AI." : "Could not load the checkout.");
+        setError(
+          data?.error === "expired"
+            ? "This link has expired. Start a new checkout from Settings → AI."
+            : data?.error === "not_found"
+              ? "This checkout link is invalid. Start a new checkout from Settings → AI."
+              : "Could not load the checkout."
+        );
         return;
       }
       setInfo(data as Info);

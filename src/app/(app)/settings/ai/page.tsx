@@ -23,6 +23,8 @@ interface ProviderInfo {
 }
 interface Usage {
   since: string;
+  /** Org display currency (from Settings → organisation). Costs are still metered in USD micros. */
+  currency?: string;
   totals: Totals;
   byFeature: FeatureRow[];
   byProvider: ProviderRow[];
@@ -34,8 +36,13 @@ interface Usage {
 type Notice = { tone: "success" | "error"; text: string };
 
 const fmtInt = (n: number) => new Intl.NumberFormat().format(Math.round(n || 0));
-const fmtUsd = (micros: number) =>
-  new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format((micros || 0) / 1e6);
+const fmtCost = (micros: number, currency = "USD") => {
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 4 }).format((micros || 0) / 1e6);
+  } catch {
+    return `${((micros || 0) / 1e6).toFixed(4)} ${currency}`;
+  }
+};
 const fmtDay = (iso: string) => {
   const d = new Date(iso + "T00:00:00Z");
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
@@ -48,6 +55,8 @@ async function readError(res: Response, fallback: string): Promise<string> {
 
 export default function AiSettingsPage() {
   const [usage, setUsage] = useState<Usage | null>(null);
+  const currency = usage?.currency ?? "USD";
+  const fmtUsd = (micros: number) => fmtCost(micros, currency);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -90,7 +99,7 @@ export default function AiSettingsPage() {
     e.preventDefault();
     const cap = capUsd.trim() === "" ? null : Number(capUsd);
     if (cap !== null && (!Number.isFinite(cap) || cap < 0 || cap > 10_000)) {
-      setCapError("Enter an amount between 0 and 10,000 USD, or leave blank for no cap.");
+      setCapError(`Enter an amount between 0 and 10,000 ${currency}, or leave blank for no cap.`);
       return;
     }
     setCapError(null);
@@ -204,7 +213,7 @@ export default function AiSettingsPage() {
               {usage.series.every((p) => p.costMicros === 0 && p.calls === 0) ? (
                 <Empty title="No model calls in the last 30 days" text="Spend appears here as soon as an agent or the copilot makes a model call." className="py-8" />
               ) : (
-                <SpendChart points={usage.series} />
+                <SpendChart points={usage.series} currency={currency} />
               )}
             </section>
 
@@ -214,7 +223,7 @@ export default function AiSettingsPage() {
               </h2>
               <p className="mb-4 text-sm text-muted-foreground">When hard stop is on, model calls are refused once spend reaches the cap. Leave blank for no cap.</p>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Cap (USD per month)" error={capError} hint="Between 0 and 10,000.">
+                <Field label={`Cap (${currency} per month)`} error={capError} hint="Between 0 and 10,000.">
                   <Input
                     type="number"
                     inputMode="decimal"
@@ -352,7 +361,8 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
 }
 
 /* Single-series daily bar chart: one axis, recessive grid, hover/focus detail, text summary for AT. */
-function SpendChart({ points }: { points: SeriesPoint[] }) {
+function SpendChart({ points, currency }: { points: SeriesPoint[]; currency: string }) {
+  const fmtUsd = (micros: number) => fmtCost(micros, currency);
   const id = useId();
   const [active, setActive] = useState<number | null>(null);
   const W = 720;
@@ -390,7 +400,7 @@ function SpendChart({ points }: { points: SeriesPoint[] }) {
             <g key={t}>
               <line x1={padL} x2={W - padR} y1={y} y2={y} stroke="hsl(var(--border))" strokeWidth={1} />
               <text x={padL - 6} y={y + 4} textAnchor="end" fontSize={11} fill="hsl(var(--muted-foreground))">
-                {t === 0 ? "$0" : fmtUsd(max * t)}
+                {fmtUsd(max * t)}
               </text>
             </g>
           );

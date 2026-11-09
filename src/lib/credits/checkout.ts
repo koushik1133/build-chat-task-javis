@@ -98,6 +98,15 @@ export async function startCheckout(
   return { url, purchaseId, provider: provider.id, token, pack };
 }
 
+/** A pending checkout link stops working after this long; paid/failed ones stay viewable. */
+export const CHECKOUT_LINK_TTL_MS = 7 * 86_400_000;
+
+export function isPurchaseExpired(p: Pick<PurchaseRow, "status" | "created_at">, now = Date.now()): boolean {
+  if (p.status !== "pending") return false;
+  const created = new Date(p.created_at).getTime();
+  return Number.isFinite(created) && now - created > CHECKOUT_LINK_TTL_MS;
+}
+
 export async function getPurchaseByToken(token: string): Promise<PurchaseRow | null> {
   if (!token || token.length > 128 || !/^[A-Za-z0-9_-]+$/.test(token)) return null;
   return queryOne<PurchaseRow>(`SELECT * FROM ai_credit_purchases WHERE token_hash = $1`, [hashToken(token)]);

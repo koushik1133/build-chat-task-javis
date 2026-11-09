@@ -8,7 +8,7 @@ import { paramToken, publicRateLimit } from "@/lib/money/http";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
-  const limited = publicRateLimit(req, "invoice");
+  const limited = await publicRateLimit(req, "invoice");
   if (limited) return limited;
   try {
     const share = await resolveShareToken("invoice", await paramToken(ctx));
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ token: stri
 
 /** Client-initiated pay: mint a checkout for the outstanding balance and return its URL. */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
-  const limited = publicRateLimit(req, "invoice-pay", 10);
+  const limited = await publicRateLimit(req, "invoice-pay", 10);
   if (limited) return limited;
   try {
     const share = await resolveShareToken("invoice", await paramToken(ctx));

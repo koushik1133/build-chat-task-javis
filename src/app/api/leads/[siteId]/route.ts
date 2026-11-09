@@ -3,7 +3,7 @@ import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
 import { enrichLead } from "@/lib/lead-enrichment";
 import { emitEvent } from "@/lib/events/bus";
-import { readCappedText, sanitiseLeadPayload, rateLimit } from "@/lib/request-limits";
+import { readCappedText, sanitiseLeadPayload, rateLimitAsync } from "@/lib/request-limits";
 import { corsHeadersFor, corsPreflight, siteAllowedOrigins } from "@/lib/cors";
 
 export const runtime = "nodejs";
@@ -69,7 +69,7 @@ export async function POST(req: Request, { params }: Ctx) {
 
     // Auto-enrich in-process (fire-and-forget). The lead is always stored;
     // only the LLM enrichment is throttled per site.
-    if (result?.id && rateLimit(`enrich:${siteId}`, 20, 60 * 60 * 1000).allowed) {
+    if (result?.id && (await rateLimitAsync(`enrich:${siteId}`, 20, 60 * 60 * 1000)).allowed) {
       void enrichLead(result.id, site.user_id).catch((err) =>
         console.error("Auto-enrichment failed:", err)
       );

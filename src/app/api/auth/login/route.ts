@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { authRateLimit } from "@/lib/request-limits";
+import { authRateLimitAsync } from "@/lib/request-limits";
 
 const Body = z.object({
   email: z.string().email().max(254),
@@ -13,7 +13,7 @@ const Body = z.object({
  * is rate limited per IP and the session cookie is set server-side.
  */
 export async function POST(req: Request) {
-  const limit = authRateLimit("login", req);
+  const limit = await authRateLimitAsync("login", req);
   if (!limit.allowed) {
     return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
   }

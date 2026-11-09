@@ -37,6 +37,8 @@ export const hi: Messages = {
   "nav.settings.sso": "SSO और SCIM",
   "nav.insights": "इनसाइट्स",
   "nav.settings.webhooks": "वेबहुक",
+  "nav.settings.privacy": "गोपनीयता और डेटा",
+  "nav.settings.system": "सिस्टम स्थिति",
   "nav.settings.developers": "डेवलपर",
   "nav.settings.mail": "ईमेल इनबॉक्स",
   "nav.voice": "वॉइस अभियान",

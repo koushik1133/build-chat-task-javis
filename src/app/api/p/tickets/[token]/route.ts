@@ -3,7 +3,7 @@ import { queryOne } from "@/lib/dsql";
 import { createTicket, formatTicketNumber, listMessages, listTickets, type TicketRow } from "@/lib/helpdesk/tickets";
 import { PortalTicketSchema } from "@/lib/helpdesk/http";
 import { parseBody, publicRateLimit } from "@/lib/money/http";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { resolveShareToken } from "@/lib/share-tokens";
 
 export const runtime = "nodejs";
@@ -25,7 +25,7 @@ function toPortalTicket(t: TicketRow) {
 }
 
 async function resolve(req: NextRequest, ctx: Ctx) {
-  const limited = publicRateLimit(req, "tickets");
+  const limited = await publicRateLimit(req, "tickets");
   if (limited) return { res: limited };
   const { token } = await ctx.params;
   const t = await resolveShareToken("portal", token);
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if ("res" in r) return r.res;
     // Ticket creation is a write that fans out (numbering, events, agent notifications):
     // cap it per portal link on top of the per-IP read limit.
-    if (!rateLimit(`p:tickets:create:${r.tokenId}`, 10, 60 * 60 * 1000).allowed) {
+    if (!(await rateLimitAsync(`p:tickets:create:${r.tokenId}`, 10, 60 * 60 * 1000)).allowed) {
       return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": "3600" } });
     }
     const body = await parseBody(req, PortalTicketSchema);

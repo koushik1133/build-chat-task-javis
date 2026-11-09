@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireScope } from "@/lib/auth/scope";
 import { addReview, getListing, listReviews } from "@/lib/marketplace/catalog";
 import { errorResponse, paramId, parseBody } from "@/lib/money/http";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const scope = await requireScope({ area: "agents", edit: true });
-    if (!rateLimit(`marketplace-review:${scope.dataId}`, 20, 60 * 60 * 1000).allowed) {
+    if (!(await rateLimitAsync(`marketplace-review:${scope.dataId}`, 20, 60 * 60 * 1000)).allowed) {
       return NextResponse.json({ error: "rate_limited", detail: "Too many reviews; try again later." }, { status: 429 });
     }
     const id = decodeURIComponent(await paramId(ctx));

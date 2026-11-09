@@ -35,6 +35,7 @@ export default function PublicQuotePage() {
   const [agree, setAgree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [intent, setIntent] = useState<"accept" | "decline">("accept");
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -42,7 +43,13 @@ export default function PublicQuotePage() {
       const res = await fetch(`/api/p/quotes/${token}`, { cache: "no-store" });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setLoadError(data?.error === "not_found" ? "This link is invalid or has expired. Ask the sender for a new one." : "Could not load the quote.");
+        setLoadError(
+          data?.error === "expired"
+            ? "This link has expired. Ask the sender for a new one."
+            : data?.error === "not_found"
+              ? "This link is invalid. Ask the sender for a new one."
+              : "Could not load the quote."
+        );
         return;
       }
       setQuote(data.quote);
@@ -63,11 +70,11 @@ export default function PublicQuotePage() {
     return data;
   }
 
-  async function requestOtp() {
+  async function requestOtp(purpose: "accept" | "decline" = intent) {
     setBusy(true);
     setError(null);
     try {
-      await post(`/api/p/quotes/${token}/otp`, { email });
+      await post(`/api/p/quotes/${token}/otp`, { email, purpose });
       setNotice(`We emailed a 6-digit code to ${email}. It expires in 10 minutes.`);
       setStep("otp");
     } catch (e) {
@@ -100,7 +107,7 @@ export default function PublicQuotePage() {
     setBusy(true);
     setError(null);
     try {
-      const data = await post(`/api/p/quotes/${token}/decline`, reason.trim() ? { reason: reason.trim() } : {});
+      const data = await post(`/api/p/quotes/${token}/decline`, { otp, email, ...(reason.trim() ? { reason: reason.trim() } : {}) });
       setQuote(data.quote);
       setNotice(null);
       setStep("declined");
@@ -111,8 +118,9 @@ export default function PublicQuotePage() {
     }
   }
 
-  function go(next: Step) {
+  function go(next: Step, nextIntent?: "accept" | "decline") {
     setError(null);
+    if (nextIntent) setIntent(nextIntent);
     setStep(next);
   }
 
@@ -189,10 +197,10 @@ export default function PublicQuotePage() {
               <p className="text-sm text-muted-foreground">Total {fmtMoney(quote.total_minor, quote.currency)}. We will verify your email before recording acceptance.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button touch onClick={() => go("email")}>
+              <Button touch onClick={() => go("email", "accept")}>
                 Accept quote
               </Button>
-              <Button touch variant="outline" onClick={() => go("decline")}>
+              <Button touch variant="outline" onClick={() => go("decline", "decline")}>
                 Decline
               </Button>
             </div>
@@ -202,10 +210,14 @@ export default function PublicQuotePage() {
             className="space-y-3"
             onSubmit={(e) => {
               e.preventDefault();
-              void decline();
+              void requestOtp("decline");
             }}
           >
             <p className="font-medium">Decline this quote?</p>
+            <p className="text-sm text-muted-foreground">We will email you a one-time code to confirm it is you before recording the decline.</p>
+            <Field label="Your email" required>
+              <Input type="email" required autoComplete="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+            </Field>
             <Field label="Reason (optional)" hint="Let them know why, so they can follow up with a better fit.">
               <Textarea rows={3} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
             </Field>
@@ -215,8 +227,8 @@ export default function PublicQuotePage() {
               </Banner>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button touch type="submit" variant="destructive" disabled={busy}>
-                {busy && spinner} Decline quote
+              <Button touch type="submit" variant="destructive" disabled={busy || !email}>
+                {busy && spinner} Send code to decline
               </Button>
               <Button touch type="button" variant="ghost" disabled={busy} onClick={() => go("view")}>
                 Cancel
@@ -244,6 +256,35 @@ export default function PublicQuotePage() {
                 {busy && spinner} Send code
               </Button>
               <Button touch type="button" variant="ghost" onClick={() => go("view")}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : intent === "decline" ? (
+          <form
+            className="space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void decline();
+            }}
+          >
+            {notice && <Banner tone="info">{notice}</Banner>}
+            <Field label="6-digit code" required>
+              <Input inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} required value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} className="tabular-nums" />
+            </Field>
+            {error && (
+              <Banner tone="error" className="mb-0" onDismiss={() => setError(null)}>
+                {error}
+              </Banner>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button touch type="submit" variant="destructive" disabled={busy || otp.length !== 6}>
+                {busy && spinner} Decline quote
+              </Button>
+              <Button touch type="button" variant="ghost" disabled={busy} onClick={() => void requestOtp("decline")}>
+                Resend code
+              </Button>
+              <Button touch type="button" variant="ghost" disabled={busy} onClick={() => go("view")}>
                 Cancel
               </Button>
             </div>
@@ -282,7 +323,7 @@ export default function PublicQuotePage() {
               <Button touch type="submit" disabled={busy || otp.length !== 6 || !name || !signature.trim() || !agree}>
                 {busy && spinner} Sign and accept
               </Button>
-              <Button touch type="button" variant="ghost" disabled={busy} onClick={() => void requestOtp()}>
+              <Button touch type="button" variant="ghost" disabled={busy} onClick={() => void requestOtp("accept")}>
                 Resend code
               </Button>
             </div>

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { ROLES, canManageRole } from "@/lib/auth/roles";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { AlreadyMemberError, createInvite } from "@/lib/team";
 
 const Body = z.object({
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const limit = rateLimit(`team-invite:${scope.userId}`, 20, 60 * 60 * 1000);
+  const limit = await rateLimitAsync(`team-invite:${scope.userId}`, 20, 60 * 60 * 1000);
   if (!limit.allowed) return NextResponse.json({ error: "rate limited" }, { status: 429 });
 
   const parsed = Body.safeParse(await req.json().catch(() => null));

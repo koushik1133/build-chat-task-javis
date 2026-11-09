@@ -3,7 +3,8 @@ import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
 import { createClient } from "@/lib/supabase/server";
 import { parseBody } from "@/lib/money/http";
-import { authRateLimit } from "@/lib/request-limits";
+import { authRateLimitAsync } from "@/lib/request-limits";
+import { ssoProviderName } from "@/lib/sso/provider-name";
 
 export const dynamic = "force-dynamic";
 
@@ -18,9 +19,9 @@ function safeNext(raw?: string): string {
   return "/onboarding";
 }
 
-/** GET /api/auth/sso — readiness flag for the login page (hides the button unless SSO_ENABLED=1). */
+/** GET /api/auth/sso — readiness flag + provider name for the login page (button hidden unless SSO_ENABLED=1). */
 export async function GET() {
-  return NextResponse.json({ enabled: ssoEnabled() });
+  return NextResponse.json({ enabled: ssoEnabled(), providerName: ssoProviderName() });
 }
 
 /**
@@ -31,14 +32,15 @@ export async function GET() {
  */
 export async function POST(req: NextRequest) {
   if (!ssoEnabled()) return NextResponse.json({ error: "sso_disabled" }, { status: 404 });
-  const limit = authRateLimit("sso", req);
+  const limit = await authRateLimitAsync("sso", req);
   if (!limit.allowed) return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
   const parsed = await parseBody(req, Body, 2_048);
   if (!parsed.ok) return parsed.res;
   const domain = parsed.data.email.split("@")[1] ?? "";
   const generic = NextResponse.json({ error: "Single sign-on is not set up for that email domain." }, { status: 404 });
 
-  const row = await queryOne<{ provider_id: string | null }>(`SELECT provider_id FROM sso_domains WHERE domain = $1`, [domain]).catch(() => null);
+  // Only DNS-verified claims route logins; an unverified claim is indistinguishable from no claim.
+  const row = await queryOne<{ provider_id: string | null }>(`SELECT provider_id FROM sso_domains WHERE domain = $1 AND verified_at IS NOT NULL`, [domain]).catch(() => null);
   if (!row) return generic;
 
   try {

@@ -3,6 +3,7 @@
  */
 
 import { query, queryOne } from "@/lib/dsql";
+import { outboundUrlRefusal } from "@/lib/webhooks/url";
 import { type UserIntegrations } from "@/lib/user-integrations";
 import { runAgentJob } from "@/lib/agent-runner";
 import { AgentNotFoundError, startRun } from "@/lib/agents/runner";
@@ -92,6 +93,8 @@ function defaultMessage(ctx: AutomationContext): string {
 
 // ─── Slack ────────────────────────────────────────────────────────────────────
 async function sendSlack(webhookUrl: string, text: string): Promise<ExecuteResult> {
+  const refusal = await outboundUrlRefusal(webhookUrl);
+  if (refusal) return { success: false, message: "Slack delivery refused", detail: refusal };
   try {
     const res = await fetchWithTimeout(webhookUrl, {
       method: "POST",
@@ -113,8 +116,11 @@ async function sendSlack(webhookUrl: string, text: string): Promise<ExecuteResul
 
 // ─── Webhook ──────────────────────────────────────────────────────────────────
 async function sendWebhook(url: string, payload: Record<string, unknown>): Promise<ExecuteResult> {
+  const refusal = await outboundUrlRefusal(url);
+  if (refusal) return { success: false, message: "Webhook refused", detail: refusal };
   try {
     const res = await fetchWithTimeout(url, {
+      redirect: "error",
       method: "POST",
       headers: { "Content-Type": "application/json", "User-Agent": "KernelHub-Automations/1.0" },
       body: JSON.stringify(payload),

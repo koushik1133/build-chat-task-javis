@@ -42,6 +42,8 @@ export const en = {
   "nav.settings.sso": "SSO & SCIM",
   "nav.insights": "Insights",
   "nav.settings.webhooks": "Webhooks",
+  "nav.settings.privacy": "Privacy & data",
+  "nav.settings.system": "System health",
   "nav.settings.developers": "Developers",
   "nav.settings.mail": "Email Inbox",
   "nav.voice": "Voice Campaigns",

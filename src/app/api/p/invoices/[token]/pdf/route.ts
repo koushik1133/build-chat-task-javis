@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
-  const limited = publicRateLimit(req, "invoice-pdf", 30);
+  const limited = await publicRateLimit(req, "invoice-pdf", 30);
   if (limited) return limited;
   try {
     const share = await resolveShareToken("invoice", await paramToken(ctx));

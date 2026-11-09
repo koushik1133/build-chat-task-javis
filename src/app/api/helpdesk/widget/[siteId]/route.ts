@@ -3,7 +3,7 @@ import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
 import { createTicket, formatTicketNumber } from "@/lib/helpdesk/tickets";
 import { WidgetTicketSchema } from "@/lib/helpdesk/http";
-import { clientIp, rateLimit, readCappedText } from "@/lib/request-limits";
+import { clientIp, rateLimitAsync, readCappedText } from "@/lib/request-limits";
 import { corsHeadersFor, corsPreflight, siteAllowedOrigins } from "@/lib/cors";
 
 export const runtime = "nodejs";
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       return reply(NextResponse.json({ error: "Invalid site ID format" }, { status: 400 }));
     }
     const ip = clientIp(req);
-    if (!rateLimit(`helpdesk-widget:ip:${ip}`, 10, 60 * 60 * 1000).allowed || !rateLimit(`helpdesk-widget:site:${siteId}`, 120, 60 * 60 * 1000).allowed) {
+    if (!(await rateLimitAsync(`helpdesk-widget:ip:${ip}`, 10, 60 * 60 * 1000)).allowed || !(await rateLimitAsync(`helpdesk-widget:site:${siteId}`, 120, 60 * 60 * 1000)).allowed) {
       return reply(NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": "3600" } }));
     }
 

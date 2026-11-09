@@ -4,7 +4,7 @@ import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { getMailAccount } from "@/lib/mail";
 import { pushSimulatedMail } from "@/lib/mail/providers/simulated";
 import { syncAccount } from "@/lib/mail/sync";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (!rateLimit(`mail-sim:${scope.dataId}`, 30, 60_000).allowed) {
+  if (!(await rateLimitAsync(`mail-sim:${scope.dataId}`, 30, 60_000)).allowed) {
     return NextResponse.json({ error: "Too many simulated emails — slow down." }, { status: 429 });
   }
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));

@@ -10,6 +10,8 @@ vi.mock("@/lib/dsql", () => ({
 
 const sendEmailUnified = vi.fn(async () => ({ success: true, message: "ok" }));
 vi.mock("@/lib/email-sender", () => ({ sendEmailUnified: () => sendEmailUnified() }));
+// partner.example has no DNS; the SSRF guard has its own tests (webhooks/__tests__/outbound-guard.test.ts).
+vi.mock("@/lib/webhooks/url", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/webhooks/url")>()), outboundUrlRefusal: async () => null }));
 
 import { channelStatus } from "@/lib/notifications/status";
 import { dispatch } from "@/lib/notifications/channels";

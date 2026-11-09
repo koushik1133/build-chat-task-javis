@@ -3,6 +3,7 @@ import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { describeProviders } from "@/lib/llm/providers";
 import { getBudget } from "@/lib/llm/budgets";
+import { getOrgSettings } from "@/lib/org-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export async function GET() {
                COALESCE(SUM(cost_micros), 0) AS cost_micros`;
 
   try {
-    const [totals, byFeature, byProvider, days, budget] = await Promise.all([
+    const [totals, byFeature, byProvider, days, budget, orgSettings] = await Promise.all([
       queryOne<TotalsRow>(
         `SELECT ${AGG} FROM ai_usage WHERE user_id = $1 AND created_at >= $2`,
         [scope.dataId, since]
@@ -65,6 +66,7 @@ export async function GET() {
         [scope.dataId, since30]
       ),
       getBudget(scope.dataId),
+      getOrgSettings(scope.dataId),
     ]);
 
     // Dense 30-day series so the bar strip always has 30 slots.
@@ -78,6 +80,7 @@ export async function GET() {
 
     return NextResponse.json({
       since,
+      currency: orgSettings.currency,
       totals: {
         calls: num(totals?.calls),
         promptTokens: num(totals?.prompt_tokens),

@@ -103,3 +103,14 @@ export async function resolvesToPublicAddress(url: string, opts: { lookup?: Host
     return false;
   }
 }
+
+/**
+ * Combined guard for legacy outbound destinations (automation webhook action,
+ * notification webhook channel): string policy + DNS resolution. Returns null
+ * when the URL may be called, otherwise a short human reason.
+ */
+export async function outboundUrlRefusal(url: string, opts: { lookup?: HostLookup; env?: EnvLike } = {}): Promise<string | null> {
+  if (!isAllowedWebhookUrl(url, opts.env ?? process.env)) return "Destination must be a public https URL (no IP literals, localhost or internal hosts).";
+  if (!(await resolvesToPublicAddress(url, opts))) return "Destination resolves to a private or internal address.";
+  return null;
+}

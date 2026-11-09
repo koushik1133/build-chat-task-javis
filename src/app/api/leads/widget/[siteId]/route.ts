@@ -3,8 +3,9 @@ import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
 import { enrichLead } from "@/lib/lead-enrichment";
 import { emitEvent } from "@/lib/events/bus";
-import { readCappedText, sanitiseLeadPayload, rateLimit } from "@/lib/request-limits";
+import { readCappedText, sanitiseLeadPayload, rateLimitAsync } from "@/lib/request-limits";
 import { corsHeadersFor, corsPreflight, siteAllowedOrigins } from "@/lib/cors";
+import { recordConsent } from "@/lib/privacy/consent";
 
 export const runtime = "nodejs";
 
@@ -55,6 +56,14 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       return corsResponse(NextResponse.json({ error: "Invalid JSON" }, { status: 400 }));
     }
 
+    // Optional `consent: { marketing: boolean }` travels beside the form fields and is recorded in the ledger, not in `data`.
+    let marketingConsent: boolean | null = null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "consent" in parsed) {
+      const { consent, ...rest } = parsed as Record<string, unknown>;
+      const c = consent && typeof consent === "object" ? (consent as Record<string, unknown>) : null;
+      marketingConsent = typeof c?.marketing === "boolean" ? c.marketing : null;
+      parsed = rest;
+    }
     const data = sanitiseLeadPayload(parsed);
     if (!data) {
       return corsResponse(NextResponse.json({ error: "Invalid payload" }, { status: 400 }));
@@ -81,9 +90,16 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
     void emitEvent(site.user_id, { type: "lead.captured", entity: "site_lead", entityId: leadId, data: { siteId, source: "widget" } });
 
+    if (marketingConsent !== null) {
+      const evidence = { ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null, ua: req.headers.get("user-agent"), text_version: `site:${siteId}` };
+      for (const purpose of ["marketing_email", "marketing_sms"] as const) {
+        void recordConsent(site.user_id, { kind: "lead", id: leadId }, purpose, marketingConsent ? "granted" : "withdrawn", "form", evidence).catch(() => undefined);
+      }
+    }
+
     // 3. Auto-enrich in-process (fire-and-forget). The lead is always stored;
     //    only the LLM enrichment is throttled per site.
-    if (rateLimit(`enrich:${siteId}`, 20, 60 * 60 * 1000).allowed) {
+    if ((await rateLimitAsync(`enrich:${siteId}`, 20, 60 * 60 * 1000)).allowed) {
       void enrichLead(leadId, site.user_id).catch((err) =>
         console.error("Auto-enrichment failed:", err)
       );

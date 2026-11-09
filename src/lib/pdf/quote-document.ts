@@ -79,6 +79,8 @@ export interface DocBranding {
 }
 
 export interface RenderOptions {
+  /** Public copies: print "IP and device recorded" instead of the raw IP / user agent. */
+  redactEvidence?: boolean;
   /** IANA zone for the "local" timestamp in the signature block. */
   timezone?: string | null;
   /** Name of the issuing business when branding has none. */
@@ -303,7 +305,9 @@ function drawSection(flow: Flow, title: string, body: string, opts: { size?: num
   flow.gap(6);
 }
 
-function drawSignature(flow: Flow, stamp: SignatureStamp, tz: string | null | undefined): void {
+export const REDACTED_EVIDENCE = "IP and device recorded";
+
+function drawSignature(flow: Flow, stamp: SignatureStamp, tz: string | null | undefined, redact = false): void {
   const x = flow.margin;
   const inner = x + 12;
   const labelW = 110;
@@ -316,8 +320,12 @@ function drawSignature(flow: Flow, stamp: SignatureStamp, tz: string | null | un
     ["Signed at (UTC)", fmtInstant(stamp.signed_at, "UTC")],
   ];
   if (tz && tz !== "UTC") rows.push([`Signed at (${tz})`, fmtInstant(stamp.signed_at, tz)]);
-  rows.push(["IP address", stamp.ip || "—"]);
-  rows.push(["User agent", stamp.user_agent || "—"]);
+  if (redact) {
+    rows.push(["Evidence", REDACTED_EVIDENCE]);
+  } else {
+    rows.push(["IP address", stamp.ip || "—"]);
+    rows.push(["User agent", stamp.user_agent || "—"]);
+  }
   rows.push(["Terms version", stamp.consent_terms_version || "—"]);
   rows.push(["Consent", CONSENT_TEXT]);
   rows.push(["Document SHA-256", stamp.document_hash]);
@@ -372,7 +380,7 @@ export function renderQuotePdf(quote: QuoteDocInput, stamp: SignatureStamp | nul
   ]);
   if (quote.notes) drawSection(flow, "Notes", quote.notes);
   if (quote.terms_text) drawSection(flow, `Terms${quote.terms_version ? ` (${quote.terms_version})` : ""}`, quote.terms_text, { size: 8.5 });
-  if (stamp) drawSignature(flow, stamp, opts.timezone);
+  if (stamp) drawSignature(flow, stamp, opts.timezone, opts.redactEvidence === true);
 
   const footer = [brand, branding.support_email ? branding.support_email : null, stamp ? `Signed copy · fingerprint ${stamp.document_hash.slice(0, 16)}…` : `Quote ${quote.number}`]
     .filter(Boolean)

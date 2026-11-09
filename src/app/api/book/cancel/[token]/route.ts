@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { cancelBookingByToken } from "@/lib/calendar/booking";
 
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ type Ctx = { params: Promise<{ token: string }> };
 /** POST /api/book/cancel/[token] — customer self-cancel. */
 export async function POST(req: NextRequest, ctx: Ctx) {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
-  if (!rateLimit(`book-cancel:${ip}`, 60, 60_000).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (!(await rateLimitAsync(`book-cancel:${ip}`, 60, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   try {
     const { token } = await ctx.params;
     if (!token || token.length > 128) return NextResponse.json({ error: "not_found" }, { status: 404 });

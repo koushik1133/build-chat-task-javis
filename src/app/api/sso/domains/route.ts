@@ -6,6 +6,7 @@ import { dbUnavailableResponse } from "@/lib/api-db";
 import { query, queryOne } from "@/lib/dsql";
 import { parseBody } from "@/lib/money/http";
 import { canClaimSsoDomain } from "@/lib/sso/domains";
+import { issueVerificationToken, verificationRecord } from "@/lib/sso/verify";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,22 @@ const Domain = z
   .regex(/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/, "expected a domain like company.com");
 const Body = z.object({ domain: Domain, providerId: z.string().trim().max(100).optional() }).strict();
 
-interface DomainRow { id: string; domain: string; provider_id: string | null; created_at: string }
+interface DomainRow { id: string; domain: string; provider_id: string | null; created_at: string; verification_token: string | null; verified_at: string | null; last_verify_error: string | null }
+
+const COLS = `id, domain, provider_id, created_at, verification_token, verified_at, last_verify_error`;
+
+/** Public shape: the token itself is exposed only as the TXT record to publish. */
+function view(r: DomainRow) {
+  return {
+    id: r.id,
+    domain: r.domain,
+    provider_id: r.provider_id,
+    created_at: r.created_at,
+    verified_at: r.verified_at,
+    last_verify_error: r.last_verify_error,
+    record: r.verification_token ? verificationRecord(r.domain, r.verification_token) : null,
+  };
+}
 
 /** GET /api/sso/domains — email domains mapped to this workspace's SAML provider. */
 export async function GET() {
@@ -28,8 +44,8 @@ export async function GET() {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
-    const domains = await query<DomainRow>(`SELECT id, domain, provider_id, created_at FROM sso_domains WHERE user_id = $1 ORDER BY domain ASC`, [scope.dataId]);
-    return NextResponse.json({ domains });
+    const domains = await query<DomainRow>(`SELECT ${COLS} FROM sso_domains WHERE user_id = $1 ORDER BY domain ASC`, [scope.dataId]);
+    return NextResponse.json({ domains: domains.map(view) });
   } catch (err) {
     return dbUnavailableResponse(err, "sso/domains");
   }
@@ -59,8 +75,10 @@ export async function POST(req: NextRequest) {
     } else {
       await query(`INSERT INTO sso_domains (id, user_id, domain, provider_id) VALUES ($1, $2, $3, $4)`, [randomUUID(), scope.dataId, parsed.data.domain, parsed.data.providerId ?? null]);
     }
-    const row = await queryOne<DomainRow>(`SELECT id, domain, provider_id, created_at FROM sso_domains WHERE domain = $1`, [parsed.data.domain]);
-    return NextResponse.json({ domain: row }, { status: taken ? 200 : 201 });
+    const created = await queryOne<{ id: string }>(`SELECT id FROM sso_domains WHERE domain = $1`, [parsed.data.domain]);
+    if (created) await issueVerificationToken(created.id);
+    const row = await queryOne<DomainRow>(`SELECT ${COLS} FROM sso_domains WHERE domain = $1`, [parsed.data.domain]);
+    return NextResponse.json({ domain: row ? view(row) : null }, { status: taken ? 200 : 201 });
   } catch (err) {
     return dbUnavailableResponse(err, "sso/domains");
   }

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { scopeErrorResponse } from "@/lib/auth/scope";
-import { rateLimit, readCappedText } from "@/lib/request-limits";
+import { rateLimitAsync, readCappedText } from "@/lib/request-limits";
 import { CurrencySchema, LineItemsSchema } from "./items";
 
 /** Shared helpers for the billing routes. */
@@ -71,9 +71,9 @@ export function clientIp(req: NextRequest): string | null {
 }
 
 /** 60 requests / minute / ip for anonymous token routes. Returns a 429 response or null. */
-export function publicRateLimit(req: NextRequest, bucket: string, limit = 60): NextResponse | null {
+export async function publicRateLimit(req: NextRequest, bucket: string, limit = 60): Promise<NextResponse | null> {
   const ip = clientIp(req) ?? "unknown";
-  const r = rateLimit(`p:${bucket}:${ip}`, limit, 60_000);
+  const r = await rateLimitAsync(`p:${bucket}:${ip}`, limit, 60_000);
   if (!r.allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   return null;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, KeyRound, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Globe2 } from "lucide-react";
+import { BadgeCheck, Check, Copy, KeyRound, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Globe2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
@@ -14,7 +14,11 @@ import { cn } from "@/lib/utils";
 
 interface TokenView { id: string; name: string; created_at: string; last_used_at: string | null; revoked_at: string | null }
 interface TokensResponse { tokens: TokenView[]; baseUrl: string; canEdit: boolean; sso: { enabled: boolean; supabaseUrl: string } }
-interface DomainRow { id: string; domain: string; provider_id: string | null; created_at: string }
+interface DomainRow {
+  id: string; domain: string; provider_id: string | null; created_at: string;
+  verified_at: string | null; last_verify_error: string | null;
+  record: { host: string; value: string } | null;
+}
 
 const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
 const fmtDate = (iso: string | null) => (iso ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "Never");
@@ -135,6 +139,20 @@ export default function SsoSettingsPage() {
     }
   }
 
+  async function verifyDomain(d: DomainRow) {
+    setBusyId(d.id);
+    setError(null);
+    try {
+      const r = await api<{ verified: boolean; domain: { last_verify_error: string | null } }>(`/api/sso/domains/${encodeURIComponent(d.id)}/verify`, { method: "POST" });
+      setNotice(r.verified ? `${d.domain} is verified. Logins for this domain now route to SSO.` : `Could not verify ${d.domain} yet: ${r.domain.last_verify_error ?? "TXT record not found"}. DNS changes can take a few minutes.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not verify the domain.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function removeDomain(d: DomainRow) {
     setBusyId(d.id);
     setError(null);
@@ -154,7 +172,8 @@ export default function SsoSettingsPage() {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const supabaseUrl = data?.sso.supabaseUrl ?? "";
   const live = data?.tokens.filter((t) => !t.revoked_at) ?? [];
-  const ssoReady = Boolean(data?.sso.enabled && supabaseUrl && domains.length > 0);
+  const verifiedDomains = domains.filter((d) => d.verified_at);
+  const ssoReady = Boolean(data?.sso.enabled && supabaseUrl && verifiedDomains.length > 0);
 
   return (
     <PageContainer
@@ -252,7 +271,7 @@ export default function SsoSettingsPage() {
             <ol className="mt-4 space-y-1.5 text-sm">
               <Check1 ok={Boolean(data.sso.enabled)} text="SSO_ENABLED=1 is set on the server (shows the “Sign in with SSO” button on the login page)." />
               <Check1 ok={Boolean(supabaseUrl)} text="NEXT_PUBLIC_SUPABASE_URL is configured." />
-              <Check1 ok={domains.length > 0} text="At least one email domain is mapped below." />
+              <Check1 ok={verifiedDomains.length > 0} text="At least one email domain is mapped and DNS-verified below." />
               <Check1 ok={false} text="SAML provider added in Supabase (CLI: supabase sso add --type saml --metadata-url … --domains …). Not checked automatically." neutral />
             </ol>
 
@@ -265,7 +284,7 @@ export default function SsoSettingsPage() {
             </dl>
 
             <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Email domains</h3>
-            <p className="mt-1 text-sm text-muted-foreground">When someone enters an email with one of these domains and clicks “Sign in with SSO”, they are sent to your identity provider.</p>
+            <p className="mt-1 text-sm text-muted-foreground">When someone enters an email with one of these domains and clicks “Sign in with SSO”, they are sent to your identity provider. A domain only routes logins once you prove ownership by publishing the TXT record shown.</p>
             {canEdit && (
               <form onSubmit={(e) => void addDomain(e)} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
                 <Field label="Domain" className="flex-1">
@@ -284,15 +303,35 @@ export default function SsoSettingsPage() {
             ) : (
               <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
                 {domains.map((d) => (
-                  <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
-                    <div className="min-w-0">
-                      <p className="truncate font-mono text-sm">{d.domain}</p>
-                      <p className="text-xs text-muted-foreground">{d.provider_id ? `Provider ${d.provider_id}` : "Resolved by domain"} · added {fmtDate(d.created_at)}</p>
+                  <li key={d.id} className="px-3 py-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="flex flex-wrap items-center gap-2 font-mono text-sm">
+                          <span className="truncate">{d.domain}</span>
+                          {d.verified_at ? <Pill tone="success">Verified</Pill> : <Pill tone="warning">Pending verification</Pill>}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {d.provider_id ? `Provider ${d.provider_id}` : "Resolved by domain"} · added {fmtDate(d.created_at)}
+                          {d.verified_at ? ` · verified ${fmtDate(d.verified_at)}` : ""}
+                        </p>
+                      </div>
+                      {canEdit && (
+                        <div className="flex flex-wrap gap-1">
+                          <Button size="sm" variant={d.verified_at ? "ghost" : "outline"} touch disabled={busyId === d.id} onClick={() => void verifyDomain(d)} aria-label={`${d.verified_at ? "Re-check" : "Verify"} ${d.domain}`}>
+                            {busyId === d.id ? spinner : <BadgeCheck className="h-3.5 w-3.5" aria-hidden />} {d.verified_at ? "Re-check" : "Verify"}
+                          </Button>
+                          <Button size="sm" variant="ghost" touch disabled={busyId === d.id} onClick={() => setDomainTarget(d)} aria-label={`Remove ${d.domain}`}>
+                            {busyId === d.id ? spinner : <Trash2 className="h-3.5 w-3.5" aria-hidden />} Remove
+                          </Button>
+                        </div>
+                      )}
                     </div>
-                    {canEdit && (
-                      <Button size="sm" variant="ghost" touch disabled={busyId === d.id} onClick={() => setDomainTarget(d)} aria-label={`Remove ${d.domain}`}>
-                        {busyId === d.id ? spinner : <Trash2 className="h-3.5 w-3.5" aria-hidden />} Remove
-                      </Button>
+                    {!d.verified_at && d.record && (
+                      <dl className="mt-2 rounded-md border border-dashed border-border bg-secondary/30 px-3">
+                        <Row label="TXT record host" value={d.record.host} />
+                        <Row label="TXT record value" value={d.record.value} />
+                        {d.last_verify_error && <p className="pb-2 text-xs text-amber-800 dark:text-amber-300">Last check: {d.last_verify_error}</p>}
+                      </dl>
                     )}
                   </li>
                 ))}

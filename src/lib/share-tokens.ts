@@ -48,18 +48,34 @@ export async function issueShareToken(
   return { token, path, url: `${appOrigin()}${path}`, expiresAt };
 }
 
-/** Look up a token; null when unknown, expired or revoked. Touches last_viewed_at. */
-export async function resolveShareToken(kind: ShareKind, token: string): Promise<ShareTokenRow | null> {
-  if (!token || token.length > 128 || !/^[A-Za-z0-9_-]+$/.test(token)) return null;
+export interface ShareTokenLookup {
+  /** The live row, or null when unknown, expired or revoked. */
+  row: ShareTokenRow | null;
+  /** True when the token exists but its expiry has passed (so the UI can say "expired" rather than "invalid"). */
+  expired: boolean;
+}
+
+/**
+ * Look up a token and say *why* it is unusable. Revoked tokens report as
+ * unknown (not expired) so a revoked link is indistinguishable from a bad one.
+ * Touches last_viewed_at on a live hit.
+ */
+export async function resolveShareTokenDetailed(kind: ShareKind, token: string): Promise<ShareTokenLookup> {
+  if (!token || token.length > 128 || !/^[A-Za-z0-9_-]+$/.test(token)) return { row: null, expired: false };
   const row = await queryOne<ShareTokenRow>(
     `SELECT id, user_id, kind, entity_id, expires_at, revoked_at FROM share_tokens WHERE token_hash = $1 AND kind = $2`,
     [hashToken(token), kind]
   );
-  if (!row) return null;
-  if (row.revoked_at) return null;
-  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return null;
+  if (!row) return { row: null, expired: false };
+  if (row.revoked_at) return { row: null, expired: false };
+  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return { row: null, expired: true };
   query(`UPDATE share_tokens SET last_viewed_at = NOW() WHERE id = $1`, [row.id]).catch(() => undefined);
-  return row;
+  return { row, expired: false };
+}
+
+/** Look up a token; null when unknown, expired or revoked. Touches last_viewed_at. */
+export async function resolveShareToken(kind: ShareKind, token: string): Promise<ShareTokenRow | null> {
+  return (await resolveShareTokenDetailed(kind, token)).row;
 }
 
 /** Most recent live token for an entity, if any (used to reuse pay links). */

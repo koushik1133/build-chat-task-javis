@@ -1,4 +1,5 @@
 import { emailIsLive, twilioIsLive, type NotificationChannel } from "./status";
+import { outboundUrlRefusal } from "@/lib/webhooks/url";
 
 /**
  * Per-channel senders. Each returns `sent` (a real provider accepted it),
@@ -85,7 +86,10 @@ async function sendWebhook(msg: OutboundMessage): Promise<SendOutcome> {
     throw new Error("webhook recipient is not a valid URL");
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("webhook must be http(s)");
+  const refusal = await outboundUrlRefusal(url.toString());
+  if (refusal) throw new Error(`webhook refused: ${refusal}`);
   const res = await fetch(url.toString(), {
+    redirect: "error",
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": "notification-outbox/1.0" },
     body: JSON.stringify({ subject: msg.subject, body: msg.body, data: msg.data ?? {}, sentAt: new Date().toISOString() }),

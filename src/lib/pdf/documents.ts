@@ -87,11 +87,12 @@ export interface BuiltPdf {
 }
 
 /** Quote PDF for its owner org; stamped when an acceptance exists. */
-export async function buildQuotePdf(dataId: string, quote: QuoteDTO): Promise<BuiltPdf> {
+export async function buildQuotePdf(dataId: string, quote: QuoteDTO, opts: { redactEvidence?: boolean } = {}): Promise<BuiltPdf> {
   const [{ branding, timezone, business }, acceptance] = await Promise.all([docContext(dataId), getQuoteAcceptance(quote.id)]);
   const unsigned = renderQuotePdf(quote, null, branding, { business, timezone });
   if (!acceptance) return { bytes: unsigned, filename: `Quote-${quote.number}.pdf`, hash: documentHash(unsigned), signed: false };
-  const stamped = renderQuotePdf(quote, toStamp(acceptance, documentHash(unsigned)), branding, { business, timezone });
+  // The fingerprint is always of the unsigned document, so redaction never changes what was signed.
+  const stamped = renderQuotePdf(quote, toStamp(acceptance, documentHash(unsigned)), branding, { business, timezone, redactEvidence: opts.redactEvidence });
   return { bytes: stamped, filename: `Quote-${quote.number}-signed.pdf`, hash: documentHash(stamped), signed: true };
 }
 

@@ -403,6 +403,13 @@ export const WebhookSample = z.object({
   data: z.record(z.unknown()),
 });
 
+export const WebhookEventType = z.object({
+  type: z.string().describe("Event type, e.g. invoice.paid"),
+  entity: z.string().describe("Entity kind carried in `entity`"),
+  sample: WebhookSample,
+});
+export const WebhookEventTypeList = z.array(WebhookEventType);
+
 export const Me = z.object({
   key: z.object({ id: Id, name: z.string(), prefix: z.string(), scopes: z.array(z.string()), created_at: Iso, last_used_at: IsoOrNull }),
   user: z.object({ id: Id }),

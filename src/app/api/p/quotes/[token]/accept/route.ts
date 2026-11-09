@@ -17,7 +17,7 @@ const Body = z.object({
 });
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
-  const limited = publicRateLimit(req, "quote-accept", 30);
+  const limited = await publicRateLimit(req, "quote-accept", 30);
   if (limited) return limited;
   try {
     const share = await resolveShareToken("quote", await paramToken(ctx));

@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { authRateLimit } from "@/lib/request-limits";
+import { authRateLimitAsync } from "@/lib/request-limits";
 
 const Body = z.object({ email: z.string().email().max(254) });
 const GENERIC = "If an account exists for that email, a reset link has been sent.";
 
 /** POST /api/auth/reset — password reset email, rate limited, enumeration-safe. */
 export async function POST(req: Request) {
-  const limit = authRateLimit("reset", req);
+  const limit = await authRateLimitAsync("reset", req);
   if (!limit.allowed) {
     return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
   }

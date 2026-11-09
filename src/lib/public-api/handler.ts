@@ -4,6 +4,7 @@ import { ApiError, errorToResponse, ok, type Meta } from "./envelope";
 import { IDEMPOTENCY_HEADER, isValidIdempotencyKey, requestHash, withIdempotency } from "./idempotency";
 import { parseListParams, type ListParams } from "./pagination";
 import type { RouteDef } from "./registry";
+import { captureError } from "@/lib/errors/capture";
 
 /**
  * Builds a Next.js route handler from a registry entry.
@@ -103,7 +104,11 @@ export function op<Q extends ZodTypeAny, P extends ZodTypeAny, B extends ZodType
       const result = await run();
       return ok(result.data, result.meta ?? {}, { status: result.status ?? def.status ?? 200, headers: { ...rlHeaders, ...result.headers } });
     } catch (err) {
-      return errorToResponse(err, rlHeaders);
+      const res = errorToResponse(err, rlHeaders);
+      if (res.status >= 500) {
+        void captureError(err, { route: `/api/v1${def.path}`, method: def.method, status: res.status, userId: null });
+      }
+      return res;
     }
   };
 }

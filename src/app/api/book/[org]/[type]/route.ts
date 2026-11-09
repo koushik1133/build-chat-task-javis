@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { rateLimit, readCappedText } from "@/lib/request-limits";
+import { rateLimitAsync, readCappedText } from "@/lib/request-limits";
 import {
   BookingConflictError,
   BookingValidationError,
@@ -9,6 +9,7 @@ import {
   resolveOrgBySlug,
 } from "@/lib/calendar/booking";
 import { groupSlotsByDay } from "@/lib/calendar/slots";
+import { recordConsent } from "@/lib/privacy/consent";
 
 export const runtime = "nodejs";
 
@@ -18,8 +19,8 @@ function clientIp(req: NextRequest): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "anon";
 }
 
-function limited(req: NextRequest): NextResponse | null {
-  const { allowed } = rateLimit(`book:${clientIp(req)}`, 60, 60_000);
+async function limited(req: NextRequest): Promise<NextResponse | null> {
+  const { allowed } = await rateLimitAsync(`book:${clientIp(req)}`, 60, 60_000);
   return allowed ? null : NextResponse.json({ error: "rate_limited" }, { status: 429 });
 }
 
@@ -34,7 +35,7 @@ async function resolve(ctx: Ctx) {
 
 /** GET /api/book/[org]/[type]?from=&to= — booking type + open slots. */
 export async function GET(req: NextRequest, ctx: Ctx) {
-  const block = limited(req);
+  const block = await limited(req);
   if (block) return block;
   try {
     const r = await resolve(ctx);
@@ -70,14 +71,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 /** POST /api/book/[org]/[type] — { name, email, phone?, startsAt, notes? } → 201 | 409 */
 export async function POST(req: NextRequest, ctx: Ctx) {
-  const block = limited(req);
+  const block = await limited(req);
   if (block) return block;
   try {
     const r = await resolve(ctx);
     if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 });
     const raw = await readCappedText(req, 8_192);
     if (raw === null) return NextResponse.json({ error: "payload too large" }, { status: 413 });
-    let body: { name?: unknown; email?: unknown; phone?: unknown; startsAt?: unknown; notes?: unknown } = {};
+    let body: { name?: unknown; email?: unknown; phone?: unknown; startsAt?: unknown; notes?: unknown; consent?: unknown } = {};
     try {
       body = JSON.parse(raw || "{}");
     } catch {
@@ -98,6 +99,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       notes: typeof body.notes === "string" ? body.notes : null,
       source: "public",
     });
+    // Optional `consent: { marketing: boolean }` → ledger row against the contact the booking created/matched.
+    const consent = body.consent && typeof body.consent === "object" ? (body.consent as Record<string, unknown>) : null;
+    if (typeof consent?.marketing === "boolean" && booking.contact_id) {
+      const evidence = { ip: clientIp(req), ua: req.headers.get("user-agent"), text_version: `booking:${r.type.slug}` };
+      for (const purpose of ["marketing_email", "marketing_sms"] as const) {
+        void recordConsent(r.org.dataId, { kind: "contact", id: booking.contact_id }, purpose, consent.marketing ? "granted" : "withdrawn", "form", evidence).catch(() => undefined);
+      }
+    }
     return NextResponse.json(
       {
         booking: { id: booking.id, startsAt: booking.starts_at, endsAt: booking.ends_at, status: booking.status },

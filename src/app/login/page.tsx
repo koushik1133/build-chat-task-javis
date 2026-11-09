@@ -58,6 +58,7 @@ function LoginForm() {
   const [checking, setChecking] = useState(true);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [ssoEnabled, setSsoEnabled] = useState(false);
+  const [ssoName, setSsoName] = useState("SSO");
   const [ssoBusy, setSsoBusy] = useState(false);
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
   const rules = passwordRules(password, email);
@@ -88,7 +89,11 @@ function LoginForm() {
     // "Sign in with SSO" only appears when the server has SSO_ENABLED=1.
     fetch("/api/auth/sso", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (active && d?.enabled === true) setSsoEnabled(true); })
+      .then((d) => {
+        if (!active || d?.enabled !== true) return;
+        setSsoEnabled(true);
+        if (typeof d.providerName === "string" && d.providerName.trim()) setSsoName(d.providerName.trim());
+      })
       .catch(() => {});
 
     // Only auto-enter the app if the server can see the session cookie.
@@ -473,7 +478,7 @@ function LoginForm() {
                   ) : (
                     <ShieldCheck className="mr-2 h-4 w-4 shrink-0" aria-hidden />
                   )}
-                  {ssoBusy ? "Redirecting to your identity provider…" : "Sign in with SSO"}
+                  {ssoBusy ? "Redirecting to your identity provider…" : `Sign in with ${ssoName}`}
                 </Button>
                 <p id="sso-hint" className="text-center text-[11px] text-muted-foreground">
                   Uses the work email entered above.

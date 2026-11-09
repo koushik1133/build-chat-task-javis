@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { resolveShareToken } from "@/lib/share-tokens";
 import { getPortalData } from "@/lib/portal";
 import { cancelBooking, getBooking } from "@/lib/calendar/booking";
@@ -14,7 +14,7 @@ function ip(req: NextRequest): string {
 
 /** GET /api/p/portal/[token] — the client's portal data. */
 export async function GET(req: NextRequest, ctx: Ctx) {
-  if (!rateLimit(`portal:${ip(req)}`, 60, 60_000).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (!(await rateLimitAsync(`portal:${ip(req)}`, 60, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   try {
     const { token } = await ctx.params;
     const t = await resolveShareToken("portal", token);
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 /** POST /api/p/portal/[token] — { action: "cancel_booking", bookingId } */
 export async function POST(req: NextRequest, ctx: Ctx) {
-  if (!rateLimit(`portal:${ip(req)}`, 60, 60_000).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (!(await rateLimitAsync(`portal:${ip(req)}`, 60, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   try {
     const { token } = await ctx.params;
     const t = await resolveShareToken("portal", token);

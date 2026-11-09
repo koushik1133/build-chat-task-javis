@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { sendTestPing } from "@/lib/webhooks/dispatch";
 
 export const runtime = "nodejs";
@@ -10,7 +10,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   try {
     const scope = await requireScope({ area: "settings", edit: true });
     const { id } = await params;
-    const rl = rateLimit(`webhook-test:${scope.dataId}`, 30, 60_000);
+    const rl = await rateLimitAsync(`webhook-test:${scope.dataId}`, 30, 60_000);
     if (!rl.allowed) return NextResponse.json({ error: "Too many test pings; try again in a minute." }, { status: 429 });
     const delivery = await sendTestPing(scope.dataId, id);
     return NextResponse.json({ delivery });

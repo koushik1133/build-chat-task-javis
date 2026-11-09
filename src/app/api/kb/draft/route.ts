@@ -4,7 +4,7 @@ import { requireScope } from "@/lib/auth/scope";
 import { draftArticleFromTickets } from "@/lib/kb/articles";
 import { llmNotConfiguredResponse } from "@/lib/llm-response";
 import { errorResponse, parseBody } from "@/lib/money/http";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -15,7 +15,7 @@ const DraftSchema = z.object({ ticketIds: z.array(z.string().min(1).max(100)).mi
 export async function POST(req: NextRequest) {
   try {
     const scope = await requireScope({ area: "knowledge", edit: true });
-    if (!rateLimit(`kb-draft:${scope.dataId}`, 20, 60 * 60 * 1000).allowed) {
+    if (!(await rateLimitAsync(`kb-draft:${scope.dataId}`, 20, 60 * 60 * 1000)).allowed) {
       return NextResponse.json({ error: "rate_limited" }, { status: 429 });
     }
     const body = await parseBody(req, DraftSchema);
