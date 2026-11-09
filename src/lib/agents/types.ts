@@ -1,4 +1,5 @@
 import type { ZodTypeAny } from "zod";
+import type { Area } from "@/lib/auth/roles";
 
 /**
  * Shared contracts for the autonomous agent runtime.
@@ -35,6 +36,12 @@ export interface ToolContext {
   runId: string;
   agentId: string | null;
   autonomy: AutonomyLevel;
+  /**
+   * Area permission check for the acting principal, when the caller has one
+   * (copilot/MCP/approvals). Tools that read cross-area data fall back to the
+   * owner matrix of `userId` (see `effectivePermissionsForOwner`).
+   */
+  can?: (area: Area, edit?: boolean) => boolean;
 }
 
 /** Outcome of a tool call. `requiresApproval` is decided BEFORE `run` is invoked. */

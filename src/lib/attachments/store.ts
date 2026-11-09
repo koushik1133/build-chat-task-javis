@@ -3,6 +3,7 @@ import { query, queryOne } from "@/lib/dsql";
 import { recordAudit } from "@/lib/audit";
 import { emitEvent } from "@/lib/events/bus";
 import { sniffImage } from "@/lib/image-sniff";
+import { verifyDeclaredType } from "./sniff";
 import { tableExists } from "@/lib/table-exists";
 import { getObject, objectKey, putObject, removeObject, signedUrl } from "./storage";
 import {
@@ -88,8 +89,9 @@ export async function uploadAttachment(dataId: string, input: UploadInput): Prom
     const sniffed = sniffImage(input.bytes, null);
     if (!sniffed || !["image/png", "image/jpeg", "image/webp"].includes(sniffed.mime)) throw new AttachmentError("Image bytes do not match a PNG, JPEG or WebP file", 415);
     contentType = sniffed.mime;
-  } else if (contentType === "application/pdf" && input.bytes.subarray(0, 5).toString("latin1") !== "%PDF-") {
-    throw new AttachmentError("File is not a valid PDF", 415);
+  } else {
+    const mismatch = verifyDeclaredType(contentType, input.bytes);
+    if (mismatch) throw new AttachmentError(mismatch, 415);
   }
   const id = randomUUID();
   const storagePath = objectKey(dataId, input.entityKind, input.entityId, id);
@@ -143,6 +145,32 @@ export async function deleteAttachment(dataId: string, id: string, actorId?: str
   if (rows.length === 0) return false;
   void recordAudit({ dataId, userId: actorId ?? null }, { action: "attachment.deleted", entity: "attachment", entityId: id });
   return true;
+}
+
+/**
+ * Retention sweep (cron, hourly block): delete storage objects for rows soft-
+ * deleted more than `days` ago, then drop the rows. The object is removed
+ * before the row so a crash never leaves an orphaned blob behind a vanished row.
+ */
+export async function purgeDeletedAttachments(days = 30, limit = 200): Promise<{ purged: number; failed: number }> {
+  if (!(await tableExists("attachments"))) return { purged: 0, failed: 0 };
+  const rows = await query<{ id: string; user_id: string; storage_path: string }>(
+    `SELECT id, user_id, storage_path FROM attachments WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - make_interval(days => $1) ORDER BY deleted_at ASC LIMIT $2`,
+    [Math.max(0, Math.floor(days)), Math.min(Math.max(limit, 1), 1000)]
+  );
+  let purged = 0;
+  let failed = 0;
+  for (const r of rows) {
+    try {
+      await removeObject(r.storage_path);
+      await query(`DELETE FROM attachments WHERE id = $1 AND user_id = $2 AND deleted_at IS NOT NULL`, [r.id, r.user_id]);
+      purged++;
+    } catch (err) {
+      failed++;
+      console.error(`[attachments] purge failed for ${r.id}:`, err);
+    }
+  }
+  return { purged, failed };
 }
 
 /* ---------- portal + DSR ---------- */
@@ -220,6 +248,8 @@ export async function entityExists(dataId: string, kind: AttachmentEntityKind, i
     product: ["products", "id"],
     purchase_order: ["purchase_orders", "id"],
     document: ["documents", "id"],
+    project: ["projects", "id"],
+    order: ["orders", "id"],
   };
   const t = table[kind];
   if (!t) return false;

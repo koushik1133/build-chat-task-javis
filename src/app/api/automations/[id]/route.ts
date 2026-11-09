@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { AutomationDefinitionSchema, AutomationPatchSchema } from "@/lib/automations/schema";
-import { definitionOf, deleteAutomation, getAutomation, redactAutomationSecrets, saveAutomation, toAutomationDTO } from "@/lib/automations/store";
+import { definitionOf, deleteAutomation, getAutomation, redactAutomationSecrets, restoreRedactedSecrets, saveAutomation, toAutomationDTO } from "@/lib/automations/store";
 import { recordAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -44,6 +44,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const row = await getAutomation(scope.dataId, id).catch(() => null);
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
   const current = definitionOf(row);
+  // The editor round-trips the redacted DTO; a placeholder token/secret means "leave it as it is".
+  const data = restoreRedactedSecrets(patch.data, current);
   const merged = AutomationDefinitionSchema.safeParse({
     name: current.name,
     description: current.description ?? null,
@@ -53,7 +55,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     steps: current.steps,
     autonomy: current.autonomy,
     enabled: current.enabled,
-    ...patch.data,
+    ...data,
   });
   if (!merged.success) return NextResponse.json({ error: "Invalid automation", details: merged.error.flatten() }, { status: 400 });
   const saved = await saveAutomation(scope.dataId, id, merged.data);

@@ -269,6 +269,76 @@ export async function publishShifts(dataId: string, ids: string[]): Promise<{ pu
   return { published, skipped: unique.filter((id) => !done.has(id)) };
 }
 
+/* ─── reminders ────────────────────────────────────────────────────────── */
+
+export const SHIFT_REMINDER_WINDOW_HOURS = 24;
+
+/**
+ * Cron (hourly block): remind each assigned person about a published or
+ * confirmed shift starting within the next 24 hours. Idempotent through
+ * `shifts.reminded_at` — the claim UPDATE marks the row before any
+ * notification is sent, so two overlapping ticks never double-remind.
+ */
+export async function remindUpcomingShifts(limit = 200): Promise<{ reminded: number; skipped: number }> {
+  const horizon = new Date(Date.now() + SHIFT_REMINDER_WINDOW_HOURS * 3_600_000).toISOString();
+  const rows = await query<ShiftRow>(
+    `UPDATE shifts SET reminded_at = NOW(), updated_at = NOW()
+      WHERE id IN (
+        SELECT id FROM shifts
+         WHERE staff_id IS NOT NULL AND reminded_at IS NULL AND status IN ('published', 'confirmed', 'swapped')
+           AND starts_at > NOW() AND starts_at <= $1
+         ORDER BY starts_at ASC LIMIT $2)
+      RETURNING ${SHIFT_COLS}`,
+    [horizon, Math.min(Math.max(limit, 1), 1000)]
+  ).catch((err: unknown) => {
+    console.error("[workforce] shift reminder claim failed:", err);
+    return [] as ShiftRow[];
+  });
+  let reminded = 0;
+  let skipped = 0;
+  const byOrg = new Map<string, ShiftRow[]>();
+  for (const r of rows) byOrg.set(r.user_id, [...(byOrg.get(r.user_id) ?? []), r]);
+  for (const [dataId, shifts] of byOrg) {
+    const staffIds = [...new Set(shifts.map((s) => s.staff_id).filter((x): x is string => Boolean(x)))];
+    const staff = await query<{ id: string; display_name: string; email: string | null; membership_id: string | null }>(
+      `SELECT id, display_name, email, membership_id FROM staff_profiles WHERE user_id = $1 AND id = ANY($2)`,
+      [dataId, staffIds]
+    ).catch(() => []);
+    const memberIds = staff.map((s) => s.membership_id).filter((x): x is string => Boolean(x));
+    const members = memberIds.length
+      ? await query<{ id: string; user_id: string | null }>(`SELECT id, user_id FROM memberships WHERE id = ANY($1)`, [memberIds]).catch(() => [])
+      : [];
+    const memberUser = new Map(members.map((m) => [m.id, m.user_id]));
+    const byStaff = new Map(staff.map((c) => [c.id, c]));
+    const tz = await orgTimezone(dataId);
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const tfmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
+    for (const s of shifts) {
+      const c = s.staff_id ? byStaff.get(s.staff_id) : null;
+      if (!c) {
+        skipped++;
+        continue;
+      }
+      const when = `${fmt.format(new Date(s.starts_at))} – ${tfmt.format(new Date(s.ends_at))}`;
+      const where = `${s.role_title ? ` (${s.role_title})` : ""}${s.location ? ` @ ${s.location}` : ""}`;
+      const memberUserId = c.membership_id ? memberUser.get(c.membership_id) ?? null : null;
+      const data = { kind: "shift.reminder", staffId: c.id, shiftId: s.id, href: "/workforce", category: "team", ...(memberUserId ? { member_user_id: memberUserId } : {}) };
+      try {
+        if (c.email) {
+          await enqueueNotification(dataId, { channel: "email", recipient: c.email, subject: `Reminder: your shift ${when}`, body: `Hi ${c.display_name},\n\nYou have a shift coming up:\n• ${when}${where}\n\nTimes are shown in ${tz}.\n`, data });
+        }
+        await enqueueNotification(dataId, { channel: "in_app", recipient: memberUserId ?? dataId, subject: `Upcoming shift: ${c.display_name}`, body: `${c.display_name} is on ${when}${where}.`, data });
+        void emitEvent(dataId, { type: "shift.reminded", entity: "shift", entityId: s.id, data: { staff_id: c.id, starts_at: new Date(s.starts_at).toISOString() } });
+        reminded++;
+      } catch (err) {
+        console.error("[workforce] shift reminder failed:", err);
+        skipped++;
+      }
+    }
+  }
+  return { reminded, skipped };
+}
+
 /* ─── week view ────────────────────────────────────────────────────────── */
 
 export interface WeekView {

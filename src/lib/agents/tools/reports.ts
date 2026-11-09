@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { registerTool } from "@/lib/agents/registry";
-import type { ToolResult } from "@/lib/agents/types";
+import type { ToolContext, ToolResult } from "@/lib/agents/types";
+import type { Area } from "@/lib/auth/roles";
+import { canFromPermissions, effectivePermissionsForOwner } from "@/lib/auth/scope";
 import { ReportSpecSchema } from "@/lib/reports/spec";
 import { listDatasets, resolveDataset, runReport, ReportSpecError, DatasetUnavailableError } from "@/lib/reports/query";
 import { getSavedReportById, listSavedReports } from "@/lib/reports/store";
@@ -10,6 +12,12 @@ import { formattedRows, formattedTotals } from "@/lib/reports/export";
 
 function fail(error: string): ToolResult {
   return { ok: false, summary: error, error };
+}
+
+/** The caller's `can` when supplied, else the owner matrix of the org whose data this is. */
+export async function canForContext(ctx: ToolContext): Promise<(area: Area, edit?: boolean) => boolean> {
+  if (ctx.can) return ctx.can;
+  return canFromPermissions(await effectivePermissionsForOwner(ctx.userId));
 }
 
 const RunInput = z
@@ -61,6 +69,8 @@ registerTool<RunInputT>({
       if (!spec) return fail("Provide report_id or spec.");
       const ds = await resolveDataset(ctx.userId, spec.dataset);
       if (!ds) return fail(`Dataset ${spec.dataset} is not available. Call reports.list_saved to see datasets.`);
+      const can = await canForContext(ctx);
+      if (!can(ds.area)) return fail(`Dataset ${spec.dataset} is outside the areas this principal may read (${ds.area}).`);
       const result = await runReport(ctx.userId, spec, { dataset: ds });
       const max = input.max_rows ?? 50;
       const rows = formattedRows({ ...result, rows: result.rows.slice(0, max) });
@@ -91,7 +101,7 @@ registerTool<ListInputT>({
     try {
       const [reports, datasets] = await Promise.all([
         listSavedReports(ctx.userId, ctx.userId, 100),
-        input.include_datasets === false ? Promise.resolve([]) : listDatasets(ctx.userId, () => true),
+        input.include_datasets === false ? Promise.resolve([]) : canForContext(ctx).then((can) => listDatasets(ctx.userId, (area) => can(area))),
       ]);
       return {
         ok: true,

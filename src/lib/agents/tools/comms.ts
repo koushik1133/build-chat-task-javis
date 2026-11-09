@@ -123,3 +123,45 @@ registerTool<NotifyInputT>({
     }
   },
 });
+
+/* ---------- messaging.reply ---------- */
+/**
+ * The receptionist queues its drafts as `messaging.reply` approvals (and as a
+ * hidden pending turn in the thread). Approving executes this tool, which
+ * releases the turn and sends it through the channel.
+ */
+const ReplyInput = z.object({
+  to: z.string().min(1).max(200).describe("Conversation address: phone number, email or web:<session>"),
+  channel: z.enum(["sms", "whatsapp", "email", "webchat"]),
+  text: z.string().min(1).max(1600),
+});
+type ReplyInputT = z.infer<typeof ReplyInput>;
+
+registerTool<ReplyInputT>({
+  name: "messaging.reply",
+  module: "comms",
+  description: "Send a reply in an inbox conversation (SMS, WhatsApp, email or web chat). Drafted replies wait for approval; approving sends them.",
+  input: ReplyInput,
+  parameters: {
+    type: "object",
+    properties: {
+      to: { type: "string", description: "Phone number (sms/whatsapp), email address or web:<sessionId>" },
+      channel: { type: "string", enum: ["sms", "whatsapp", "email", "webchat"] },
+      text: { type: "string", description: "Plain-text reply (max 1600 chars)" },
+    },
+    required: ["to", "channel", "text"],
+  },
+  scope: "write",
+  requiresApproval: true,
+  preview: (i) => `Reply to ${i.to} via ${i.channel}: ${i.text.slice(0, 160)}`,
+  async run(ctx, input) {
+    try {
+      const { deliverApprovedReply } = await import("@/lib/messaging/reply");
+      const r = await deliverApprovedReply(ctx.userId, input);
+      const how = r.sent ? `sent via ${input.channel}` : r.simulated ? `recorded (${input.channel} not configured${r.error ? `: ${r.error}` : ""})` : "delivered";
+      return { ok: true, data: { conversation_id: r.conversationId, sent: r.sent, simulated: r.simulated, released_draft: r.released }, summary: `Reply to ${input.to} ${how}` };
+    } catch (err) {
+      return fail(`Reply failed: ${errMsg(err)}`);
+    }
+  },
+});

@@ -25,8 +25,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) return NextResponse.json({ error: "decision must be approved or rejected" }, { status: 400 });
 
   try {
-    const { approval } = await decideApproval(scope.dataId, id, parsed.data, scope.dataId);
-    return NextResponse.json({ approval });
+    const { approval, outcome } = await decideApproval(scope.dataId, id, parsed.data, scope.dataId);
+    return NextResponse.json({ approval, outcome });
   } catch (err) {
     if (err instanceof ApprovalError) return NextResponse.json({ error: err.message }, { status: err.status });
     console.error("[approvals] decide failed", err);

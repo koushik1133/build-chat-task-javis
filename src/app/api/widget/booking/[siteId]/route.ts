@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { BookingConflictError, BookingValidationError, availableSlots, createBooking, getBookingTypeBySlug, listBookingTypes } from "@/lib/calendar/booking";
+import { BookingConflictError, BookingValidationError, availableSlots, createBooking, getBookingTypeBySlug, listBookingTypes, recordBookingConsent } from "@/lib/calendar/booking";
 import { groupSlotsByDay } from "@/lib/calendar/slots";
-import { recordConsent } from "@/lib/privacy/consent";
 import { loadSiteForWidget } from "@/lib/webchat/public-config";
 import { clientIp, enforceLimits, isUuid, jsonWith, parseBody, widgetCors, widgetPreflight } from "@/lib/webchat/http";
 
@@ -74,7 +73,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     const type = await getBookingTypeBySlug(site.user_id, body.data.type);
     if (!type || !type.active) return jsonWith(cors, { error: "not_found" }, 404);
 
-    const { booking, cancelToken } = await createBooking(site.user_id, {
+    const created = await createBooking(site.user_id, {
       bookingTypeId: type.id,
       name: body.data.name,
       email: body.data.email,
@@ -83,11 +82,9 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       notes: body.data.notes ?? null,
       source: "public",
     });
-    if (body.data.consent && booking.contact_id) {
-      const evidence = { ip, ua: req.headers.get("user-agent"), text_version: `site:${siteId}` };
-      for (const purpose of ["marketing_email", "marketing_sms"] as const) {
-        void recordConsent(site.user_id, { kind: "contact", id: booking.contact_id }, purpose, body.data.consent.marketing ? "granted" : "withdrawn", "form", evidence).catch(() => undefined);
-      }
+    const { booking, cancelToken } = created;
+    if (body.data.consent) {
+      void recordBookingConsent(site.user_id, created, body.data.consent.marketing, { ip, ua: req.headers.get("user-agent"), text_version: `site:${siteId}` }).catch(() => undefined);
     }
     return jsonWith(cors, { booking: { id: booking.id, startsAt: booking.starts_at, endsAt: booking.ends_at, status: booking.status }, cancelPath: `/book/cancel/${cancelToken}` }, 201);
   } catch (err) {

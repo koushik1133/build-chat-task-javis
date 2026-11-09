@@ -1,14 +1,14 @@
 import { query, queryOne } from "@/lib/dsql";
+import { AUTOMATION_COLS, definitionOf, type AutomationRow } from "@/lib/automations/store";
 import { getPlaybook } from "@/lib/agents/playbooks";
 import { getPack } from "@/lib/records/packs";
 import { getType, listTypes } from "@/lib/records/store";
 import type { RecordType } from "@/lib/records/types";
 import {
   parseDefinition,
-  scrubAutomationConfig,
+  scrubAutomationV2,
   slugifyListing,
   type AgentDefinition,
-  type AutomationDefinition,
   type ListingKind,
   type PackDefinition,
   type PlaybookDefinition,
@@ -54,15 +54,6 @@ function parseJsonArray(raw: string | null): string[] | null {
   }
 }
 
-function parseJsonObject(raw: string | null): Record<string, unknown> {
-  if (!raw) return {};
-  try {
-    const v: unknown = JSON.parse(raw);
-    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
 
 async function exportAgent(dataId: string, agentId: string): Promise<ExportedListing> {
   const row = await queryOne<AgentRow>(
@@ -127,53 +118,43 @@ async function exportPlaybook(dataId: string, playbookId: string): Promise<Expor
   };
 }
 
-interface AutomationRow {
-  id: string;
-  name: string;
-  trigger_event: string;
-  action_type: string;
-  kanban_label: string | null;
-  action_config: string | null;
-  schedule_time: string | null;
-  schedule_timezone: string | null;
-  schedule_days: string | null;
-}
 
 async function exportAutomation(dataId: string, automationId: string): Promise<ExportedListing> {
-  const row = await queryOne<AutomationRow>(
-    `SELECT id, name, trigger_event, action_type, kanban_label, action_config, schedule_time, schedule_timezone, schedule_days
-       FROM automations WHERE id::text = $1 AND user_id = $2`,
-    [automationId, dataId]
-  );
+  const row = await queryOne<AutomationRow>(`SELECT ${AUTOMATION_COLS} FROM automations WHERE id::text = $1 AND user_id = $2`, [automationId, dataId]);
   if (!row) throw new Error("Automation not found");
-  const scrub = scrubAutomationConfig(parseJsonObject(row.action_config));
-  const definition: AutomationDefinition = {
-    name: row.name,
-    trigger_event: row.trigger_event,
-    action_type: row.action_type,
-    kanban_label: row.kanban_label,
-    action_config: scrub.config,
-    schedule_time: row.schedule_time,
-    schedule_timezone: row.schedule_timezone,
-    schedule_days: row.schedule_days,
-  };
+  // Legacy rows are adapted to v2 on read, so every listing published from now on carries the v2 shape.
+  const engineDef = definitionOf(row);
+  const scrub = scrubAutomationV2(engineDef);
+  const definition = scrub.definition;
   parseDefinition("automation", definition);
-  const when = row.schedule_time ? `daily at ${row.schedule_time}${row.schedule_timezone ? ` (${row.schedule_timezone})` : ""}` : `when ${row.trigger_event}${row.kanban_label ? ` · label "${row.kanban_label}"` : ""}`;
+  const tc = definition.trigger_config;
+  const when =
+    definition.trigger_type === "schedule"
+      ? `on a schedule${tc.schedule ? ` at ${tc.schedule.time} (${tc.schedule.timezone}, ${tc.schedule.days})` : ""}`
+      : definition.trigger_type === "event"
+        ? `when ${tc.event_type ?? "an event"} fires`
+        : definition.trigger_type === "webhook"
+          ? "when its inbound webhook is called"
+          : "when run manually";
+  const stepSummary = definition.steps.map((st) => (st.kind === "tool" ? st.config.tool : st.kind)).join(" → ") || "no steps";
   return {
     kind: "automation",
     slug: slugifyListing(row.name),
     title: row.name,
-    summary: `${row.action_type} ${when}.`,
+    summary: `${stepSummary} ${when}.`,
     description_md: [
-      `**Trigger:** ${row.trigger_event}  `,
-      `**Action:** ${row.action_type}`,
+      definition.description?.trim() ? definition.description.trim() : null,
+      `**Trigger:** ${definition.trigger_type}${tc.event_type ? ` · ${tc.event_type}` : ""}  `,
+      `**Steps:** ${stepSummary}`,
       "",
       scrub.removed.length
         ? `Workspace-specific settings were removed before publishing (${scrub.removed.join(", ")}); fill them in after installing. The automation installs **paused**.`
         : "The automation installs **paused** so you can review it before it runs.",
-    ].join("\n"),
+    ]
+      .filter((l): l is string => l !== null)
+      .join("\n"),
     category: null,
-    tags: [slugifyListing(row.action_type), slugifyListing(row.trigger_event)].filter(Boolean),
+    tags: [definition.trigger_type, tc.event_type ? slugifyListing(tc.event_type) : null, ...definition.steps.slice(0, 3).map((st) => slugifyListing(st.kind === "tool" ? st.config.tool : st.kind))].filter((t): t is string => Boolean(t)),
     definition,
     scrubbed: scrub.removed,
   };
@@ -261,7 +242,7 @@ export async function listPublishable(dataId: string): Promise<Record<ListingKin
     query<{ id: string; name: string; role: string }>(`SELECT id::text AS id, name, role FROM agents WHERE user_id = $1 AND deleted_at IS NULL ORDER BY name ASC LIMIT 200`, [dataId]).catch(() =>
       query<{ id: string; name: string; role: string }>(`SELECT id::text AS id, name, role FROM agents WHERE user_id = $1 ORDER BY name ASC LIMIT 200`, [dataId]).catch(() => [])
     ),
-    query<{ id: string; name: string; action_type: string }>(`SELECT id::text AS id, name, action_type FROM automations WHERE user_id = $1 ORDER BY name ASC LIMIT 200`, [dataId]).catch(() => []),
+    query<{ id: string; name: string; trigger_type: string | null; action_type: string | null }>(`SELECT id::text AS id, name, trigger_type, action_type FROM automations WHERE user_id = $1 ORDER BY name ASC LIMIT 200`, [dataId]).catch(() => []),
     listTypes(dataId).catch(() => [] as RecordType[]),
   ]);
   const { PLAYBOOKS } = await import("@/lib/agents/playbooks");
@@ -270,7 +251,7 @@ export async function listPublishable(dataId: string): Promise<Record<ListingKin
   return {
     agent: agents.filter((a) => !a.name.startsWith("Playbook: ")).map((a) => ({ id: a.id, label: a.name, hint: a.role })),
     playbook: PLAYBOOKS.map((p) => ({ id: p.id, label: p.name, hint: `${p.cooldownHours}h cooldown` })),
-    automation: automations.map((a) => ({ id: a.id, label: a.name, hint: a.action_type })),
+    automation: automations.map((a) => ({ id: a.id, label: a.name, hint: a.trigger_type ? `${a.trigger_type} trigger` : a.action_type ?? undefined })),
     pack: [
       ...[...packGroups.entries()].map(([slug, n]) => ({ id: slug, label: getPack(slug)?.name ?? slug, hint: `${n} type${n === 1 ? "" : "s"} (pack)` })),
       ...types.map((t) => ({ id: t.slug, label: t.name, hint: `${t.fields.length} fields (single type)` })),

@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
-import { query, queryOne } from "@/lib/dsql";
-import { emitEvent } from "@/lib/events/bus";
-import { keysetClause, keysetOrder, normaliseCursor, page, parseListParams } from "@/lib/public-api/pagination";
+import { normaliseCursor, page, parseListParams } from "@/lib/public-api/pagination";
+import { createTask, deleteTask, listTasks, TASK_PRIORITIES, updateTask } from "@/lib/tasks/store";
 
-/**
- * `tasks.created_at` is TIMESTAMP (no zone). Both the SELECT and the keyset
- * predicate read it through `AT TIME ZONE 'UTC'` so the cursor (ISO/UTC) and
- * the column compare in the same frame regardless of the session time zone.
- */
-const TASK_TS = "(created_at AT TIME ZONE 'UTC')";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-/** GET /api/tasks?cursor=&limit= — keyset-paginated, newest first (default 50 + next_cursor). */
+const DueAt = z.string().datetime({ offset: true }).nullable();
+
+/** GET /api/tasks?cursor=&limit=&assignee=&overdue=1 — keyset-paginated, newest first (default 50 + next_cursor). */
 export async function GET(req: Request) {
   let scope;
   try {
@@ -21,19 +18,18 @@ export async function GET(req: Request) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const list = parseListParams(new URL(req.url), { limit: 50 });
+  const url = new URL(req.url);
+  const list = parseListParams(url, { limit: 50 });
   if (list.badCursor) return NextResponse.json({ error: "invalid cursor" }, { status: 400 });
-  const params: unknown[] = [scope.dataId];
-  const keyset = keysetClause(list.cursor, params, { col: TASK_TS });
+  const assignee = url.searchParams.get("assignee");
+  const overdue = url.searchParams.get("overdue") === "1";
 
-  const rows = await query<{ id: string; created_at: string | Date }>(
-    `SELECT id, title, done, ${TASK_TS} AS created_at, chat_id
-     FROM tasks
-     WHERE user_id = $1${keyset}
-     ORDER BY ${keysetOrder("", TASK_TS)}
-     LIMIT ${list.limit + 1}`,
-    params
-  ).catch((err) => {
+  const rows = await listTasks(scope.dataId, {
+    cursor: list.cursor,
+    limit: list.limit + 1,
+    assigneeId: assignee === "me" ? scope.userId : assignee || null,
+    overdue,
+  }).catch((err) => {
     console.error("[tasks] list failed:", err);
     return [];
   });
@@ -42,11 +38,16 @@ export async function GET(req: Request) {
   return NextResponse.json({ tasks: pg.data, next_cursor: pg.next_cursor });
 }
 
-const Patch = z.object({
-  id: z.string().uuid(),
-  done: z.boolean().optional(),
-  title: z.string().min(1).max(200).optional(),
-});
+const Patch = z
+  .object({
+    id: z.string().uuid(),
+    done: z.boolean().optional(),
+    title: z.string().trim().min(1).max(200).optional(),
+    due_at: DueAt.optional(),
+    assignee_id: z.string().trim().min(1).max(100).nullable().optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+  })
+  .strict();
 
 export async function PATCH(req: Request) {
   let scope;
@@ -57,24 +58,19 @@ export async function PATCH(req: Request) {
   }
 
   const parsed = Patch.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
-  const { id, done, title } = parsed.data;
-
-  const sets: string[] = [];
-  const vals: unknown[] = [];
-  let i = 1;
-  if (done !== undefined) { sets.push(`done = $${i++}`); vals.push(done); }
-  if (title !== undefined) { sets.push(`title = $${i++}`); vals.push(title); }
-  if (sets.length === 0) return NextResponse.json({ ok: true });
-
-  vals.push(id, scope.dataId);
-  await query(
-    `UPDATE tasks SET ${sets.join(", ")} WHERE id = $${i++} AND user_id = $${i}`,
-    vals
-  );
-
-  return NextResponse.json({ ok: true });
+  if (!parsed.success) return NextResponse.json({ error: "bad request", details: parsed.error.flatten() }, { status: 400 });
+  const { id, ...patch } = parsed.data;
+  try {
+    const task = await updateTask(scope.dataId, id, patch);
+    return NextResponse.json({ ok: true, task });
+  } catch (err) {
+    if (err instanceof Error && err.message === "Task not found") return NextResponse.json({ error: "not found" }, { status: 404 });
+    console.error("[tasks] update failed:", err);
+    return NextResponse.json({ error: "Could not update the task" }, { status: 500 });
+  }
 }
+
+const Delete = z.object({ id: z.string().uuid() }).strict();
 
 export async function DELETE(req: Request) {
   let scope;
@@ -83,14 +79,20 @@ export async function DELETE(req: Request) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const rawBody = await req.json().catch(() => null);
-  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  const { id } = rawBody;
-  await query("DELETE FROM tasks WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
+  const parsed = Delete.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  await deleteTask(scope.dataId, parsed.data.id);
   return NextResponse.json({ ok: true });
 }
 
-const Create = z.object({ title: z.string().min(1).max(200) });
+const Create = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    due_at: DueAt.optional(),
+    assignee_id: z.string().trim().min(1).max(100).nullable().optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+  })
+  .strict();
 
 export async function POST(req: Request) {
   let scope;
@@ -101,16 +103,13 @@ export async function POST(req: Request) {
   }
 
   const parsed = Create.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: "bad request", details: parsed.error.flatten() }, { status: 400 });
 
-  const task = await queryOne(
-    `INSERT INTO tasks (user_id, title)
-     VALUES ($1, $2)
-     RETURNING id, title, done, created_at`,
-    [scope.dataId, parsed.data.title]
-  );
-
-  if (task) void emitEvent(scope.dataId, { type: "task.created", entity: "task", entityId: String((task as { id: string }).id), data: { title: parsed.data.title } });
-
-  return NextResponse.json({ task });
+  try {
+    const task = await createTask(scope.dataId, parsed.data, "app");
+    return NextResponse.json({ task });
+  } catch (err) {
+    console.error("[tasks] create failed:", err);
+    return NextResponse.json({ error: "Could not create the task" }, { status: 500 });
+  }
 }

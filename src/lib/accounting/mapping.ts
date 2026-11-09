@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import type { AccountingBill, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingContact, AccountingSettings, AccountingSupplier } from "./types";
+import type { AccountingBill, AccountingBillPayment, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingContact, AccountingSettings, AccountingSupplier } from "./types";
 
 /**
  * Pure payload builders for QuickBooks Online and Xero. No I/O, no DB — the
@@ -187,6 +187,24 @@ export function qboBill(bill: AccountingBill, s: AccountingSettings): QboPayload
   return p;
 }
 
+/** Bill payment → QBO BillPayment (Check from the bank account, linked to the Bill). */
+export function qboBillPayment(p: AccountingBillPayment, s: AccountingSettings): QboPayload {
+  if (!p.supplier_remote_id) throw new Error("Bill payment needs the bill's vendor before it can be pushed to QuickBooks");
+  if (!s.deposit_account_id) throw new Error("Choose a bank account in Accounting settings before pushing bill payments");
+  const amount = minorToMajor(p.amount_minor, p.currency);
+  return {
+    VendorRef: { value: p.supplier_remote_id },
+    PayType: "Check",
+    CheckPayment: { BankAccountRef: { value: s.deposit_account_id } },
+    TotalAmt: amount,
+    TxnDate: dateOnly(p.paid_at),
+    CurrencyRef: { value: p.currency },
+    DocNumber: (p.ref ?? p.id).slice(0, 21),
+    PrivateNote: `KernelHub bill payment ${p.id}${p.method ? ` (${p.method})` : ""}`,
+    Line: [{ Amount: amount, LinkedTxn: [{ TxnId: p.bill_remote_id, TxnType: "Bill" }] }],
+  };
+}
+
 // ── Xero ─────────────────────────────────────────────────────────────────────
 
 export type XeroPayload = Record<string, unknown>;
@@ -349,4 +367,16 @@ export function selectNewRemotePayments<T extends { remoteId: string; remoteInvo
 /** Provider string recorded on invoice_payments for pulled payments. */
 export function pulledPaymentProvider(providerId: string): string {
   return `accounting:${providerId}`;
+}
+
+/** Bill payment → Xero Payment against the ACCPAY invoice from the bank account. */
+export function xeroBillPayment(p: AccountingBillPayment, s: AccountingSettings): XeroPayload {
+  if (!s.deposit_account_id) throw new Error("Choose a bank account in Accounting settings before pushing bill payments to Xero");
+  return {
+    Invoice: { InvoiceID: p.bill_remote_id },
+    Account: { AccountID: s.deposit_account_id },
+    Date: dateOnly(p.paid_at),
+    Amount: minorToMajor(p.amount_minor, p.currency),
+    Reference: (p.ref ?? p.id).slice(0, 255),
+  };
 }

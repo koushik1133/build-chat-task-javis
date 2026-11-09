@@ -183,9 +183,12 @@ describeDb("documents flow", () => {
     // Signed PDF attached to the document and the contact (portal-visible).
     const att = await import("@/app/api/attachments/route");
     const onDoc = await api<{ attachments: AttachmentDTO[] }>(att.GET, `/api/attachments`, { query: { entity_kind: "document", entity_id: doc.id }, expect: 200 });
-    expect(onDoc.body.attachments.length).toBe(1);
-    expect(onDoc.body.attachments[0].content_type).toBe("application/pdf");
-    expect(onDoc.body.attachments[0].visibility).toBe("portal");
+    // Full signed copy (portal) + the signer-facing redacted copy (internal) are both stored at completion.
+    expect(onDoc.body.attachments.length).toBe(2);
+    const fullCopy = onDoc.body.attachments.find((a) => a.visibility === "portal")!;
+    expect(fullCopy.content_type).toBe("application/pdf");
+    expect(fullCopy.sha256).toBe(d.body.document.signed_pdf_hash);
+    expect(onDoc.body.attachments.some((a) => a.file_name.endsWith("-signed-public.pdf") && a.visibility === "internal")).toBe(true);
     const onContact = await api<{ attachments: AttachmentDTO[] }>(att.GET, `/api/attachments`, { query: { entity_kind: "contact", entity_id: contact.id }, expect: 200 });
     expect(onContact.body.attachments.some((a) => a.file_name.endsWith("-signed.pdf"))).toBe(true);
 
@@ -207,6 +210,43 @@ describeDb("documents flow", () => {
     expect(ev.body.signers[0].ip).toBe("203.0.113.9");
     expect(ev.body.signers[0].consent_text).toBeTruthy();
     expect(ev.body.signers[1].signature_text).toBe("B. Provider");
+  });
+
+  it("signed PDFs are served from the stored copy and hash-verified; signers get a 30-day completion download link", async () => {
+    const pdf = await import("@/app/api/documents/[id]/pdf/route");
+    const pubPdf = await import("@/app/api/p/sign/[token]/pdf/route");
+    const stored = await sqlOne<{ sha256: string }>(`SELECT sha256 FROM attachments WHERE user_id = $1 AND entity_kind = 'document' AND entity_id = $2 AND visibility = 'portal' AND deleted_at IS NULL`, [org.dataId, doc.id]);
+    const ownerPdf = await call(pdf.GET, req(`/api/documents/${doc.id}/pdf`), { id: doc.id }, 200);
+    expect(ownerPdf.res.headers.get("x-document-sha256")).toBe(stored!.sha256);
+    // The owner copy is the immutable attachment, byte for byte: a second download is identical.
+    const again = await call(pdf.GET, req(`/api/documents/${doc.id}/pdf`), { id: doc.id }, 200);
+    expect(again.text).toBe(ownerPdf.text);
+
+    // Tamper with the recorded hash → integrity failure, never a silently re-rendered PDF.
+    await sql(`UPDATE documents SET signed_pdf_hash = repeat('0', 64) WHERE id = $1 AND user_id = $2`, [doc.id, org.dataId]);
+    const broken = await call<{ error: string }>(pdf.GET, req(`/api/documents/${doc.id}/pdf`), { id: doc.id }, 500);
+    expect(broken.body.error).toBe("integrity_check_failed");
+    await sql(`UPDATE documents SET signed_pdf_hash = $3 WHERE id = $1 AND user_id = $2`, [doc.id, org.dataId, stored!.sha256]);
+    await call(pdf.GET, req(`/api/documents/${doc.id}/pdf`), { id: doc.id }, 200);
+    // Same for the signer copy, verified against its own stored digest.
+    const pub = await sqlOne<{ id: string; sha256: string }>(`SELECT id, sha256 FROM attachments WHERE user_id = $1 AND entity_kind = 'document' AND entity_id = $2 AND file_name LIKE '%-signed-public.pdf'`, [org.dataId, doc.id]);
+    await sql(`UPDATE attachments SET sha256 = repeat('1', 64) WHERE id = $1`, [pub!.id]);
+    await call(pubPdf.GET, req(`/api/p/sign/${token2}/pdf`), { token: token2 }, 500);
+    await sql(`UPDATE attachments SET sha256 = $2 WHERE id = $1`, [pub!.id, pub!.sha256]);
+    await call(pubPdf.GET, req(`/api/p/sign/${token2}/pdf`), { token: token2 }, 200);
+
+    // Completion emails: one per signer, recipient-bound download link to the public PDF route.
+    const mails = await sql<{ recipient: string; body: string; data: string }>(`SELECT recipient, body, data FROM notification_outbox WHERE user_id = $1 AND channel = 'email' AND subject = $2 ORDER BY created_at ASC`, [org.dataId, `Signed: ${doc.title}`]);
+    expect(mails.map((m) => m.recipient).sort()).toEqual([signer1, signer2].sort());
+    const link = mails[0].body.match(/https?:\/\/\S+\/api\/p\/sign\/([A-Za-z0-9_-]+)\/pdf/);
+    expect(link).toBeTruthy();
+    const tok = await sqlOne<{ recipient: string | null; expires_at: string }>(`SELECT recipient, expires_at FROM share_tokens WHERE kind = 'sign' AND token_hash = encode(sha256($1::bytea), 'hex')`, [link![1]]);
+    expect(tok?.recipient).toBe(mails[0].recipient);
+    const days = (new Date(tok!.expires_at).getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(29);
+    expect(days).toBeLessThanOrEqual(30.1);
+    const viaLink = await call(pubPdf.GET, req(`/api/p/sign/${link![1]}/pdf`), { token: link![1] }, 200);
+    expect(viaLink.res.headers.get("content-type")).toBe("application/pdf");
   });
 
   it("decline path: OTP purpose is enforced and the document becomes declined", async () => {

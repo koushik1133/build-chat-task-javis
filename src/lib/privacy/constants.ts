@@ -18,7 +18,7 @@ export const CONSENT_PURPOSE_LABELS: Record<ConsentPurpose, string> = {
 /** Purposes a subject may toggle themselves. `transactional` runs on a service ground, not consent. */
 export const SELF_SERVICE_PURPOSES: readonly ConsentPurpose[] = ["marketing_email", "marketing_sms", "marketing_voice", "analytics"];
 
-export const CONSENT_SUBJECT_KINDS = ["contact", "lead", "member", "tombstone"] as const;
+export const CONSENT_SUBJECT_KINDS = ["contact", "lead", "member", "booking", "tombstone"] as const;
 export type ConsentSubjectKind = (typeof CONSENT_SUBJECT_KINDS)[number];
 
 export const CONSENT_SOURCES = ["form", "portal", "import", "manual", "api"] as const;

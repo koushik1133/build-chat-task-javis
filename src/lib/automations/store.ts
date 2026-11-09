@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { isLegacyRow, legacyToV2, type LegacyRow } from "./legacy";
 import { getTemplate } from "./templates";
+import { REDACTED_SECRET } from "./secrets";
 import type { AutomationDTO, AutomationDefinition, AutomationRunDTO, ConditionNode, RunContext, Step, StepResult, TriggerConfig, TriggerType } from "./types";
 
 /** Persistence for automations v2 + run history. All queries are scoped by user_id (= org data id). */
@@ -72,7 +73,7 @@ export function toAutomationDTO(row: AutomationRow): AutomationDTO {
 }
 
 /** Marker returned in place of a stored secret for callers who may read but not edit automations. */
-export const REDACTED_SECRET = "••••••••";
+export { REDACTED_SECRET, restoreRedactedSecrets } from "./secrets";
 
 /**
  * Strip the inbound webhook token and outbound webhook signing secrets from a

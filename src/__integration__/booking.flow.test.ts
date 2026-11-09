@@ -117,6 +117,33 @@ describeDb("booking flow", () => {
     await api(pub.POST, `/api/book/${org.slug}/intro`, { json: { name: "X", email: "not-an-email", startsAt: slot }, params: { org: org.slug, type: "intro" }, expect: 400 });
   });
 
+  it("marketing consent from the public form binds to the booking for an existing contact and to the contact only when the booking created it", async () => {
+    const pub = await import("@/app/api/book/[org]/[type]/route");
+    const slots = await api<{ slots: string[] }>(pub.GET, `/api/book/${org.slug}/intro`, { params: { org: org.slug, type: "intro" }, expect: 200 });
+    const [slotA, slotB] = slots.body.slots.slice(-2);
+    // Same email as the existing contact: the unverified form must not flip that contact's consent.
+    const r1 = await api<{ booking: PublicBooking }>(pub.POST, `/api/book/${org.slug}/intro`, {
+      json: { name: "Guest Person", email: customerEmail, startsAt: slotA, consent: { marketing: true } },
+      params: { org: org.slug, type: "intro" },
+      expect: 201,
+    });
+    const onBooking = await waitForRows<{ subject_kind: string; purpose: string; status: string }>(`SELECT subject_kind, purpose, status FROM consent_records WHERE user_id = $1 AND subject_id = $2`, [org.dataId, r1.body.booking.id], 2);
+    expect(onBooking.map((c) => c.purpose).sort()).toEqual(["marketing_email", "marketing_sms"]);
+    expect(onBooking.every((c) => c.subject_kind === "booking" && c.status === "granted")).toBe(true);
+    const onExisting = await sql(`SELECT 1 FROM consent_records WHERE user_id = $1 AND subject_kind = 'contact' AND subject_id = $2`, [org.dataId, contactId]);
+    expect(onExisting).toHaveLength(0);
+    // A brand-new email creates the contact, so consent lands on that contact.
+    const r2 = await api<{ booking: PublicBooking }>(pub.POST, `/api/book/${org.slug}/intro`, {
+      json: { name: "New Person", email: "new-person@example.test", startsAt: slotB, consent: { marketing: false } },
+      params: { org: org.slug, type: "intro" },
+      expect: 201,
+    });
+    const newContact = await sqlOne<{ contact_id: string }>(`SELECT contact_id FROM bookings WHERE id = $1 AND user_id = $2`, [r2.body.booking.id, org.dataId]);
+    const onContact = await waitForRows<{ subject_kind: string; status: string }>(`SELECT subject_kind, status FROM consent_records WHERE user_id = $1 AND subject_id = $2`, [org.dataId, newContact!.contact_id], 2);
+    expect(onContact.every((c) => c.subject_kind === "contact" && c.status === "withdrawn")).toBe(true);
+    await sql(`UPDATE bookings SET status = 'cancelled' WHERE id = ANY($1) AND user_id = $2`, [[r1.body.booking.id, r2.body.booking.id], org.dataId]);
+  });
+
   it("owner sees the booking; portal link lists it for the contact", async () => {
     const list = await import("@/app/api/bookings/route");
     const from = new Date(new Date(slot).getTime() - 3_600_000).toISOString();

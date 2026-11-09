@@ -3,14 +3,14 @@ import { query, queryOne } from "@/lib/dsql";
 import { recordAudit } from "@/lib/audit";
 import { emitEvent } from "@/lib/events/bus";
 import { enqueueNotification } from "@/lib/notifications/outbox";
-import { issueShareToken, resolveShareTokenDetailed, revokeShareTokens, type ShareTokenRow } from "@/lib/share-tokens";
+import { appOrigin, issueShareToken, resolveShareTokenDetailed, revokeShareTokens, type ShareTokenRow } from "@/lib/share-tokens";
 import { rateLimitAsync } from "@/lib/request-limits";
 import { businessName } from "@/lib/money/quotes";
 import { assertRecipientMatches, OTP_MAX_ATTEMPTS, OTP_TTL_MS } from "@/lib/money/acceptance";
 import { CONSENT_TEXT } from "@/lib/pdf/quote-document";
 import { uploadAttachment } from "@/lib/attachments/store";
 import type { AttachmentEntityKind } from "@/lib/attachments/types";
-import { buildDocumentPdf, buildUnsignedPdf, DocumentError, getDocument, getDocumentById, listSigners, referenceFor, signerToDto, type SignerRow } from "./documents";
+import { buildDocumentPdf, buildUnsignedPdf, DocumentError, getDocument, getDocumentById, listSigners, PUBLIC_SIGNED_SUFFIX, referenceFor, servePdf, signerToDto, type SignerRow } from "./documents";
 import { emailHint, type DocumentDTO, type DocumentSignerDTO, type PublicDocument } from "./types";
 
 /**
@@ -330,6 +330,10 @@ async function completeDocument(dataId: string, documentId: string): Promise<voi
     for (const t of targets) {
       await uploadAttachment(dataId, { entityKind: t.kind, entityId: t.id, fileName: built.filename, declaredType: "application/pdf", bytes: Buffer.from(built.bytes), visibility: "portal", uploadedBy: null }).catch((err) => console.error("[documents] attach signed pdf failed", err));
     }
+    // Signer-facing copy (other signers' IP/device redacted), stored once so the public link serves bytes, never a re-render.
+    const redacted = await buildDocumentPdf(dataId, doc, { redactEvidence: true });
+    await uploadAttachment(dataId, { entityKind: "document", entityId: doc.id, fileName: built.filename.replace(/-signed\.pdf$/, "") + PUBLIC_SIGNED_SUFFIX, declaredType: "application/pdf", bytes: Buffer.from(redacted.bytes), visibility: "internal", uploadedBy: null }).catch((err) => console.error("[documents] attach public signed pdf failed", err));
+    await notifyCompletion(dataId, doc).catch((err) => console.error("[documents] completion emails failed", err));
   } catch (err) {
     console.error("[documents] signed pdf build failed", err);
   }
@@ -373,12 +377,38 @@ export async function declineWithToken(token: string, input: DeclineInput): Prom
   return publicDocumentForToken(token);
 }
 
-/** PDF for a signer: redacted evidence (no raw IP/UA on the public copy). */
+export const COMPLETION_LINK_TTL_DAYS = 30;
+
+/**
+ * Every signer gets a recipient-bound, 30-day download link to the immutable
+ * signed copy once the document completes.
+ */
+async function notifyCompletion(dataId: string, doc: DocumentDTO): Promise<void> {
+  const from = await businessName(dataId);
+  const signers = await listSigners(doc.id);
+  for (const s of signers) {
+    if (s.status !== "signed") continue;
+    const link = await issueShareToken(dataId, "sign", s.id, COMPLETION_LINK_TTL_DAYS, { recipient: s.email });
+    const download = `${appOrigin()}/api/p/sign/${link.token}/pdf`;
+    await enqueueNotification(dataId, {
+      channel: "email",
+      recipient: s.email,
+      subject: `Signed: ${doc.title}`,
+      body:
+        `Everyone has signed "${doc.title}" (${referenceFor(doc)}) from ${from}.\n\n` +
+        `Download your signed copy here (link valid for ${COMPLETION_LINK_TTL_DAYS} days): ${download}\n\n` +
+        `SHA-256 of the signed PDF: ${doc.signed_pdf_hash ?? "pending"}`,
+      data: { kind: "document_completed", document_id: doc.id, signer_id: s.id, url: download, page_url: link.url },
+    }).catch(() => undefined);
+  }
+}
+
+/** PDF for a signer: in-flight documents render the unsigned preview; a completed one streams the stored, hash-verified copy. */
 export async function pdfForToken(token: string) {
   const { share, doc } = await resolveSigner(token);
   // A live link only downloads a document that is still in flight or fully signed.
   if (doc.status !== "signed") assertSignable(doc);
-  return buildDocumentPdf(share.user_id, doc, { redactEvidence: true });
+  return servePdf(share.user_id, doc, { redacted: true });
 }
 
 export { signerToDto };

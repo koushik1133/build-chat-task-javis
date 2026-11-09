@@ -30,6 +30,8 @@ import {
 
 export interface SummaryScope {
   dataId: string;
+  /** Actor (member) id — enables "assigned to me" items. */
+  userId?: string | null;
   can(area: Area, edit?: boolean): boolean;
 }
 
@@ -190,12 +192,10 @@ async function buildKpis(scope: SummaryScope, ctx: KpiCtx): Promise<KpiTile[]> {
   tile("tasks", "tasks", async () => {
     const [t, r] = await Promise.all([
       queryOne<CountRow>(`SELECT COUNT(*) AS n FROM tasks WHERE user_id = $1 AND done = FALSE`, [dataId]).catch(() => null),
-      (await tableExists("records"))
-        ? queryOne<CountRow>(`SELECT COUNT(*) AS n FROM records WHERE user_id = $1 AND deleted_at IS NULL AND due_at IS NOT NULL AND due_at < $2`, [dataId, ctx.nowIso]).catch(() => null)
-        : null,
+      queryOne<CountRow>(`SELECT COUNT(*) AS n FROM tasks WHERE user_id = $1 AND done = FALSE AND due_at IS NOT NULL AND due_at < $2`, [dataId, ctx.nowIso]).catch(() => null),
     ]);
     const overdue = num(r);
-    return { key: "tasks", label: "Open tasks", value: String(num(t)), hint: overdue > 0 ? `${overdue} record${overdue === 1 ? "" : "s"} overdue` : "Nothing overdue", tone: overdue > 0 ? "warn" : "neutral", href: "/tasks" };
+    return { key: "tasks", label: "Open tasks", value: String(num(t)), hint: overdue > 0 ? `${overdue} task${overdue === 1 ? "" : "s"} overdue` : "Nothing overdue", tone: overdue > 0 ? "warn" : "neutral", href: "/tasks?overdue=1" };
   });
 
   tile("messaging", "inbox", async () => {
@@ -265,6 +265,36 @@ async function buildNeedsYou(scope: SummaryScope, nowIso: string, currency: stri
         [dataId]
       );
       for (const r of rows) items.push({ kind: "deal", id: r.id, title: `Stalled: ${r.full_name}`, detail: `${r.company ? r.company + " · " : ""}no touch in 7+ days`, href: `/crm?contact=${encodeURIComponent(r.id)}`, rank: 3 });
+    }));
+  }
+  if (scope.can("tasks") && scope.userId) {
+    jobs.push(safe("my overdue tasks", async () => {
+      const rows = await query<{ id: string; title: string; due_at: string; project_name: string | null }>(
+        `SELECT t.id::text AS id, t.title, t.due_at, p.name AS project_name FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+          WHERE t.user_id = $1 AND t.done = FALSE AND t.deleted_at IS NULL AND t.assignee_id = $2 AND t.due_at IS NOT NULL AND t.due_at < $3
+          ORDER BY t.due_at ASC LIMIT 5`,
+        [dataId, scope.userId, nowIso]
+      ).catch(() => []);
+      for (const r of rows) {
+        const days = Math.max(1, Math.floor((Date.parse(nowIso) - Date.parse(iso(r.due_at))) / 86_400_000));
+        items.push({ kind: "task", id: r.id, title: `Overdue: ${r.title}`, detail: `${r.project_name ? r.project_name + " · " : ""}${days} day${days === 1 ? "" : "s"} late`, href: "/tasks?mine=1", rank: 2 });
+      }
+    }));
+  }
+  if (scope.can("tasks")) {
+    jobs.push(safe("milestones due", async () => {
+      if (!(await tableExists("project_milestones"))) return;
+      const weekEnd = new Date(Date.parse(nowIso) + 7 * 86_400_000).toISOString().slice(0, 10);
+      const rows = await query<{ id: string; name: string; due_on: string; project_id: string; project_name: string }>(
+        `SELECT m.id, m.name, m.due_on::text AS due_on, m.project_id, p.name AS project_name FROM project_milestones m JOIN projects p ON p.id = m.project_id
+          WHERE m.user_id = $1 AND m.status = 'open' AND m.due_on IS NOT NULL AND m.due_on <= $2 AND p.archived_at IS NULL AND p.status IN ('planning', 'active')
+          ORDER BY m.due_on ASC LIMIT 5`,
+        [dataId, weekEnd]
+      );
+      for (const r of rows) {
+        const late = r.due_on < nowIso.slice(0, 10);
+        items.push({ kind: "milestone", id: r.id, title: `${late ? "Milestone overdue" : "Milestone due"}: ${r.name}`, detail: `${r.project_name} · ${late ? "was due" : "due"} ${r.due_on}`, href: `/projects/${encodeURIComponent(r.project_id)}`, rank: late ? 2 : 4 });
+      }
     }));
   }
   await Promise.all(jobs);

@@ -44,7 +44,7 @@ export function isLiveAccountingProviderId(v: unknown): v is LiveAccountingProvi
   return typeof v === "string" && (LIVE_ACCOUNTING_PROVIDERS as readonly string[]).includes(v);
 }
 
-export const ACCOUNTING_ENTITY_KINDS = ["contact", "invoice", "payment", "expense", "product", "supplier", "bill"] as const;
+export const ACCOUNTING_ENTITY_KINDS = ["contact", "invoice", "payment", "expense", "product", "supplier", "bill", "bill_payment"] as const;
 export type AccountingEntityKind = (typeof ACCOUNTING_ENTITY_KINDS)[number];
 export function isAccountingEntityKind(v: unknown): v is AccountingEntityKind {
   return typeof v === "string" && (ACCOUNTING_ENTITY_KINDS as readonly string[]).includes(v);
@@ -287,6 +287,19 @@ export interface AccountingBill {
   supplier_name: string;
 }
 
+/** Payment made against a supplier bill → QBO BillPayment / Xero ACCPAY Payment. */
+export interface AccountingBillPayment {
+  id: string;
+  bill_id: string;
+  amount_minor: number;
+  currency: string;
+  method: string | null;
+  ref: string | null;
+  paid_at: string;
+  bill_remote_id: string;
+  supplier_remote_id: string | null;
+}
+
 export interface LiveAccountingProvider {
   readonly id: LiveAccountingProviderId;
   readonly label: string;
@@ -304,5 +317,6 @@ export interface LiveAccountingProvider {
   pushItem(auth: AccountingAuth, conn: ConnectionContext, product: AccountingProduct, existing: RemoteRef | null): Promise<PushResult>;
   pushVendor(auth: AccountingAuth, conn: ConnectionContext, supplier: AccountingSupplier, existing: RemoteRef | null): Promise<PushResult>;
   pushBill(auth: AccountingAuth, conn: ConnectionContext, bill: AccountingBill, existing: RemoteRef | null): Promise<PushResult>;
+  pushBillPayment(auth: AccountingAuth, conn: ConnectionContext, payment: AccountingBillPayment, existing: RemoteRef | null): Promise<PushResult>;
   pullPayments(auth: AccountingAuth, conn: ConnectionContext, cursor: string | null): Promise<PullPaymentsResult>;
 }

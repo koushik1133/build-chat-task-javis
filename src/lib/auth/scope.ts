@@ -113,6 +113,26 @@ async function effectivePermissions(orgId: string, role: Role): Promise<Record<A
   return base;
 }
 
+/**
+ * Effective permission matrix for the org whose data lives under `dataId`
+ * (its `owner_user_id`), evaluated as the owner. Background callers with no
+ * request (agent tools, cron) use this to gate reads the same way a route
+ * would; an unknown data id yields the viewer matrix so nothing widens.
+ */
+export async function effectivePermissionsForOwner(dataId: string): Promise<Record<Area, AreaPermission>> {
+  const org = await queryOne<{ id: string }>(`SELECT id FROM organizations WHERE owner_user_id = $1 LIMIT 1`, [dataId]).catch(() => null);
+  if (!org) return { ...DEFAULT_MATRIX.viewer };
+  return effectivePermissions(org.id, "owner");
+}
+
+/** `can(area, edit)` closure over a permission matrix. */
+export function canFromPermissions(permissions: Record<Area, AreaPermission>): (area: Area, edit?: boolean) => boolean {
+  return (area, edit = false) => {
+    const p = permissions[area];
+    return Boolean(p && p.view && (!edit || p.edit));
+  };
+}
+
 /** Uncached loader for `listUserOrgs` (exported for tests). */
 export async function loadUserOrgs(userId: string): Promise<Array<OrgRow & { role: Role }>> {
   const rows = await query<OrgRow & { role: string }>(

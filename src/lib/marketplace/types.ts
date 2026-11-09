@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { RecordTypeInputSchema } from "@/lib/records/schema";
+import { ConditionNodeSchema, ScheduleConfigSchema, StepsSchema } from "@/lib/automations/schema";
+import type { AutomationDefinition as EngineAutomationDefinition, Step, TriggerConfig } from "@/lib/automations/types";
 
 /**
  * Marketplace contracts — client-safe (no DB imports).
@@ -47,7 +49,8 @@ export const PlaybookDefinitionSchema = z.object({
 });
 export type PlaybookDefinition = z.infer<typeof PlaybookDefinitionSchema>;
 
-export const AutomationDefinitionSchema = z.object({
+/** Pre-v2 automation listing (trigger_event + action_type + action_config). Still importable via legacyToV2. */
+export const LegacyAutomationDefinitionSchema = z.object({
   name: z.string().trim().min(1).max(200),
   trigger_event: z.string().trim().min(1).max(120),
   action_type: z.string().trim().min(1).max(120),
@@ -58,7 +61,36 @@ export const AutomationDefinitionSchema = z.object({
   schedule_timezone: z.string().max(64).nullable(),
   schedule_days: z.string().max(40).nullable(),
 });
+export type LegacyAutomationDefinition = z.infer<typeof LegacyAutomationDefinitionSchema>;
+
+/** Portable trigger config: no inbound webhook token (the installer mints its own). */
+export const PortableTriggerConfigSchema = z
+  .object({
+    event_type: z.string().trim().min(1).max(120).optional(),
+    filter: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+    schedule: ScheduleConfigSchema.optional(),
+  })
+  .strict();
+
+/** v2 automation listing: the engine definition (trigger / conditions / steps) scrubbed of ids, secrets and endpoints. */
+export const AutomationV2DefinitionSchema = z.object({
+  schema: z.literal(2),
+  name: z.string().trim().min(1).max(200),
+  description: z.string().max(2000).nullable().optional(),
+  trigger_type: z.enum(["event", "schedule", "webhook", "manual"]),
+  trigger_config: PortableTriggerConfigSchema.default({}),
+  conditions: ConditionNodeSchema.nullable().default(null),
+  steps: StepsSchema,
+  autonomy: z.enum(["auto", "approve"]).default("approve"),
+});
+export type AutomationV2Definition = z.infer<typeof AutomationV2DefinitionSchema>;
+
+export const AutomationDefinitionSchema = z.union([AutomationV2DefinitionSchema, LegacyAutomationDefinitionSchema]);
 export type AutomationDefinition = z.infer<typeof AutomationDefinitionSchema>;
+
+export function isV2AutomationDefinition(d: AutomationDefinition): d is AutomationV2Definition {
+  return (d as { schema?: unknown }).schema === 2;
+}
 
 export const PackRecordTypeSchema = RecordTypeInputSchema.extend({
   slug: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
@@ -128,6 +160,96 @@ export function scrubAutomationConfig(raw: unknown): ScrubResult {
     }
   }
   return { config, removed };
+}
+
+/** Placeholder for a webhook endpoint stripped on export; the installer must replace it before enabling. */
+export const WEBHOOK_URL_PLACEHOLDER = "https://example.invalid/replace-me";
+/** Templated placeholder for a stripped literal recipient; renders empty so the step fails loudly until it is set. */
+export const NOTIFY_TO_PLACEHOLDER = "{{recipient}}";
+
+/** Templated references (`{{ … }}`) are portable; literal ids, addresses and URLs are not. */
+const SECRET_LIKE = /https?:\/\/|hooks\.slack\.com|[A-Za-z0-9_-]{32,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|@/i;
+function portableString(v: string): boolean {
+  return v.trim().startsWith("{{") || !SECRET_LIKE.test(v);
+}
+
+function scrubRecord(input: Record<string, unknown>, path: string, removed: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (typeof v === "string") {
+      if (portableString(v)) out[k] = v.slice(0, 4000);
+      else removed.push(`${path}.${k}`);
+    } else if (v && typeof v === "object" && !Array.isArray(v)) {
+      out[k] = scrubRecord(v as Record<string, unknown>, `${path}.${k}`, removed);
+    } else if (/(^|_)(id|ids|token|secret|key|url|webhook)$/i.test(k)) {
+      removed.push(`${path}.${k}`);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/** Allow-list scrub of one step. Ids, endpoints, recipients and secrets go; templates, routing and copy stay. */
+export function scrubStep(step: Step, removed: string[]): Step {
+  const at = `steps.${step.id}`;
+  const base = { id: step.id, kind: step.kind, ...(step.name ? { name: step.name } : {}) };
+  switch (step.kind) {
+    case "tool":
+      return { ...base, kind: "tool", config: { tool: step.config.tool, input: scrubRecord(step.config.input ?? {}, `${at}.input`, removed) } };
+    case "delay":
+      return { ...base, kind: "delay", config: { ...(step.config.minutes != null ? { minutes: step.config.minutes } : {}), ...(step.config.until ? { until: step.config.until } : {}) } };
+    case "branch":
+      return { ...base, kind: "branch", config: { conditions: step.config.conditions, then: step.config.then ?? null, else: step.config.else ?? null } };
+    case "agent": {
+      if (step.config.agent_id) removed.push(`${at}.agent_id`);
+      const prompt = portableString(step.config.prompt) ? step.config.prompt : (removed.push(`${at}.prompt`), "Describe what the agent should do.");
+      return { ...base, kind: "agent", config: { agent_id: "", prompt } };
+    }
+    case "notify": {
+      const to = step.config.to.trim().startsWith("{{") ? step.config.to : (removed.push(`${at}.to`), NOTIFY_TO_PLACEHOLDER);
+      const body = portableString(step.config.body) ? step.config.body : (removed.push(`${at}.body`), "(edit this message)");
+      const subject = step.config.subject && portableString(step.config.subject) ? step.config.subject : step.config.subject ? (removed.push(`${at}.subject`), undefined) : undefined;
+      const contact_id = step.config.contact_id && step.config.contact_id.trim().startsWith("{{") ? step.config.contact_id : step.config.contact_id ? (removed.push(`${at}.contact_id`), undefined) : undefined;
+      return { ...base, kind: "notify", config: { channel: step.config.channel, to, body, ...(subject ? { subject } : {}), ...(step.config.marketing ? { marketing: true } : {}), ...(contact_id ? { contact_id } : {}) } };
+    }
+    case "webhook": {
+      removed.push(`${at}.url`);
+      if (step.config.secret) removed.push(`${at}.secret`);
+      return { ...base, kind: "webhook", config: { url: WEBHOOK_URL_PLACEHOLDER, ...(step.config.payload ? { payload: scrubRecord(step.config.payload, `${at}.payload`, removed) } : {}) } };
+    }
+    case "approval":
+      return { ...base, kind: "approval", config: { title: step.config.title, ...(step.config.description ? { description: step.config.description } : {}) } };
+  }
+}
+
+export interface ScrubV2Result {
+  definition: AutomationV2Definition;
+  removed: string[];
+}
+
+/** Engine definition → portable v2 listing definition. */
+export function scrubAutomationV2(def: EngineAutomationDefinition): ScrubV2Result {
+  const removed: string[] = [];
+  const tc: TriggerConfig = def.trigger_config ?? {};
+  if (tc.webhook) removed.push("trigger_config.webhook");
+  const trigger_config: AutomationV2Definition["trigger_config"] = {
+    ...(tc.event_type ? { event_type: tc.event_type } : {}),
+    ...(tc.filter ? { filter: tc.filter } : {}),
+    ...(tc.schedule ? { schedule: tc.schedule } : {}),
+  };
+  const steps = def.steps.map((s) => scrubStep(s, removed));
+  const definition = AutomationV2DefinitionSchema.parse({
+    schema: 2,
+    name: def.name,
+    description: def.description ?? null,
+    trigger_type: def.trigger_type,
+    trigger_config,
+    conditions: def.conditions ?? null,
+    steps,
+    autonomy: def.autonomy,
+  });
+  return { definition, removed };
 }
 
 /* ─── Listing DTO ────────────────────────────────────────────────────────── */

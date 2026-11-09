@@ -3,6 +3,7 @@
  * outbox) → swap → leave with balance (409 when short, debit on approve) →
  * crew link with staff_id → clock in/out → attendance → payroll CSV → v1.
  */
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { api, cleanupDataIds, createTestOrg, describeDb, expectEvent, setScope, sql, sqlOne, type TestOrg } from "./setup";
 import type { AttendanceDTO, BalanceDTO, LeaveDTO, ShiftDTO, StaffDTO, SwapDTO } from "@/lib/workforce/pure";
@@ -290,6 +291,37 @@ describeDb("workforce flow", () => {
     expect(text).toContain("Staff ID,Name,Role,Employment,Currency,Hourly rate,Weekly hours,Scheduled hours,Attended hours");
     expect(text).toContain("Ana Tech");
     expect(text).toContain("950.00");
+  });
+
+  it("remindUpcomingShifts: one reminder per assigned shift in the next 24h, idempotent via reminded_at", async () => {
+    const { remindUpcomingShifts } = await import("@/lib/workforce/shifts");
+    const soonId = randomUUID();
+    const startsAt = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    const endsAt = new Date(Date.now() + 6 * 3_600_000).toISOString();
+    await sql(
+      `INSERT INTO shifts (id, user_id, staff_id, role_title, starts_at, ends_at, break_minutes, status, published_at) VALUES ($1, $2, $3, 'Technician', $4, $5, 0, 'published', NOW())`,
+      [soonId, org.dataId, ana.id, startsAt, endsAt]
+    );
+    // A draft shift and one beyond the window are never reminded.
+    const laterId = randomUUID();
+    await sql(`INSERT INTO shifts (id, user_id, staff_id, starts_at, ends_at, break_minutes, status) VALUES ($1, $2, $3, $4, $5, 0, 'published')`, [laterId, org.dataId, ana.id, new Date(Date.now() + 30 * 3_600_000).toISOString(), new Date(Date.now() + 34 * 3_600_000).toISOString()]);
+    const first = await remindUpcomingShifts(500);
+    expect(first.reminded).toBeGreaterThanOrEqual(1);
+    const row = await sqlOne<{ reminded_at: string | null }>(`SELECT reminded_at FROM shifts WHERE id = $1`, [soonId]);
+    expect(row?.reminded_at).toBeTruthy();
+    const later = await sqlOne<{ reminded_at: string | null }>(`SELECT reminded_at FROM shifts WHERE id = $1`, [laterId]);
+    expect(later?.reminded_at).toBeNull();
+    const mail = await sqlOne<{ subject: string; data: string }>(`SELECT subject, data FROM notification_outbox WHERE user_id = $1 AND channel = 'email' AND recipient = 'ana@example.test' AND subject LIKE 'Reminder: your shift%' ORDER BY created_at DESC LIMIT 1`, [org.dataId]);
+    expect(mail).toBeTruthy();
+    expect(JSON.parse(mail!.data)).toMatchObject({ kind: "shift.reminder", shiftId: soonId, category: "team" });
+    await expectEvent(org.dataId, "shift.reminded", soonId);
+    const count = await sql(`SELECT 1 FROM notification_outbox WHERE user_id = $1 AND data LIKE $2`, [org.dataId, `%"shiftId":"${soonId}"%`]);
+    const before = count.length;
+    const second = await remindUpcomingShifts(500);
+    const afterRows = await sql(`SELECT 1 FROM notification_outbox WHERE user_id = $1 AND data LIKE $2`, [org.dataId, `%"shiftId":"${soonId}"%`]);
+    expect(afterRows.length).toBe(before);
+    expect(second.reminded).toBeLessThan(first.reminded + 1);
+    await sql(`DELETE FROM shifts WHERE id = ANY($1)`, [[soonId, laterId]]);
   });
 
   it("v1: staff/shifts/leave list+get+create with scopes, 409 on conflict", async () => {

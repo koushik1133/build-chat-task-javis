@@ -75,9 +75,9 @@ export const AREA_LABELS: Record<Area, string> = {
   calendar: "Calendar & bookings",
   helpdesk: "Helpdesk tickets",
   reports: "Reports",
-  team: "Team",
+  team: "Team, staff & rota",
   settings: "Settings & webhooks",
 };
 
 /** Areas that the v1 API currently exposes (others exist for future routes). */
-export const API_AREAS: readonly Area[] = ["crm", "tasks", "billing", "calendar", "helpdesk", "knowledge", "agents", "messaging", "reports", "settings"];
+export const API_AREAS: readonly Area[] = ["crm", "tasks", "billing", "calendar", "helpdesk", "knowledge", "agents", "messaging", "reports", "team", "settings"];

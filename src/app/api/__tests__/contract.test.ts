@@ -81,7 +81,7 @@ describe("GET /api/tasks", () => {
     const call = dataQueryCall("FROM tasks");
     expect(call).toBeDefined();
     // Scoped to the org's data owner (== the user for a personal org).
-    expect(call?.[1]).toEqual([AUTH_USER.id]);
+    expect(call?.[1]).toEqual([AUTH_USER.id, 51]); // scope + parameterised page size
   });
 
   it("returns 200 with an empty list when the DB query fails", async () => {

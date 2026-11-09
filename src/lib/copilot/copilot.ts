@@ -171,10 +171,10 @@ export async function planCopilot(userId: string, req: Pick<CopilotRequest, "mod
   };
 }
 
-export async function runCopilot(userId: string, req: CopilotRequest): Promise<CopilotResult> {
+export async function runCopilot(userId: string, req: CopilotRequest, opts: { can?: ToolContext["can"] } = {}): Promise<CopilotResult> {
   const plan = await planCopilot(userId, req);
   const tools = plan.tools;
-  const ctx: ToolContext = { userId, runId: `copilot:${randomUUID()}`, agentId: null, autonomy: "approve" };
+  const ctx: ToolContext = { userId, runId: `copilot:${randomUUID()}`, agentId: null, autonomy: "approve", can: opts.can };
 
   const messages: RouterMessage[] = [{ role: "system", content: plan.system }];
   for (const h of (req.history ?? []).slice(-MAX_HISTORY)) {

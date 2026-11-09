@@ -1,8 +1,8 @@
 import type {
-  AccountOption, AccountingAuth, AccountingBill, AccountingContact, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingSupplier,
+  AccountOption, AccountingAuth, AccountingBill, AccountingBillPayment, AccountingContact, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingSupplier,
   ConnectionContext, LiveAccountingProvider, PullPaymentsResult, PushResult, RemotePayment, RemoteRef,
 } from "../types";
-import { majorToMinor, xeroBankTransaction, xeroBill, xeroContact, xeroInvoice, xeroItem, xeroPayment, xeroSupplierContact, type XeroPayload } from "../mapping";
+import { majorToMinor, xeroBankTransaction, xeroBill, xeroBillPayment, xeroContact, xeroInvoice, xeroItem, xeroPayment, xeroSupplierContact, type XeroPayload } from "../mapping";
 
 /**
  * Xero via the Accounting API (no SDK). App credentials come from
@@ -129,6 +129,7 @@ export const xeroProvider: LiveAccountingProvider = {
   async pushItem(auth, conn, product: AccountingProduct, existing) { return upsert(auth, conn, "Items", xeroItem(product, conn.settings), existing); },
   async pushVendor(auth, conn, supplier: AccountingSupplier, existing) { return upsert(auth, conn, "Contacts", xeroSupplierContact(supplier), existing); },
   async pushBill(auth, conn, bill: AccountingBill, existing) { return upsert(auth, conn, "Invoices", xeroBill(bill, conn.settings), existing); },
+  async pushBillPayment(auth, conn, payment: AccountingBillPayment, existing) { return upsert(auth, conn, "Payments", xeroBillPayment(payment, conn.settings), existing); },
 
   async pullPayments(auth, conn, cursor): Promise<PullPaymentsResult> {
     const headers: Record<string, string> = {};

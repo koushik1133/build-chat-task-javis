@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await runCopilot(scope.dataId, parsed.data);
+    const result = await runCopilot(scope.dataId, parsed.data, { can: scope.can });
     return NextResponse.json(result);
   } catch (err) {
     const mapped = llmErrorResponse(err);

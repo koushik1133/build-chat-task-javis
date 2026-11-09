@@ -2,15 +2,15 @@ import { query } from "@/lib/dsql";
 import { toCsv } from "@/lib/export/csv";
 import { orgTimezone } from "@/lib/calendar/booking";
 import { approvedLeaveHours } from "./leave";
-import { attendedMinutesByStaff } from "./attendance";
+import { attendedMinutesByStaffAndWeek } from "./attendance";
 import { listStaff, WorkforceError } from "./staff";
 import { addDays, isValidYmd, localMidnightUtc, payrollLine, periodWeeks, type PayrollLine } from "./pure";
 
 /**
  * Payroll export: per staff member for an inclusive Y-M-D range — scheduled
  * hours (non-cancelled shifts), attended hours (closed attendance), approved
- * leave split paid/unpaid, overtime above weekly_hours × weeks and gross pay
- * at the hourly rate (overtime at 1.5×). Both JSON and CSV.
+ * leave split paid/unpaid, overtime above weekly_hours per calendar week (org
+ * timezone) and gross pay at the hourly rate (overtime at 1.5×). Both JSON and CSV.
  */
 
 export interface PayrollExport {
@@ -37,7 +37,7 @@ export async function payrollExport(dataId: string, range: { from: string; to: s
       `SELECT staff_id, starts_at, ends_at, break_minutes FROM shifts WHERE user_id = $1 AND staff_id IS NOT NULL AND status <> 'cancelled' AND starts_at >= $2 AND starts_at < $3 LIMIT 20000`,
       [dataId, fromIso, toIso]
     ),
-    attendedMinutesByStaff(dataId, fromIso, toIso),
+    attendedMinutesByStaffAndWeek(dataId, fromIso, toIso, timezone),
     approvedLeaveHours(dataId, range.from, range.to),
   ]);
   const scheduled = new Map<string, number>();
@@ -51,7 +51,8 @@ export async function payrollExport(dataId: string, range: { from: string; to: s
       payrollLine({
         staff: s,
         scheduledMinutes: scheduled.get(s.id) ?? 0,
-        attendedMinutes: attended.get(s.id) ?? 0,
+        attendedMinutes: Object.values(attended.get(s.id) ?? {}).reduce((a, b) => a + b, 0),
+        attendedMinutesByWeek: attended.get(s.id) ?? {},
         paidLeaveHours: leave.get(s.id)?.paid ?? 0,
         unpaidLeaveHours: leave.get(s.id)?.unpaid ?? 0,
         periodWeeks: weeks,

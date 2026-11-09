@@ -132,6 +132,45 @@ describeDb("webchat flow", () => {
     lastTs = poll.body.messages[0].ts;
   });
 
+  it("approving the messaging.reply approval releases the hidden draft to the visitor; rejecting discards one", async () => {
+    const approvals = await import("@/app/api/approvals/[id]/route");
+    const pending = await sqlOne<{ id: string; input: string }>(`SELECT id, input FROM approvals WHERE user_id = $1 AND tool_name = 'messaging.reply' AND status = 'pending' ORDER BY created_at DESC LIMIT 1`, [org.dataId]);
+    expect(pending).toBeTruthy();
+    expect(JSON.parse(pending!.input).channel).toBe("webchat");
+    const decided = await api<{ approval: { status: string }; outcome: string | null }>(approvals.PATCH, `/api/approvals/${pending!.id}`, {
+      method: "PATCH",
+      json: { decision: "approved", edited_input: { ...JSON.parse(pending!.input), text: "Yes — 10% off this week with code WELCOME10." } },
+      params: { id: pending!.id },
+      expect: 200,
+    });
+    expect(decided.body.approval.status).toBe("approved");
+    expect(decided.body.outcome).toMatch(/^Done: Reply to web:/);
+
+    const route = await import("@/app/api/widget/chat/[siteId]/messages/route");
+    const poll = await call<{ messages: Msg[]; status: string }>(route.GET, req(`/api/widget/chat/${siteId}/messages`, { query: { since: lastTs ?? undefined, wait: 0 }, headers: { authorization: `Bearer ${token}` } }), { siteId }, 200);
+    const assistant = poll.body.messages.filter((m) => m.role === "assistant");
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0].content).toContain("WELCOME10");
+    const conv = await sqlOne<{ messages: string }>(`SELECT c.messages FROM messaging_conversations c JOIN chat_sessions s ON s.conversation_id = c.id WHERE s.id = $1`, [sessionId]);
+    expect((JSON.parse(conv!.messages) as Array<{ pending?: boolean }>).some((t) => t.pending)).toBe(false);
+    lastTs = assistant[0].ts;
+
+    // A second held draft, rejected: the hidden turn is removed and the visitor never sees it.
+    const r2 = await api<{ pendingHuman: boolean }>(route.POST, `/api/widget/chat/${siteId}/messages`, { json: { text: "And free shipping?" }, headers: { authorization: `Bearer ${token}` }, params: { siteId }, expect: 201 });
+    expect(r2.body.pendingHuman).toBe(true);
+    const held = await sqlOne<{ id: string }>(`SELECT id FROM approvals WHERE user_id = $1 AND tool_name = 'messaging.reply' AND status = 'pending' ORDER BY created_at DESC LIMIT 1`, [org.dataId]);
+    const rejected = await api<{ approval: { status: string }; outcome: string | null }>(approvals.PATCH, `/api/approvals/${held!.id}`, { method: "PATCH", json: { decision: "rejected" }, params: { id: held!.id }, expect: 200 });
+    expect(rejected.body.approval.status).toBe("rejected");
+    expect(rejected.body.outcome).toBe("Draft discarded");
+    const after = await sqlOne<{ messages: string }>(`SELECT c.messages FROM messaging_conversations c JOIN chat_sessions s ON s.conversation_id = c.id WHERE s.id = $1`, [sessionId]);
+    const turns = JSON.parse(after!.messages) as Array<{ role: string; pending?: boolean; content: string }>;
+    expect(turns.some((t) => t.pending)).toBe(false);
+    expect(turns[turns.length - 1]).toMatchObject({ role: "user", content: "And free shipping?" });
+    const poll2 = await call<{ messages: Msg[] }>(route.GET, req(`/api/widget/chat/${siteId}/messages`, { query: { since: lastTs, wait: 0 }, headers: { authorization: `Bearer ${token}` } }), { siteId }, 200);
+    expect(poll2.body.messages.map((m) => m.role)).toEqual(["user"]);
+    lastTs = poll2.body.messages[0].ts;
+  });
+
   it("handoff creates a contact, a lead and consent records, and marks the session handed off", async () => {
     const route = await import("@/app/api/widget/chat/[siteId]/handoff/route");
     await api(route.POST, `/api/widget/chat/${siteId}/handoff`, { json: { name: "No Contact" }, headers: { authorization: `Bearer ${token}` }, params: { siteId }, expect: 400 });

@@ -63,6 +63,7 @@ export const EVENT_TYPES = [
   "production.card.approved",
   "production.card.rejected",
   "message.received",
+  "message.sent",
   "social.post.published",
   "social.post.failed",
   "task.created",
@@ -91,6 +92,7 @@ export const EVENT_TYPES = [
   "webchat.session_started",
   "webchat.handoff_requested",
   "shift.published",
+  "shift.reminded",
   "shift.swap_requested",
   "leave.requested",
   "leave.decided",
@@ -108,6 +110,15 @@ export const EVENT_TYPES = [
   "marketplace.installed",
   "automation.run_finished",
   "automation.run_failed",
+  "order.created",
+  "order.paid",
+  "order.fulfilled",
+  "order.cancelled",
+  "cart.abandoned",
+  "project.created",
+  "project.status_changed",
+  "milestone.completed",
+  "task.overdue",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

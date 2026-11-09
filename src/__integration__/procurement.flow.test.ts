@@ -215,6 +215,31 @@ describeDb("procurement flow", () => {
     expect(list.body.payments).toHaveLength(2);
   });
 
+  it("supplier_bill.paid pushes the bill and both payments to the connected (simulated) ledger; pushDue finds nothing left", async () => {
+    const { upsertConnection, updateConnectionSettings } = await import("@/lib/accounting/connections");
+    const { onAccountingRelevantEvent, pushDue } = await import("@/lib/accounting/sync");
+    const connId = await upsertConnection(org.dataId, { provider: "simulated", auth: {}, realmId: "sim-realm", tenantId: null, companyName: "Simulated Books Ltd" });
+    await updateConnectionSettings(org.dataId, connId, { settings: { expense_account_id: "sim-expense-general", deposit_account_id: "sim-bank-checking", push_payments: true, push_expenses: true } });
+    const outs = await onAccountingRelevantEvent({ user_id: org.dataId, type: "supplier_bill.paid", entity: "supplier_bill", entity_id: bill.id });
+    expect(outs.find((o) => o.kind === "bill")?.status).toBe("ok");
+    const payments = outs.filter((o) => o.kind === "bill_payment");
+    expect(payments).toHaveLength(2);
+    expect(payments.every((o) => o.status === "ok")).toBe(true);
+    const links = await sql<{ entity_kind: string }>(`SELECT entity_kind FROM accounting_links WHERE connection_id = $1 AND entity_kind IN ('bill', 'bill_payment', 'supplier')`, [connId]);
+    expect(links.filter((l) => l.entity_kind === "bill_payment")).toHaveLength(2);
+    expect(links.some((l) => l.entity_kind === "supplier")).toBe(true);
+    const sim = await sql<{ kind: string; payload: string }>(`SELECT kind, payload FROM accounting_sim_objects WHERE connection_id = $1 AND kind = 'BillPayment'`, [connId]);
+    expect(sim).toHaveLength(2);
+    const payload = JSON.parse(sim[0].payload) as { Line: Array<{ LinkedTxn: Array<{ TxnType: string }> }>; TotalAmt: number };
+    expect(payload.Line[0].LinkedTxn[0].TxnType).toBe("Bill");
+    expect([20, 37]).toContain(payload.TotalAmt);
+    // Unchanged entities are skipped on the next due scan; nothing is pushed twice.
+    const due = await pushDue(50);
+    const after = await sql(`SELECT 1 FROM accounting_sim_objects WHERE connection_id = $1 AND kind = 'BillPayment'`, [connId]);
+    expect(after).toHaveLength(2);
+    expect(due.errors).toBe(0);
+  });
+
   it("AP aging buckets an overdue open bill per supplier; overdue filter finds it", async () => {
     const bills = await import("@/app/api/supplier-bills/route");
     const overdue = (await api<{ bill: Bill }>(bills.POST, "/api/supplier-bills", {

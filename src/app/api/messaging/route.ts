@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
-import { decryptSecret } from "@/lib/secure-store";
 import { parseConversation, saveConversation, type ConversationTurn } from "@/lib/twilio-webhook";
 import type { InboundChannel } from "@/lib/receptionist/inbound-agent";
 import { sendMailReply } from "@/lib/mail/send";
 import { takeOverByConversation } from "@/lib/webchat/service";
+import { loadTwilioCreds, sendViaTwilio, twilioConfigured, type TwilioCreds } from "@/lib/messaging/twilio";
 
 export async function GET() {
   let scope;
@@ -38,38 +38,6 @@ const postSchema = z.object({
   text: z.string().trim().min(1).max(1600),
 });
 
-interface TwilioCreds {
-  twilio_sid: string | null;
-  twilio_auth_token: string | null;
-  twilio_from_number: string | null;
-}
-
-function plain(v: string | null): string {
-  return v ? decryptSecret(v) ?? v : "";
-}
-
-/** Send via Twilio's REST API with fetch (no SDK). Returns the message SID. */
-async function sendViaTwilio(creds: TwilioCreds, channel: InboundChannel, to: string, body: string): Promise<string> {
-  const sid = plain(creds.twilio_sid);
-  const token = plain(creds.twilio_auth_token);
-  const from = creds.twilio_from_number ?? "";
-  const prefix = channel === "whatsapp" ? "whatsapp:" : "";
-  const form = new URLSearchParams({ From: `${prefix}${from}`, To: `${prefix}${to}`, Body: body });
-
-  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: form.toString(),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const data = (await res.json().catch(() => ({}))) as { sid?: string; message?: string };
-  if (!res.ok) throw new Error(data.message ?? `Twilio returned ${res.status}`);
-  return data.sid ?? "";
-}
-
 /** Append a human-authored reply to a thread and send it when Twilio is configured. */
 export async function POST(req: NextRequest) {
   let scope;
@@ -91,15 +59,10 @@ export async function POST(req: NextRequest) {
     );
     if (!conv) return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
 
-    const creds = await queryOne<TwilioCreds>(
-      `SELECT twilio_sid, twilio_auth_token, twilio_from_number FROM user_integrations WHERE user_id = $1`,
-      [scope.dataId]
-    ).catch(() => null);
+    const creds: TwilioCreds | null = await loadTwilioCreds(scope.dataId);
 
     const isWebchat = conv.channel === "webchat";
-    const canSend =
-      conv.channel !== "voice" && conv.channel !== "email" && !isWebchat &&
-      !!creds?.twilio_sid && !!creds?.twilio_auth_token && !!creds?.twilio_from_number;
+    const canSend = conv.channel !== "voice" && conv.channel !== "email" && !isWebchat && twilioConfigured(creds);
 
     let simulated = !canSend && !isWebchat;
     let sendError: string | null = null;

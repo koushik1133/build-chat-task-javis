@@ -7,6 +7,7 @@ import { businessName } from "@/lib/money/quotes";
 import { orgTimezone, type BuiltPdf } from "@/lib/pdf/documents";
 import { tableExists } from "@/lib/table-exists";
 import { entityExists } from "@/lib/attachments/store";
+import { getObject } from "@/lib/attachments/storage";
 import type { AttachmentEntityKind } from "@/lib/attachments/types";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import { DocumentError, getTemplate } from "./templates";
@@ -377,6 +378,54 @@ export async function buildDocumentPdf(dataId: string, doc: DocumentDTO, opts: {
   const stamps = signers.filter((s) => s.status === "signed").map(toStamp);
   const bytes = renderDocumentPdf(toInput(doc), stamps, branding, { business, timezone, documentHash: unsignedHash, redactEvidence: opts.redactEvidence });
   return { bytes, filename: `${safeName(doc.title)}-signed.pdf`, hash: documentHash(bytes), signed: true };
+}
+
+/** Raised when the stored signed PDF no longer matches `signed_pdf_hash` (tampering or storage corruption). */
+export class SignedPdfIntegrityError extends Error {
+  constructor(public readonly documentId: string, public readonly expected: string, public readonly actual: string | null) {
+    super(`Signed PDF for document ${documentId} failed its integrity check`);
+    this.name = "SignedPdfIntegrityError";
+  }
+}
+
+/** File-name suffix of the signer-facing copy (evidence redacted) stored next to the full signed PDF. */
+export const PUBLIC_SIGNED_SUFFIX = "-signed-public.pdf";
+
+/**
+ * The immutable signed copy: the attachment written at completion, verified
+ * against its recorded hash (`signed_pdf_hash` for the full copy; the
+ * attachment's own sha256 for the redacted signer copy). Re-rendering a signed
+ * document is never done — render changes would silently alter a legal record —
+ * so when the attachment is missing the document is unavailable, not regenerated.
+ */
+export async function loadSignedPdf(dataId: string, doc: DocumentDTO, opts: { redacted?: boolean } = {}): Promise<BuiltPdf> {
+  if (doc.status !== "signed") throw new DocumentError("Document is not fully signed", 409);
+  if (!doc.signed_pdf_hash) throw new SignedPdfIntegrityError(doc.id, "", null);
+  const row = opts.redacted
+    ? await queryOne<{ storage_path: string; content_type: string; file_name: string; sha256: string }>(
+        `SELECT storage_path, content_type, file_name, sha256 FROM attachments
+          WHERE user_id = $1 AND entity_kind = 'document' AND entity_id = $2 AND deleted_at IS NULL AND file_name LIKE $3
+          ORDER BY created_at ASC LIMIT 1`,
+        [dataId, doc.id, `%${PUBLIC_SIGNED_SUFFIX}`]
+      )
+    : await queryOne<{ storage_path: string; content_type: string; file_name: string; sha256: string }>(
+        `SELECT storage_path, content_type, file_name, sha256 FROM attachments
+          WHERE user_id = $1 AND entity_kind = 'document' AND entity_id = $2 AND deleted_at IS NULL AND sha256 = $3
+          ORDER BY created_at ASC LIMIT 1`,
+        [dataId, doc.id, doc.signed_pdf_hash]
+      );
+  if (!row) throw new SignedPdfIntegrityError(doc.id, doc.signed_pdf_hash, null);
+  const expected = opts.redacted ? row.sha256 : doc.signed_pdf_hash;
+  const obj = await getObject(row.storage_path, row.content_type);
+  if (!obj) throw new SignedPdfIntegrityError(doc.id, expected, null);
+  const actual = documentHash(obj.bytes);
+  if (actual !== expected) throw new SignedPdfIntegrityError(doc.id, expected, actual);
+  return { bytes: new Uint8Array(obj.bytes), filename: row.file_name, hash: actual, signed: true };
+}
+
+/** Unsigned → fresh render; signed → the verified stored copy (redacted variant for signers). */
+export async function servePdf(dataId: string, doc: DocumentDTO, opts: { redacted?: boolean } = {}): Promise<BuiltPdf> {
+  return doc.status === "signed" ? loadSignedPdf(dataId, doc, opts) : buildUnsignedPdf(dataId, doc);
 }
 
 function safeName(title: string): string {

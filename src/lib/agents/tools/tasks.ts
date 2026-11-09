@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { registerTool } from "@/lib/agents/registry";
-import { emitEvent } from "@/lib/events/bus";
 import type { ToolResult } from "@/lib/agents/types";
+import { createTask, TASK_PRIORITIES } from "@/lib/tasks/store";
 
 /** Personal to-do list tools (the `tasks` table). */
 
@@ -51,32 +51,40 @@ registerTool<ListInputT>({
 const CreateInput = z.object({
   title: z.string().min(1).max(200),
   due: z.string().max(40).optional(),
+  assignee_id: z.string().max(100).optional(),
+  priority: z.enum(TASK_PRIORITIES).optional(),
 });
 type CreateInputT = z.infer<typeof CreateInput>;
 
 registerTool<CreateInputT>({
   name: "tasks.create",
   module: "tasks",
-  description: "Create a to-do task. `due` (ISO date) is appended to the title since tasks have no due column.",
+  description: "Create a to-do task with an optional due date-time (ISO 8601), assignee (member user id) and priority (low|normal|high|urgent).",
   input: CreateInput,
   parameters: {
     type: "object",
-    properties: { title: { type: "string" }, due: { type: "string", description: "ISO date, optional" } },
+    properties: {
+      title: { type: "string" },
+      due: { type: "string", description: "ISO date or date-time, optional (a bare date is due at end of that day UTC)" },
+      assignee_id: { type: "string", description: "Member user id, optional" },
+      priority: { type: "string", enum: ["low", "normal", "high", "urgent"], description: "Default normal" },
+    },
     required: ["title"],
   },
   scope: "write",
   requiresApproval: false,
-  preview: (i) => `Create task "${i.title}"${i.due ? ` due ${i.due}` : ""}`,
+  preview: (i) => `Create task "${i.title}"${i.due ? ` due ${i.due}` : ""}${i.priority && i.priority !== "normal" ? ` (${i.priority})` : ""}`,
   async run(ctx, input) {
     try {
-      const title = input.due ? `${input.title.trim()} (due ${input.due})`.slice(0, 200) : input.title.trim();
-      const row = await queryOne<TaskRow>(
-        `INSERT INTO tasks (user_id, title) VALUES ($1, $2) RETURNING id, title, done, created_at`,
-        [ctx.userId, title]
-      );
-      if (!row) return fail("Insert returned no row");
-      void emitEvent(ctx.userId, { type: "task.created", entity: "task", entityId: row.id, data: { title: row.title, source: "tool" } });
-      return { ok: true, data: row, summary: `Created task "${row.title}"` };
+      let dueAt: string | null = null;
+      if (input.due) {
+        const raw = /^\d{4}-\d{2}-\d{2}$/.test(input.due) ? `${input.due}T23:59:59Z` : input.due;
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) return fail("`due` must be an ISO date or date-time");
+        dueAt = d.toISOString();
+      }
+      const task = await createTask(ctx.userId, { title: input.title, due_at: dueAt, assignee_id: input.assignee_id ?? null, priority: input.priority ?? "normal" }, "tool");
+      return { ok: true, data: task, summary: `Created task "${task.title}"${task.due_at ? ` due ${task.due_at.slice(0, 10)}` : ""}` };
     } catch (err) {
       return fail(`Create failed: ${errMsg(err)}`);
     }

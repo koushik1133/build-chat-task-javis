@@ -1,8 +1,8 @@
 import type {
-  AccountOption, AccountingAuth, AccountingBill, AccountingContact, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingSupplier,
+  AccountOption, AccountingAuth, AccountingBill, AccountingBillPayment, AccountingContact, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingSupplier,
   ConnectionContext, LiveAccountingProvider, PullPaymentsResult, PushResult, RemotePayment, RemoteRef,
 } from "../types";
-import { majorToMinor, qboBill, qboCustomer, qboInvoice, qboItem, qboPayment, qboPurchase, qboVendor, type QboPayload } from "../mapping";
+import { majorToMinor, qboBill, qboBillPayment, qboCustomer, qboInvoice, qboItem, qboPayment, qboPurchase, qboVendor, type QboPayload } from "../mapping";
 
 /**
  * QuickBooks Online via the REST API (no SDK). App credentials come from
@@ -71,7 +71,7 @@ async function token(params: Record<string, string>): Promise<AccountingAuth> {
   };
 }
 
-type Entity = "Customer" | "Invoice" | "Payment" | "Purchase" | "Item" | "Vendor" | "Bill";
+type Entity = "Customer" | "Invoice" | "Payment" | "Purchase" | "Item" | "Vendor" | "Bill" | "BillPayment";
 
 async function readEntity(auth: AccountingAuth, conn: ConnectionContext, entity: Entity, id: string): Promise<{ Id: string; SyncToken: string; MetaData?: { LastUpdatedTime?: string } }> {
   const r = await api<Record<string, { Id: string; SyncToken: string; MetaData?: { LastUpdatedTime?: string } }>>(auth, conn, `/${entity.toLowerCase()}/${encodeURIComponent(id)}`);
@@ -181,6 +181,9 @@ export const quickbooksProvider: LiveAccountingProvider = {
   },
   async pushBill(auth, conn, bill: AccountingBill, existing) {
     return upsert(auth, conn, "Bill", qboBill(bill, conn.settings), existing);
+  },
+  async pushBillPayment(auth, conn, payment: AccountingBillPayment, existing) {
+    return upsert(auth, conn, "BillPayment", qboBillPayment(payment, conn.settings), existing);
   },
 
   /** CDC: every Payment changed since the cursor (max 30 days back per Intuit; we clamp). */

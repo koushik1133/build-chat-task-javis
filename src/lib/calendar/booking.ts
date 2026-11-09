@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { query, queryOne, transaction } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
+import { recordConsent, type ConsentSubject } from "@/lib/privacy/consent";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { listSlots, wouldClash, zonedParts, type AvailabilityRule, type Interval } from "@/lib/calendar/slots";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
@@ -249,6 +250,8 @@ export interface CreatedBooking {
   booking: BookingRow;
   /** Plain cancel token — shown once to the customer. */
   cancelToken: string;
+  /** True when this booking created the CRM contact (vs matched an existing one or none). */
+  contactCreated: boolean;
 }
 
 function fmtWhen(iso: string, timezone: string): string {
@@ -267,8 +270,8 @@ function fmtWhen(iso: string, timezone: string): string {
   }
 }
 
-/** Find an existing contact by email/phone, or create one. Returns the id. */
-async function upsertContact(dataId: string, input: { name: string; email?: string | null; phone?: string | null }): Promise<string | null> {
+/** Find an existing contact by email/phone, or create one. Returns the id and whether this booking created it. */
+async function upsertContact(dataId: string, input: { name: string; email?: string | null; phone?: string | null }): Promise<{ id: string; created: boolean } | null> {
   try {
     const email = input.email?.trim().toLowerCase() || null;
     const phone = input.phone?.trim() || null;
@@ -277,7 +280,7 @@ async function upsertContact(dataId: string, input: { name: string; email?: stri
       `SELECT id FROM crm_contacts WHERE user_id = $1 AND ((($2::text IS NOT NULL) AND LOWER(email) = $2) OR (($3::text IS NOT NULL) AND phone = $3)) LIMIT 1`,
       [dataId, email, phone]
     );
-    if (existing) return existing.id;
+    if (existing) return { id: existing.id, created: false };
     const id = randomUUID();
     await query(
       `INSERT INTO crm_contacts (id, user_id, domain, full_name, email, phone, tags, lifecycle, notes, last_contact)
@@ -285,11 +288,36 @@ async function upsertContact(dataId: string, input: { name: string; email?: stri
       [id, dataId, input.name.trim().slice(0, 200), email, phone]
     );
     await emitEvent(dataId, { type: "crm.contact.created", entity: "contact", entityId: id, data: { source: "booking" } });
-    return id;
+    return { id, created: true };
   } catch (err) {
     console.error("[booking] contact upsert failed:", err);
     return null;
   }
+}
+
+/** Where a booking form's marketing consent is recorded (pure; see `recordBookingConsent`). */
+export function consentSubjectForBooking(b: { id: string; contact_id: string | null; contactCreated: boolean }): ConsentSubject {
+  // An unverified public form must never flip consent on an existing customer's record: only a
+  // contact this very booking created takes the consent; otherwise it lives on the booking itself.
+  return b.contactCreated && b.contact_id ? { kind: "contact", id: b.contact_id } : { kind: "booking", id: b.id };
+}
+
+/**
+ * Record `consent: { marketing }` from a public booking form for email + SMS,
+ * against the contact when the booking created it, else against the booking.
+ */
+export async function recordBookingConsent(
+  dataId: string,
+  created: Pick<CreatedBooking, "booking" | "contactCreated">,
+  marketing: boolean,
+  evidence: { ip?: string | null; ua?: string | null; text_version?: string | null }
+): Promise<ConsentSubject> {
+  const subject = consentSubjectForBooking({ id: created.booking.id, contact_id: created.booking.contact_id, contactCreated: created.contactCreated });
+  const status = marketing ? "granted" : "withdrawn";
+  for (const purpose of ["marketing_email", "marketing_sms"] as const) {
+    await recordConsent(dataId, subject, purpose, status, "form", evidence).catch(() => undefined);
+  }
+  return subject;
 }
 
 export async function createBooking(dataId: string, input: CreateBookingInput): Promise<CreatedBooking> {
@@ -334,7 +362,9 @@ export async function createBooking(dataId: string, input: CreateBookingInput): 
     if (!slots.includes(start.toISOString())) throw new BookingConflictError();
   }
 
-  const contactId = input.contactId ?? (await upsertContact(dataId, input));
+  const upserted = input.contactId ? null : await upsertContact(dataId, input);
+  const contactId = input.contactId ?? upserted?.id ?? null;
+  const contactCreated = upserted?.created ?? false;
   const id = randomUUID();
   const cancelToken = randomBytes(24).toString("base64url");
 
@@ -407,7 +437,7 @@ export async function createBooking(dataId: string, input: CreateBookingInput): 
     data: { name: booking.name, email: booking.email, startsAt: booking.starts_at, endsAt: booking.ends_at, bookingTypeId: type?.id ?? null, source: booking.source, contactId },
   });
 
-  return { booking, cancelToken };
+  return { booking, cancelToken, contactCreated };
 }
 
 export async function getBooking(dataId: string, id: string): Promise<BookingRow | null> {

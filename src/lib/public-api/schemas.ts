@@ -10,6 +10,7 @@ import { StaffInputSchema } from "@/lib/workforce/staff";
 import { ShiftInputSchema } from "@/lib/workforce/shifts";
 import { LeaveRequestSchema } from "@/lib/workforce/leave";
 import { EMPLOYMENT_TYPES, LEAVE_KINDS, LEAVE_STATUSES, SHIFT_STATUSES } from "@/lib/workforce/pure";
+import { MilestoneInputSchema, ProjectInputSchema, ProjectPatchSchema, ProjectTaskInputSchema, PROJECT_STATUSES } from "@/lib/projects/pure";
 
 /**
  * Zod schemas for every /api/v1 request and response. The route registry
@@ -72,10 +73,30 @@ export const ContactListQuery = SearchListQuery.extend({
 
 /* ─── Tasks ────────────────────────────────────────────────────────────── */
 
-export const Task = z.object({ id: Id, title: z.string(), done: z.boolean(), chat_id: z.string().nullable(), created_at: Iso });
-export const TaskCreate = z.object({ title: z.string().trim().min(1).max(200) }).strict();
-export const TaskPatch = z.object({ title: z.string().trim().min(1).max(200).optional(), done: z.boolean().optional() }).strict();
-export const TaskListQuery = ListQuery.extend({ done: z.enum(["true", "false"]).optional() });
+export const TaskPriority = z.enum(["low", "normal", "high", "urgent"]);
+export const Task = z.object({
+  id: Id,
+  title: z.string(),
+  done: z.boolean(),
+  chat_id: z.string().nullable(),
+  due_at: Iso.nullable().describe("Due date-time (ISO 8601); null when none"),
+  assignee_id: z.string().nullable().describe("Member user id the task is assigned to"),
+  priority: TaskPriority,
+  overdue: z.boolean().describe("Open and past due_at"),
+  created_at: Iso,
+});
+const TaskFields = {
+  due_at: z.string().datetime({ offset: true }).nullable().optional(),
+  assignee_id: z.string().trim().min(1).max(100).nullable().optional(),
+  priority: TaskPriority.optional(),
+};
+export const TaskCreate = z.object({ title: z.string().trim().min(1).max(200), ...TaskFields }).strict();
+export const TaskPatch = z.object({ title: z.string().trim().min(1).max(200).optional(), done: z.boolean().optional(), ...TaskFields }).strict();
+export const TaskListQuery = ListQuery.extend({
+  done: z.enum(["true", "false"]).optional(),
+  assignee_id: z.string().max(100).optional().describe("Only tasks assigned to this member user id"),
+  overdue: z.enum(["true"]).optional().describe("Only open tasks past their due date"),
+});
 
 /* ─── Money ────────────────────────────────────────────────────────────── */
 
@@ -826,6 +847,24 @@ export const DsrOpen = z
   })
   .strict();
 
+/* ─── Marketing ────────────────────────────────────────────────────────── */
+export const MarketingCampaignStats = z.object({
+  total: z.number().int(), queued: z.number().int(), skipped_no_consent: z.number().int(), sent: z.number().int(), delivered: z.number().int(), opened: z.number().int(), clicked: z.number().int(),
+  bounced: z.number().int(), failed: z.number().int(), unsubscribed: z.number().int(), open_rate: z.number(), click_rate: z.number(), bounce_rate: z.number(), unsubscribe_rate: z.number(),
+});
+export const MarketingCampaign = z.object({
+  id: Id, name: z.string(), channel: z.enum(["email", "sms"]), status: z.enum(["draft", "scheduled", "sending", "sent", "paused", "cancelled"]),
+  audience_id: Id.nullable(), template_id: Id.nullable(), subject: z.string().nullable(), schedule_at: z.string().nullable(),
+  sent_count: z.number().int(), delivered_count: z.number().int(), opened_count: z.number().int(), clicked_count: z.number().int(), bounced_count: z.number().int(), unsubscribed_count: z.number().int(), skipped_count: z.number().int(),
+  created_at: z.string(), started_at: z.string().nullable(), finished_at: z.string().nullable(),
+});
+export const MarketingCampaignWithStats = MarketingCampaign.extend({ stats: MarketingCampaignStats });
+export const MarketingCampaignListQuery = ListQuery.extend({ status: z.enum(["draft", "scheduled", "sending", "sent", "paused", "cancelled"]).optional() });
+export const MarketingLaunchBody = z.object({ force: z.boolean().optional().describe("Launch even when every contact lacks consent (everything is skipped)") }).strict();
+export const MarketingLaunchResult = MarketingCampaign.extend({ queued: z.number().int(), skipped_no_consent: z.number().int(), skipped_no_address: z.number().int() });
+export const MarketingAudience = z.object({ id: Id, name: z.string(), definition: z.record(z.unknown()), is_dynamic: z.boolean(), size_cache: z.number().int().nullable(), created_at: z.string(), updated_at: z.string() });
+export const MarketingTemplate = z.object({ id: Id, name: z.string(), subject: z.string(), preheader: z.string().nullable(), body_md: z.string(), category: z.string(), created_at: z.string(), updated_at: z.string() });
+
 /* ─── Voice campaigns ──────────────────────────────────────────────────── */
 export const CampaignStats = z.object({
   total: z.number().int(),
@@ -1363,3 +1402,108 @@ export const AutomationRun = z.object({
   created_at: MaybeIso,
 });
 export const AutomationRunListQuery = ListQuery.extend({ status: z.enum(["queued", "running", "waiting", "done", "failed", "skipped"]).optional() });
+
+/* ─── Projects ──────────────────────────────────────────────────────────── */
+
+
+const Ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Calendar date YYYY-MM-DD");
+export const Project = z.object({
+  id: Id,
+  name: z.string(),
+  code: z.string().nullable(),
+  description_md: z.string().nullable(),
+  contact_id: z.string().nullable(),
+  contact_name: z.string().nullable(),
+  quote_id: z.string().nullable(),
+  status: z.enum(PROJECT_STATUSES),
+  starts_on: Ymd.nullable(),
+  due_on: Ymd.nullable(),
+  budget_minor: z.number().int(),
+  currency: z.string(),
+  billing_mode: z.enum(["fixed", "hourly", "none"]),
+  hourly_rate_minor: z.number().int(),
+  owner_member_id: z.string().nullable(),
+  color: z.string().nullable(),
+  archived_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const ProjectCreate = ProjectInputSchema;
+export const ProjectPatch = ProjectPatchSchema;
+export const ProjectListQuery = ListQuery.extend({ status: z.enum(PROJECT_STATUSES).optional(), archived: z.enum(["true", "false"]).optional() });
+export const ProjectMilestone = z.object({
+  id: Id,
+  project_id: Id,
+  name: z.string(),
+  due_on: Ymd.nullable(),
+  status: z.enum(["open", "done"]),
+  sort: z.number().int(),
+  completed_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+});
+export const ProjectMilestoneCreate = MilestoneInputSchema;
+export const ProjectTask = z.object({
+  id: Id,
+  title: z.string(),
+  done: z.boolean(),
+  project_id: z.string().nullable(),
+  milestone_id: z.string().nullable(),
+  assignee_id: z.string().nullable(),
+  due_at: MaybeIso.nullable(),
+  priority: z.enum(["low", "medium", "high", "urgent"]).nullable(),
+  estimate_minutes: z.number().int().nullable(),
+  sort: z.number().int().nullable(),
+  depends_on: z.array(z.string()),
+  created_at: MaybeIso,
+});
+export const ProjectTaskCreate = ProjectTaskInputSchema;
+export const ProjectTaskListQuery = z.object({ done: z.enum(["true", "false"]).optional(), milestone: z.string().max(100).optional(), assignee: z.string().max(100).optional() });
+
+/* ─── Phase 8 lane B: storefront + orders ──────────────────────────────── */
+import { ORDER_STATUSES, ShippingAddressSchema } from "@/lib/storefront/pure";
+import { StorefrontProductPatchSchema } from "@/lib/storefront/catalog";
+
+export const Order = z.object({
+  id: Id,
+  number: z.string(),
+  status: z.enum(ORDER_STATUSES),
+  status_label: z.string(),
+  customer_name: z.string(),
+  customer_email: z.string(),
+  customer_phone: z.string().nullable(),
+  shipping_address: ShippingAddressSchema.nullable(),
+  items: z.array(LineItemSchema),
+  subtotal_minor: Money,
+  tax_minor: Money,
+  shipping_minor: Money,
+  total_minor: Money,
+  currency: Currency,
+  contact_id: z.string().nullable(),
+  invoice_id: z.string().nullable(),
+  payment_ref: z.string().nullable(),
+  consent_marketing: z.boolean(),
+  notes: z.string().nullable(),
+  paid_at: MaybeIso.nullable(),
+  fulfilled_at: MaybeIso.nullable(),
+  cancelled_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const OrderListQuery = SearchListQuery.extend({ status: z.enum(ORDER_STATUSES).optional() });
+export const OrderCancel = z.object({ reason: z.string().trim().max(500).nullable().optional(), restock: z.boolean().optional() }).strict();
+export const OrderCancelResult = z.object({ order: Order, released: z.number().int(), refunded_minor: Money });
+export const StorefrontProduct = z.object({
+  id: Id,
+  sku: z.string().nullable(),
+  name: z.string(),
+  unit_price_minor: Money,
+  currency: Currency,
+  track_stock: z.boolean(),
+  stock_available: z.number().int(),
+  active: z.boolean(),
+  visible: z.boolean(),
+  sort: z.number().int(),
+  description_md: z.string().nullable(),
+  image_url: z.string().nullable(),
+});
+export const StorefrontProductPut = StorefrontProductPatchSchema;

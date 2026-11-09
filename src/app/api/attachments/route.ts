@@ -4,6 +4,7 @@ import { requireScope, scopeErrorResponse, type Scope } from "@/lib/auth/scope";
 import { rateLimitAsync } from "@/lib/request-limits";
 import { errorResponse } from "@/lib/money/http";
 import { AttachmentError, entityExists, isEntityKind, listAttachments, uploadAttachment } from "@/lib/attachments/store";
+import { cappedRequest, isBodyTooLarge } from "@/lib/attachments/body-limit";
 import { AREA_FOR_ENTITY, ATTACHMENT_ENTITY_KINDS, ATTACHMENT_VISIBILITIES, MAX_ATTACHMENT_BYTES, type AttachmentEntityKind } from "@/lib/attachments/types";
 
 export const runtime = "nodejs";
@@ -48,7 +49,15 @@ export async function POST(req: NextRequest) {
   if (!(await rateLimitAsync(`attachments:upload:${scope.userId}`, 60, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   const declared = Number(req.headers.get("content-length") ?? "");
   if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_BYTES + 64 * 1024) return NextResponse.json({ error: "payload_too_large", detail: "File must be 20 MB or smaller" }, { status: 413 });
-  const form = await req.formData().catch(() => null);
+  // Cap while streaming: the parse aborts as soon as the body passes the limit (+ multipart overhead) instead of buffering it all.
+  let tooLarge = false;
+  const form = await cappedRequest(req, MAX_ATTACHMENT_BYTES + 64 * 1024)
+    .formData()
+    .catch((err: unknown) => {
+      tooLarge = isBodyTooLarge(err);
+      return null;
+    });
+  if (tooLarge) return NextResponse.json({ error: "payload_too_large", detail: "File must be 20 MB or smaller" }, { status: 413 });
   if (!form) return NextResponse.json({ error: "invalid_body", detail: "multipart/form-data expected" }, { status: 400 });
   const file = form.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "invalid_body", detail: "file is required" }, { status: 400 });

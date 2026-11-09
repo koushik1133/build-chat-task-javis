@@ -5,6 +5,7 @@ import {
   defaultLeaveHours,
   findShiftConflicts,
   localMidnightUtc,
+  overtimeHours,
   payrollLine,
   periodWeeks,
   remainingHours,
@@ -108,9 +109,18 @@ describe("payroll", () => {
     expect(line.gross_minor).toBe(111_000);
     expect(line.unpaid_leave_hours).toBe(4);
   });
-  it("prorates the overtime threshold by period length and contractors never accrue overtime", () => {
-    const twoWeeks = payrollLine({ staff, scheduledMinutes: 0, attendedMinutes: 85 * 60, paidLeaveHours: 0, unpaidLeaveHours: 0, periodWeeks: 2 });
-    expect(twoWeeks.overtime_hours).toBe(5);
+  it("counts overtime per calendar week, not per period: 50h + 35h over two weeks is 10h overtime", () => {
+    const twoWeeks = payrollLine({ staff, scheduledMinutes: 0, attendedMinutes: 85 * 60, paidLeaveHours: 0, unpaidLeaveHours: 0, periodWeeks: 2, attendedMinutesByWeek: { "2026-03-02": 50 * 60, "2026-03-09": 35 * 60 } });
+    expect(twoWeeks.overtime_hours).toBe(10);
+    expect(twoWeeks.regular_hours).toBe(75);
+    // 75h × $20 + 10h × $30 = $1,800
+    expect(twoWeeks.gross_minor).toBe(180_000);
+    // The same 85h spread evenly never crosses 40h in a week.
+    const even = payrollLine({ staff, scheduledMinutes: 0, attendedMinutes: 85 * 60, paidLeaveHours: 0, unpaidLeaveHours: 0, periodWeeks: 2, attendedMinutesByWeek: { "2026-03-02": 42.5 * 60, "2026-03-09": 42.5 * 60 } });
+    expect(even.overtime_hours).toBe(5);
+    expect(overtimeHours({ a: 45 * 60, b: 30 * 60 }, 40)).toBe(5);
+    // Without week buckets everything is one week (legacy callers).
+    expect(payrollLine({ staff, scheduledMinutes: 0, attendedMinutes: 85 * 60, paidLeaveHours: 0, unpaidLeaveHours: 0, periodWeeks: 2 }).overtime_hours).toBe(45);
     const contractor = payrollLine({ staff: { ...staff, employment_type: "contractor" }, scheduledMinutes: 0, attendedMinutes: 85 * 60, paidLeaveHours: 0, unpaidLeaveHours: 0, periodWeeks: 1 });
     expect(contractor.overtime_hours).toBe(0);
     expect(contractor.gross_minor).toBe(85 * 2000);

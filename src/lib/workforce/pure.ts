@@ -307,8 +307,14 @@ export interface PayrollInput {
   paidLeaveHours: number;
   /** Approved unpaid/other leave hours (reported, not paid). */
   unpaidLeaveHours: number;
-  /** Length of the period in weeks (fractional allowed). */
+  /** Length of the period in weeks (fractional allowed); reported, not used for overtime. */
   periodWeeks: number;
+  /**
+   * Attended minutes bucketed by calendar week (Monday Y-M-D in the org
+   * timezone). Overtime is anything above `weekly_hours` in each week. When
+   * omitted, all attended minutes are treated as one week.
+   */
+  attendedMinutesByWeek?: Record<string, number>;
 }
 
 export interface PayrollLine {
@@ -335,15 +341,27 @@ export const OVERTIME_MULTIPLIER = 1.5;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
+ * Overtime hours: per calendar week, attended hours above `weeklyHours`.
+ * A week that is only partly inside the payroll range still gets the full
+ * weekly threshold (that is what "per calendar week" means for the worker).
+ */
+export function overtimeHours(attendedMinutesByWeek: Record<string, number>, weeklyHours: number): number {
+  const threshold = Math.max(0, weeklyHours);
+  let ot = 0;
+  for (const minutes of Object.values(attendedMinutesByWeek)) ot += Math.max(0, minutes / 60 - threshold);
+  return ot;
+}
+
+/**
  * One payroll line. Hours paid = attended hours + paid leave. Overtime is
- * anything above weekly_hours × weeks of *attended* time (contractors never
- * accrue overtime), paid at 1.5×.
+ * attended time above weekly_hours in each calendar week (org timezone);
+ * contractors never accrue overtime. Overtime is paid at 1.5×.
  */
 export function payrollLine(input: PayrollInput): PayrollLine {
   const attended = input.attendedMinutes / 60;
   const scheduled = input.scheduledMinutes / 60;
-  const threshold = input.staff.employment_type === "contractor" ? Number.POSITIVE_INFINITY : Math.max(0, input.staff.weekly_hours) * Math.max(0, input.periodWeeks);
-  const overtime = Math.max(0, attended - threshold);
+  const byWeek = input.attendedMinutesByWeek ?? { all: input.attendedMinutes };
+  const overtime = input.staff.employment_type === "contractor" ? 0 : Math.min(attended, overtimeHours(byWeek, input.staff.weekly_hours));
   const regular = attended - overtime;
   const rate = Number(input.staff.hourly_rate_minor) || 0;
   const gross = Math.floor((regular + input.paidLeaveHours) * rate + overtime * rate * OVERTIME_MULTIPLIER + 0.5);

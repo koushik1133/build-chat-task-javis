@@ -5,11 +5,11 @@ import {
   BookingValidationError,
   availableSlots,
   createBooking,
+  recordBookingConsent,
   getBookingTypeBySlug,
   resolveOrgBySlug,
 } from "@/lib/calendar/booking";
 import { groupSlotsByDay } from "@/lib/calendar/slots";
-import { recordConsent } from "@/lib/privacy/consent";
 
 export const runtime = "nodejs";
 // Slot availability is time-sensitive and public: never cache at any layer.
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: "a valid email is required" }, { status: 400 });
     if (typeof body.startsAt !== "string") return NextResponse.json({ error: "startsAt is required" }, { status: 400 });
 
-    const { booking, cancelToken } = await createBooking(r.org.dataId, {
+    const created = await createBooking(r.org.dataId, {
       bookingTypeId: r.type.id,
       name,
       email,
@@ -105,13 +105,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       notes: typeof body.notes === "string" ? body.notes : null,
       source: "public",
     });
-    // Optional `consent: { marketing: boolean }` → ledger row against the contact the booking created/matched.
+    const { booking, cancelToken } = created;
+    // Optional `consent: { marketing: boolean }` → ledger row on the contact this booking created, else on the booking.
     const consent = body.consent && typeof body.consent === "object" ? (body.consent as Record<string, unknown>) : null;
-    if (typeof consent?.marketing === "boolean" && booking.contact_id) {
-      const evidence = { ip: clientIp(req), ua: req.headers.get("user-agent"), text_version: `booking:${r.type.slug}` };
-      for (const purpose of ["marketing_email", "marketing_sms"] as const) {
-        void recordConsent(r.org.dataId, { kind: "contact", id: booking.contact_id }, purpose, consent.marketing ? "granted" : "withdrawn", "form", evidence).catch(() => undefined);
-      }
+    if (typeof consent?.marketing === "boolean") {
+      void recordBookingConsent(r.org.dataId, created, consent.marketing, { ip: clientIp(req), ua: req.headers.get("user-agent"), text_version: `booking:${r.type.slug}` }).catch(() => undefined);
     }
     return NextResponse.json(
       {

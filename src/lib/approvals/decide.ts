@@ -119,6 +119,27 @@ async function executeDirectly(userId: string, row: ApprovalRow): Promise<string
   }
 }
 
+/** Rejected `messaging.reply`: drop the hidden draft so it can never surface. */
+async function discardRejectedReply(dataId: string, row: ApprovalRow): Promise<string | null> {
+  let input: { to?: unknown; channel?: unknown } = {};
+  try {
+    input = JSON.parse(row.input ?? "{}");
+  } catch {
+    return null;
+  }
+  if (typeof input.to !== "string" || typeof input.channel !== "string") return null;
+  const channel = input.channel;
+  if (channel !== "sms" && channel !== "whatsapp" && channel !== "email" && channel !== "webchat") return null;
+  try {
+    const { discardPendingReply } = await import("@/lib/messaging/reply");
+    const r = await discardPendingReply(dataId, { to: input.to, channel });
+    return r.discarded ? "Draft discarded" : null;
+  } catch (err) {
+    console.error("[approvals] discard draft failed", err);
+    return null;
+  }
+}
+
 export async function getApproval(dataId: string, id: string): Promise<ApprovalRow | null> {
   return queryOne<ApprovalRow>(`SELECT ${APPROVAL_COLUMNS} FROM approvals WHERE id = $1 AND user_id = $2`, [id, dataId]).catch(() => null);
 }
@@ -186,6 +207,11 @@ export async function decideApproval(dataId: string, id: string, input: DecideIn
       (await queryOne<ApprovalRow>(`UPDATE approvals SET preview = $1 WHERE id = $2 AND user_id = $3 RETURNING ${APPROVAL_COLUMNS}`, [preview, row.id, dataId]).catch(
         () => null
       )) ?? { ...row, preview };
+  }
+
+  if (decision === "rejected" && row.tool_name === "messaging.reply") {
+    // The receptionist draft is a hidden pending turn in the thread; rejecting discards it.
+    outcome = await discardRejectedReply(dataId, row);
   }
 
   const agent = updated.agent_id

@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { staffNames, WorkforceError } from "./staff";
-import { attendanceMinutes, ATTENDANCE_SOURCES, shiftMinutes, type AttendanceDTO } from "./pure";
+import { attendanceMinutes, ATTENDANCE_SOURCES, shiftMinutes, type AttendanceDTO, localDate, weekStartOf } from "./pure";
 
 /**
  * Attendance: actual clock in/out per staff member. Crew links write here
@@ -157,6 +157,22 @@ export async function clockOutStaff(dataId: string, staffId: string): Promise<At
 }
 
 /** Attended minutes per staff id in [from, to) (closed rows only). */
+/** Attended minutes per staff member per calendar week (Monday Y-M-D of `clock_in` in `timezone`). */
+export async function attendedMinutesByStaffAndWeek(dataId: string, from: string, to: string, timezone: string): Promise<Map<string, Record<string, number>>> {
+  const rows = await query<{ staff_id: string; clock_in: string | Date; minutes: number | string | null }>(
+    `SELECT staff_id, clock_in, minutes FROM attendance WHERE user_id = $1 AND clock_in >= $2 AND clock_in < $3 AND clock_out IS NOT NULL LIMIT 50000`,
+    [dataId, from, to]
+  );
+  const out = new Map<string, Record<string, number>>();
+  for (const r of rows) {
+    const week = weekStartOf(localDate(r.clock_in, timezone));
+    const weeks = out.get(r.staff_id) ?? {};
+    weeks[week] = (weeks[week] ?? 0) + (Number(r.minutes) || 0);
+    out.set(r.staff_id, weeks);
+  }
+  return out;
+}
+
 export async function attendedMinutesByStaff(dataId: string, from: string, to: string): Promise<Map<string, number>> {
   const rows = await query<{ staff_id: string; n: string }>(
     `SELECT staff_id, COALESCE(SUM(minutes), 0)::text AS n FROM attendance WHERE user_id = $1 AND clock_in >= $2 AND clock_in < $3 AND clock_out IS NOT NULL GROUP BY staff_id`,

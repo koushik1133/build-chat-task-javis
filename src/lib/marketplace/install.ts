@@ -5,7 +5,10 @@ import { getPlaybook } from "@/lib/agents/playbooks";
 import { createType, getType } from "@/lib/records/store";
 import { tableExists } from "@/lib/table-exists";
 import { assertDefinition, getListing } from "./catalog";
-import { isBuiltinId, type InstallResult, type ListingDTO, type ListingKind } from "./types";
+import { isBuiltinId, isV2AutomationDefinition, type InstallResult, type ListingDTO, type ListingKind } from "./types";
+import { createAutomation } from "@/lib/automations/store";
+import { legacyToV2 } from "@/lib/automations/legacy";
+import type { AutomationDefinition as EngineAutomationDefinition } from "@/lib/automations/types";
 
 /**
  * Create the listing's entity in the installing org. Idempotent per
@@ -71,13 +74,19 @@ async function installAutomation(dataId: string, listing: ListingDTO): Promise<{
   const def = assertDefinition(listing);
   if (def.kind !== "automation") throw new Error("Definition mismatch");
   const d = def.definition;
-  const row = await queryOne<{ id: string }>(
-    `INSERT INTO automations (user_id, name, trigger_event, action_type, kanban_label, action_config, schedule_time, schedule_timezone, schedule_days, status, run_count)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'paused', 0) RETURNING id::text AS id`,
-    [dataId, d.name, d.trigger_event, d.action_type, d.kanban_label, JSON.stringify(d.action_config ?? {}), d.schedule_time, d.schedule_timezone, d.schedule_days]
-  );
-  if (!row) throw new Error("Could not create the automation");
-  return { entityId: row.id, note: `Automation "${d.name}" installed paused. Review its settings (recipients, webhooks, agent) and resume it from Automations.` };
+  // Legacy listings are adapted through the same converter the engine uses for old rows.
+  const v2: EngineAutomationDefinition = isV2AutomationDefinition(d)
+    ? { name: d.name, description: d.description ?? null, trigger_type: d.trigger_type, trigger_config: d.trigger_config, conditions: d.conditions, steps: d.steps, autonomy: d.autonomy, enabled: false }
+    : {
+        ...legacyToV2({
+          id: "", name: d.name, trigger_event: d.trigger_event, action_type: d.action_type, kanban_label: d.kanban_label, action_config: JSON.stringify(d.action_config ?? {}),
+          schedule_time: d.schedule_time, schedule_timezone: d.schedule_timezone, schedule_days: d.schedule_days, status: "paused",
+        }),
+        enabled: false,
+      };
+  // Always installed paused, gated on approval, so scrubbed placeholders (webhook URL, agent, recipients) get reviewed first.
+  const row = await createAutomation(dataId, { ...v2, enabled: false, autonomy: "approve" }, { templateKey: `marketplace:${listing.id}` });
+  return { entityId: row.id, note: `Automation "${v2.name}" installed paused. Review its steps (recipients, webhook URL, agent) and enable it from Automations.` };
 }
 
 async function installPack(dataId: string, listing: ListingDTO): Promise<{ entityId: string; note: string | null }> {
