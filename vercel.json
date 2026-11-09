@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "crons": [
-    { "path": "/api/cron/agents", "schedule": "* * * * *" }
+    { "path": "/api/cron/agents", "schedule": "0 3 * * *" }
   ],
   "functions": {
     "src/app/api/import/preview/route.ts": { "maxDuration": 60 },

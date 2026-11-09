@@ -1,0 +1,36 @@
+name: Background worker tick
+
+# Triggers the app's worker endpoints on a schedule. Vercel Hobby only allows daily
+# crons, so this workflow provides the frequent tick (GitHub's minimum is 5 minutes
+# and scheduled runs can be delayed). Needs repository secrets:
+#   APP_URL      e.g. https://your-app.vercel.app   (no trailing slash)
+#   CRON_SECRET  the same value as the CRON_SECRET env var in the deployment
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: worker-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call worker endpoints
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "APP_URL / CRON_SECRET secrets not set; skipping."
+            exit 0
+          fi
+          for path in /api/cron/agents /api/cron/automations; do
+            code=$(curl -sS -o /tmp/out.txt -w "%{http_code}" --max-time 55 \
+              -X POST -H "Authorization: Bearer $CRON_SECRET" "${APP_URL%/}$path" || echo "000")
+            echo "$path -> $code"
+            if [ "$code" != "200" ]; then head -c 300 /tmp/out.txt; echo; fi
+          done

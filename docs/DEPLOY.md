@@ -61,7 +61,7 @@ Services: `postgres` (volume `pgdata`, host port 5433 for psql/backups), `migrat
 1. Import the repository (framework auto-detected; `vercel.json` only adds crons and function durations). Do **not** set `NEXT_OUTPUT` — standalone output is for Docker only.
 2. Add every variable from `.env.example` you use (Settings → Environment Variables). `NEXT_PUBLIC_APP_URL` must be the production domain.
 3. Database: Aurora DSQL with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (serverless functions have no instance role), or a managed Postgres fronted so that it is reachable — see the table above. Set `RATE_LIMIT_STORE=db` (functions do not share memory).
-4. Cron: `vercel.json` schedules `/api/cron/agents` `* * * * *`. Vercel sends `Authorization: Bearer $CRON_SECRET` automatically when `CRON_SECRET` is set in the project. **Hobby plan runs crons at most once per day and caps functions at 60 s**; per-minute schedules need Pro. The cron route exports `maxDuration = 60`; import/PDF/export routes get 60 s via `vercel.json`.
+4. Cron: `vercel.json` schedules `/api/cron/agents` once a day (`0 3 * * *`) because the Hobby plan rejects anything more frequent and fails the whole build. For frequent ticks use `.github/workflows/cron.yml` (every 5 minutes, free on public repos; set repository secrets `APP_URL` and `CRON_SECRET`), an external pinger such as cron-job.org, or on a Pro plan change the schedule to `* * * * *`. Vercel sends `Authorization: Bearer $CRON_SECRET` automatically when `CRON_SECRET` is set in the project. **Hobby plan runs crons at most once per day and caps functions at 60 s**; per-minute schedules need Pro. The cron route exports `maxDuration = 60`; import/PDF/export routes get 60 s via `vercel.json`.
 5. Migrations are not run by Vercel: run `node scripts/run-migrations.mjs` from CI or a laptop with the production `DSQL_ENDPOINT` before promoting a build that needs new tables.
 
 ## 3. Other container hosts (Cloud Run, ECS, Fly)
@@ -74,7 +74,7 @@ Use the Docker image; set `PORT` if the platform requires a different one (Cloud
 |---|---|
 | Local dev | `npm run dev` (`scripts/dev.mjs`) ticks automatically; or `node scripts/cron-tick.mjs` |
 | Compose | `cron` sidecar service |
-| Vercel | `vercel.json` crons (Pro for per-minute) |
+| Vercel | daily `vercel.json` cron + `.github/workflows/cron.yml` every 5 min (Pro: per-minute in vercel.json) |
 | Cloud Run / anything | external scheduler hitting `/api/cron/agents` with the bearer secret |
 
 One tick drains: automations, agent jobs, notification outbox, webhook fan-out, mail sync, helpdesk SLA, quote expiry, accounting push/pull, voice calls; once an hour it also runs privacy reminders, retention and rate-limit pruning. Ticks are idempotent and safe to overlap (per-row claims), but the sidecar never overlaps on purpose.
