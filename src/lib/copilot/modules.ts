@@ -21,6 +21,8 @@ export const COPILOT_MODULES = [
   "helpdesk",
   "knowledge",
   "inventory",
+  "procurement",
+  "workforce",
   "finance",
   "billing",
   "calendar",
@@ -29,6 +31,7 @@ export const COPILOT_MODULES = [
   "insights",
   "marketplace",
   "voice",
+  "documents",
   "settings",
   "home",
   "general",
@@ -106,9 +109,10 @@ export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
   agents: {
     label: "Agents",
     paths: ["/agents", "/approvals", "/automations"],
-    tools: ["agents", "marketplace"],
-    prompt: "Agents rules: explain what an agent will do before queuing a run; point at the Approvals inbox for pending items; suggest marketplace listings when no agent fits.",
-    entityParams: { run: "agents.list", agent: "agents.list" },
+    tools: ["agents", "marketplace", "automations"],
+    prompt:
+      "Agents rules: explain what an agent will do before queuing a run; point at the Approvals inbox for pending items; suggest marketplace listings when no agent fits. Automations: use automations.list to see workflows and their last error before suggesting fixes; recommend a template (automations.install_template) when the user describes a common workflow; templates install paused — tell the user to review recipients and enable it from /automations.",
+    entityParams: { run: "agents.list", agent: "agents.list", automation: "automations.list" },
   },
   helpdesk: {
     label: "Helpdesk",
@@ -130,6 +134,19 @@ export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
     tools: ["inventory", "finance"],
     prompt: "Inventory rules: find the product (products.search) before adjusting stock; receives are safe, consumes/adjustments need approval; check-outs reserve stock and must be checked in.",
     entityParams: { product: "products.search", checkout: "inventory.list_checkouts" },
+  },
+  workforce: {
+    label: "Workforce",
+    paths: ["/workforce"],
+    tools: ["workforce", "calendar"],
+    prompt: "Workforce rules: check workforce.schedule_gaps before proposing shifts; creating shifts needs approval and must name the staff member, start and end in ISO; never approve leave on your own — summarise workforce.leave_requests and let the manager decide.",
+  },
+  procurement: {
+    label: "Procurement",
+    paths: ["/procurement", "/suppliers", "/purchase-orders", "/supplier-bills"],
+    tools: ["procurement", "inventory", "finance"],
+    prompt: "Procurement rules: start from procurement.reorder_suggestions; purchase orders are drafted (approval) and sent by the user; never mark a bill paid without a payment record; quote AP aging from the tool, not from memory.",
+    entityParams: { po: "procurement.reorder_suggestions", supplier: "procurement.ap_aging" },
   },
   finance: {
     label: "Finance",
@@ -162,8 +179,9 @@ export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
   reports: {
     label: "Reports",
     paths: ["/reports", "/analytics"],
-    tools: ["optimize", "finance", "billing", "agency"],
-    prompt: "Reports rules: answer with numbers from the tools (job costing, cashflow, capacity, roll-up); state the period you used; do not estimate when a tool can compute.",
+    tools: ["reports", "optimize", "finance", "billing", "agency"],
+    prompt: "Reports rules: call reports.list_saved to learn datasets and field keys, then reports.run (saved report_id or an ad-hoc spec with filters/group_by/measures) for any count, sum or trend; state the period and dataset you used; do not estimate when a tool can compute; mention when rows were truncated.",
+    entityParams: { report: "reports.run" },
   },
   insights: {
     label: "Insights",
@@ -184,6 +202,13 @@ export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
     tools: ["voice", "crm", "privacy"],
     prompt: "Voice rules: campaigns dial real phones — always confirm audience size and script with the user; starting a campaign needs approval; respect do-not-call and consent.",
     entityParams: { campaign: "voice.campaign_status" },
+  },
+  documents: {
+    label: "Documents",
+    paths: ["/documents"],
+    tools: ["documents", "crm"],
+    prompt: "Documents rules: create drafts from the org's templates (documents.create_from_template) and fill custom merge fields from the conversation; never invent legal terms. Sending for signature emails real people and needs approval; check documents.status before re-sending. The signed PDF is attached automatically when everyone has signed.",
+    entityParams: { document: "documents.status", id: "documents.status" },
   },
   settings: {
     label: "Settings",

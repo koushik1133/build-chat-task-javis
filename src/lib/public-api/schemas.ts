@@ -4,6 +4,12 @@ import { EVENT_TYPES } from "@/lib/events/bus";
 import { LineItemSchema } from "@/lib/money/items";
 import { ProductInputSchema, ProductPatchSchema, PRODUCT_KINDS } from "@/lib/inventory/products";
 import { TICKET_PRIORITIES, TICKET_SOURCES, TICKET_STATUSES } from "@/lib/helpdesk/sla";
+import { ChartConfigSchema, ReportSpecSchema } from "@/lib/reports/spec";
+import { LayoutItemSchema } from "@/lib/reports/store";
+import { StaffInputSchema } from "@/lib/workforce/staff";
+import { ShiftInputSchema } from "@/lib/workforce/shifts";
+import { LeaveRequestSchema } from "@/lib/workforce/leave";
+import { EMPLOYMENT_TYPES, LEAVE_KINDS, LEAVE_STATUSES, SHIFT_STATUSES } from "@/lib/workforce/pure";
 
 /**
  * Zod schemas for every /api/v1 request and response. The route registry
@@ -1026,3 +1032,334 @@ export const ApprovalDecide = z
   })
   .strict();
 export const ApprovalDecided = Approval.extend({ outcome: z.string().nullable().describe("Result of executing a copilot/MCP approval inline") });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Phase 7 — Procurement (suppliers, purchase orders, supplier bills).
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+import { SupplierInputSchema, SupplierPatchSchema } from "@/lib/procurement/suppliers";
+import { PurchaseOrderInputSchema, PoLineSchema } from "@/lib/procurement/purchase-orders";
+import { ReceiveLinesSchema } from "@/lib/procurement/receiving";
+import { BillPaymentInputSchema, SupplierBillInputSchema } from "@/lib/procurement/bills";
+import { BILL_STATUSES, PO_STATUSES } from "@/lib/procurement/pure";
+
+export const Supplier = z.object({
+  id: Id,
+  name: z.string(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  tax_number: z.string().nullable(),
+  address: z.string().nullable().describe("JSON address object or plain text"),
+  payment_terms_days: z.number().int(),
+  currency: z.string(),
+  notes: z.string().nullable(),
+  active: z.boolean(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const SupplierCreate = SupplierInputSchema;
+export const SupplierPatch = SupplierPatchSchema;
+export const SupplierListQuery = SearchListQuery.extend({ inactive: z.enum(["true", "false"]).optional().describe("Include inactive suppliers") });
+
+export const PoLine = PoLineSchema;
+export const PurchaseOrder = z.object({
+  id: Id,
+  supplier_id: Id,
+  supplier_name: z.string().nullable(),
+  supplier_email: z.string().nullable(),
+  number: z.string(),
+  status: z.enum(PO_STATUSES),
+  items: z.array(PoLine),
+  subtotal_minor: Minor,
+  tax_minor: Minor,
+  total_minor: Minor,
+  currency: z.string(),
+  expected_at: MaybeIso.nullable(),
+  notes: z.string().nullable(),
+  sent_at: MaybeIso.nullable(),
+  received_at: MaybeIso.nullable(),
+  created_by: z.string().nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const PurchaseOrderCreate = PurchaseOrderInputSchema;
+export const PurchaseOrderListQuery = ListQuery.extend({ status: z.enum(PO_STATUSES).optional(), supplier_id: Id.optional() });
+export const PurchaseOrderReceive = ReceiveLinesSchema;
+export const PurchaseOrderReceiveResult = z.object({
+  purchase_order: PurchaseOrder,
+  receipt: z.object({ id: Id, purchase_order_id: Id, received_at: MaybeIso, lines: z.array(z.object({ product_id: Id, qty: z.number().int() })), note: z.string().nullable() }),
+  recosted: z.record(Minor).describe("product id → new weighted-average unit cost"),
+});
+
+export const SupplierBill = z.object({
+  id: Id,
+  supplier_id: Id,
+  supplier_name: z.string().nullable(),
+  purchase_order_id: Id.nullable(),
+  po_number: z.string().nullable(),
+  number: z.string(),
+  supplier_ref: z.string().nullable(),
+  status: z.enum(BILL_STATUSES),
+  items: z.array(PoLine),
+  subtotal_minor: Minor,
+  tax_minor: Minor,
+  total_minor: Minor,
+  paid_minor: Minor,
+  outstanding_minor: Minor,
+  currency: z.string(),
+  issued_at: MaybeIso.nullable(),
+  due_at: MaybeIso.nullable(),
+  paid_at: MaybeIso.nullable(),
+  overdue: z.boolean(),
+  notes: z.string().nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const SupplierBillCreate = SupplierBillInputSchema;
+export const SupplierBillListQuery = ListQuery.extend({ status: z.enum(BILL_STATUSES).optional(), supplier_id: Id.optional(), overdue: z.enum(["true", "false"]).optional() });
+export const SupplierBillPay = BillPaymentInputSchema;
+export const SupplierBillPayment = z.object({
+  id: Id,
+  bill_id: Id,
+  amount_minor: Minor,
+  currency: z.string(),
+  paid_at: MaybeIso,
+  method: z.string().nullable(),
+  ref: z.string().nullable(),
+  note: z.string().nullable(),
+  expense_id: Id.nullable(),
+  created_at: MaybeIso,
+});
+export const SupplierBillPayResult = z.object({ bill: SupplierBill, payment: SupplierBillPayment });
+
+/* ─── Workforce ────────────────────────────────────────────────────────── */
+export const Staff = z.object({
+  id: Id,
+  membership_id: z.string().nullable(),
+  display_name: z.string(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  role_title: z.string().nullable(),
+  employment_type: z.enum(EMPLOYMENT_TYPES),
+  hourly_rate_minor: z.number().int(),
+  currency: z.string(),
+  weekly_hours: z.number().int(),
+  skills: z.array(z.string()),
+  location: z.string().nullable(),
+  start_date: z.string().nullable(),
+  end_date: z.string().nullable(),
+  active: z.boolean(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const StaffCreate = StaffInputSchema;
+export const StaffListQuery = ListQuery.extend({ all: z.enum(["true", "false"]).optional().describe("Include inactive staff") });
+
+export const Shift = z.object({
+  id: Id,
+  staff_id: z.string().nullable(),
+  staff_name: z.string().nullable(),
+  role_title: z.string().nullable(),
+  starts_at: MaybeIso,
+  ends_at: MaybeIso,
+  break_minutes: z.number().int(),
+  minutes: z.number().int().describe("Paid minutes (span minus break)"),
+  location: z.string().nullable(),
+  notes: z.string().nullable(),
+  status: z.enum(SHIFT_STATUSES),
+  published_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const ShiftCreate = ShiftInputSchema;
+export const ShiftListQuery = ListQuery.extend({
+  from: z.string().max(40).optional().describe("ISO start of window"),
+  to: z.string().max(40).optional().describe("ISO end of window"),
+  staff_id: z.string().max(100).optional(),
+  status: z.enum(SHIFT_STATUSES).optional(),
+});
+
+export const Leave = z.object({
+  id: Id,
+  staff_id: z.string(),
+  staff_name: z.string().nullable(),
+  kind: z.enum(LEAVE_KINDS),
+  starts_on: z.string(),
+  ends_on: z.string(),
+  hours: z.number().int(),
+  status: z.enum(LEAVE_STATUSES),
+  note: z.string().nullable(),
+  decided_by: z.string().nullable(),
+  decided_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+});
+export const LeaveCreate = LeaveRequestSchema;
+export const LeaveListQuery = ListQuery.extend({
+  status: z.enum(LEAVE_STATUSES).optional(),
+  staff_id: z.string().max(100).optional(),
+  from: z.string().max(10).optional().describe("YYYY-MM-DD"),
+  to: z.string().max(10).optional().describe("YYYY-MM-DD"),
+});
+
+/* ─── Reports & dashboards ─────────────────────────────────────────────── */
+
+export const SavedReport = z.object({
+  id: Id,
+  name: z.string(),
+  description: z.string().nullable(),
+  spec: ReportSpecSchema,
+  chart: ChartConfigSchema,
+  visibility: z.enum(["private", "org"]),
+  created_by: z.string().nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const ReportColumn = z.object({
+  key: z.string(),
+  label: z.string(),
+  kind: z.enum(["dimension", "measure", "date"]),
+  format: z.enum(["money", "number", "minutes", "percent"]).nullable(),
+  field: z.string().nullable(),
+  agg: z.string().nullable(),
+  bucket: z.string().nullable(),
+});
+const ReportCell = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+export const ReportResult = z.object({
+  dataset: z.string(),
+  columns: z.array(ReportColumn),
+  rows: z.array(z.record(ReportCell)),
+  totals: z.record(ReportCell).nullable(),
+  row_count: z.number().int(),
+  truncated: z.boolean(),
+  mode: z.enum(["aggregate", "raw"]),
+  currency: z.string(),
+  timezone: z.string(),
+  generated_at: MaybeIso,
+});
+export const SavedReportRun = z.object({ report: SavedReport, result: ReportResult });
+export const Dashboard = z.object({
+  id: Id,
+  name: z.string(),
+  role: z.string().nullable(),
+  layout: z.array(LayoutItemSchema),
+  is_default: z.boolean(),
+  created_by: z.string().nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+
+/* ─── Documents (Phase 7 / Lane E) ─────────────────────────────────────── */
+export const DocumentSigner = z.object({
+  id: Id,
+  name: z.string(),
+  email: z.string(),
+  role: z.string().nullable(),
+  order_index: z.number().int(),
+  status: z.enum(["pending", "viewed", "signed", "declined"]),
+  signed_at: IsoOrNull,
+  signature_text: z.string().nullable(),
+  decline_reason: z.string().nullable(),
+});
+export const Document = z.object({
+  id: Id,
+  template_id: Id.nullable(),
+  title: z.string(),
+  kind: z.enum(["contract", "proposal", "nda", "letter", "form", "other"]),
+  body_md: z.string().describe("Rendered markdown (merge fields applied)"),
+  merge_data: z.record(z.string()),
+  status: z.enum(["draft", "sent", "viewed", "signed", "declined", "expired", "void"]),
+  signing_order: z.enum(["parallel", "sequential"]),
+  contact_id: Id.nullable(),
+  contact_name: z.string().nullable(),
+  record_id: Id.nullable(),
+  quote_id: Id.nullable(),
+  pdf_hash: z.string().nullable().describe("SHA-256 of the unsigned PDF, fixed at send time"),
+  signed_pdf_hash: z.string().nullable(),
+  sent_at: IsoOrNull,
+  viewed_at: IsoOrNull,
+  completed_at: IsoOrNull,
+  expires_at: IsoOrNull,
+  created_by: z.string().nullable(),
+  created_at: Iso,
+  updated_at: Iso,
+  signers: z.array(DocumentSigner),
+});
+export const DocumentListQuery = ListQuery.extend({
+  status: z.enum(["draft", "sent", "viewed", "signed", "declined", "expired", "void"]).optional(),
+  contact_id: Id.optional(),
+  q: z.string().max(200).optional(),
+});
+const DocumentSignerInput = z.object({ name: z.string().trim().min(1).max(200), email: z.string().trim().email().max(320), role: z.string().trim().max(60).nullable().optional() }).strict();
+export const DocumentCreate = z
+  .object({
+    template_id: Id.nullable().optional().describe("Render this template; omit to supply body_md"),
+    title: z.string().trim().min(1).max(200).nullable().optional(),
+    kind: z.enum(["contract", "proposal", "nda", "letter", "form", "other"]).nullable().optional(),
+    body_md: z.string().max(200_000).nullable().optional(),
+    merge_data: z.record(z.string().max(60), z.string().max(20_000)).nullable().optional(),
+    contact_id: Id.nullable().optional(),
+    record_id: Id.nullable().optional(),
+    quote_id: Id.nullable().optional(),
+    signing_order: z.enum(["parallel", "sequential"]).nullable().optional(),
+    expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
+    signers: z.array(DocumentSignerInput).max(10).nullable().optional(),
+  })
+  .strict();
+export const DocumentSendBody = z.object({ message: z.string().max(2000).nullable().optional(), expires_in_days: z.number().int().min(1).max(365).nullable().optional() }).strict();
+export const DocumentSendResult = Document.extend({ notified: z.array(z.object({ signer_id: Id, email: z.string(), url: z.string().url() })) });
+export const DocumentTemplate = z.object({
+  id: Id,
+  name: z.string(),
+  kind: z.enum(["contract", "proposal", "nda", "letter", "form", "other"]),
+  body_md: z.string(),
+  fields: z.array(z.object({ key: z.string(), label: z.string(), source: z.enum(["contact", "org", "custom"]), required: z.boolean().optional() })),
+  requires_signature: z.boolean(),
+  signer_roles: z.array(z.string()),
+  version: z.number().int(),
+  starter_slug: z.string().nullable(),
+  created_at: Iso,
+  updated_at: Iso,
+});
+
+/* ─── Automations (v2) ─────────────────────────────────────────────────── */
+
+export const Automation = z.object({
+  id: Id,
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  trigger_type: z.enum(["event", "schedule", "webhook", "manual"]),
+  trigger_config: z.record(z.unknown()),
+  conditions: z.unknown().nullable(),
+  steps: z.array(z.record(z.unknown())),
+  autonomy: z.enum(["auto", "approve"]),
+  enabled: z.boolean(),
+  version: z.number().int(),
+  legacy: z.boolean().describe("Stored in the pre-v2 shape and converted on read"),
+  template_key: z.string().nullable(),
+  run_count: z.number().int(),
+  error_count: z.number().int(),
+  last_run_at: MaybeIso.nullable(),
+  last_error: z.string().nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso.nullable(),
+});
+export const AutomationListQuery = ListQuery.extend({
+  trigger_type: z.enum(["event", "schedule", "webhook", "manual"]).optional(),
+  enabled: z.enum(["true", "false"]).optional(),
+});
+export const AutomationRun = z.object({
+  id: Id,
+  automation_id: Id,
+  trigger_event_id: z.string().nullable(),
+  status: z.enum(["queued", "running", "waiting", "done", "failed", "skipped"]),
+  step_results: z.array(z.record(z.unknown())),
+  step_index: z.number().int(),
+  approval_id: z.string().nullable(),
+  error: z.string().nullable(),
+  attempt: z.number().int(),
+  started_at: MaybeIso.nullable(),
+  finished_at: MaybeIso.nullable(),
+  resume_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+});
+export const AutomationRunListQuery = ListQuery.extend({ status: z.enum(["queued", "running", "waiting", "done", "failed", "skipped"]).optional() });

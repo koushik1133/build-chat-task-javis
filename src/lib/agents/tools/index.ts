@@ -33,6 +33,11 @@ import "./inventory";
 import "./agency";
 import "./home";
 import "./webchat";
+import "./documents";
+import "./automations";
+import "./reports";
+import "./procurement";
+import "./workforce";
 // END tool-module imports
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -133,6 +133,17 @@ export const ROUTES = {
   deleteExpense: def({ id: "deleteExpense", method: "DELETE", path: "/expenses/{id}", summary: "Delete an expense", tag: "Expenses", scope: "write:billing", params: S.IdParams, response: S.Deleted }),
 
   /* time entries */
+  /* workforce */
+  listStaff: def({ id: "listStaff", method: "GET", path: "/staff", summary: "List staff profiles", tag: "Workforce", scope: "read:team", query: S.StaffListQuery, response: S.Staff, list: true }),
+  createStaff: def({ id: "createStaff", method: "POST", path: "/staff", summary: "Create a staff profile", tag: "Workforce", scope: "write:team", body: S.StaffCreate, response: S.Staff, status: 201 }),
+  getStaff: def({ id: "getStaff", method: "GET", path: "/staff/{id}", summary: "Get a staff profile", tag: "Workforce", scope: "read:team", params: S.IdParams, response: S.Staff }),
+  listShifts: def({ id: "listShifts", method: "GET", path: "/shifts", summary: "List shifts", tag: "Workforce", scope: "read:team", query: S.ShiftListQuery, response: S.Shift, list: true }),
+  createShift: def({ id: "createShift", method: "POST", path: "/shifts", summary: "Create a shift", description: "Drafts by default; pass `publish: true` to publish immediately. Returns 409 with `details.conflicts` when the person is double-booked or on approved leave.", tag: "Workforce", scope: "write:team", body: S.ShiftCreate, response: S.Shift, status: 201, emits: ["shift.published"], tools: ["workforce.create_shift"] }),
+  getShift: def({ id: "getShift", method: "GET", path: "/shifts/{id}", summary: "Get a shift", tag: "Workforce", scope: "read:team", params: S.IdParams, response: S.Shift }),
+  listLeave: def({ id: "listLeave", method: "GET", path: "/leave", summary: "List leave requests", tag: "Workforce", scope: "read:team", query: S.LeaveListQuery, response: S.Leave, list: true, tools: ["workforce.leave_requests"] }),
+  createLeave: def({ id: "createLeave", method: "POST", path: "/leave", summary: "Request leave", description: "Balance-checked for paid kinds (vacation, sick): 409 when the remaining hours are insufficient.", tag: "Workforce", scope: "write:team", body: S.LeaveCreate, response: S.Leave, status: 201, emits: ["leave.requested"] }),
+  getLeave: def({ id: "getLeave", method: "GET", path: "/leave/{id}", summary: "Get a leave request", tag: "Workforce", scope: "read:team", params: S.IdParams, response: S.Leave }),
+
   listTimeEntries: def({ id: "listTimeEntries", method: "GET", path: "/time-entries", summary: "List time entries", tag: "Time", scope: "read:billing", query: S.TimeEntryListQuery, response: S.TimeEntry, list: true }),
   createTimeEntry: def({ id: "createTimeEntry", method: "POST", path: "/time-entries", summary: "Log time", description: "Omit `ended_at`/`minutes` to start a running timer.", tag: "Time", scope: "write:billing", body: S.TimeEntryCreate, response: S.TimeEntry, status: 201, tools: ["time.log"] }),
   getTimeEntry: def({ id: "getTimeEntry", method: "GET", path: "/time-entries/{id}", summary: "Get a time entry", tag: "Time", scope: "read:billing", params: S.IdParams, response: S.TimeEntry }),
@@ -215,7 +226,42 @@ export const ROUTES = {
 
   /* approvals */
   listApprovals: def({ id: "listApprovals", method: "GET", path: "/approvals", summary: "List approvals", tag: "Agents", scope: "read:agents", query: S.ApprovalListQuery, response: S.Approval, list: true }),
+  /* ── Phase 7 lane A: procurement ─────────────────────────────────────── */
+  listSuppliers: def({ id: "listSuppliers", method: "GET", path: "/suppliers", summary: "List suppliers", tag: "Procurement", scope: "read:billing", query: S.SupplierListQuery, response: S.Supplier, list: true }),
+  createSupplier: def({ id: "createSupplier", method: "POST", path: "/suppliers", summary: "Create a supplier", tag: "Procurement", scope: "write:billing", body: S.SupplierCreate, response: S.Supplier, status: 201 }),
+  getSupplier: def({ id: "getSupplier", method: "GET", path: "/suppliers/{id}", summary: "Get a supplier", tag: "Procurement", scope: "read:billing", params: S.IdParams, response: S.Supplier }),
+  updateSupplier: def({ id: "updateSupplier", method: "PATCH", path: "/suppliers/{id}", summary: "Update a supplier", tag: "Procurement", scope: "write:billing", params: S.IdParams, body: S.SupplierPatch, response: S.Supplier }),
+  listPurchaseOrders: def({ id: "listPurchaseOrders", method: "GET", path: "/purchase-orders", summary: "List purchase orders", tag: "Procurement", scope: "read:billing", query: S.PurchaseOrderListQuery, response: S.PurchaseOrder, list: true }),
+  createPurchaseOrder: def({ id: "createPurchaseOrder", method: "POST", path: "/purchase-orders", summary: "Create a draft purchase order", description: "`items[].unit_minor` is the unit cost. Totals use the org tax engine.", tag: "Procurement", scope: "write:billing", body: S.PurchaseOrderCreate, response: S.PurchaseOrder, status: 201, tools: ["procurement.create_po"] }),
+  getPurchaseOrder: def({ id: "getPurchaseOrder", method: "GET", path: "/purchase-orders/{id}", summary: "Get a purchase order", tag: "Procurement", scope: "read:billing", params: S.IdParams, response: S.PurchaseOrder }),
+  sendPurchaseOrder: def({ id: "sendPurchaseOrder", method: "POST", path: "/purchase-orders/{id}/send", summary: "Send a purchase order to the supplier", description: "Marks the order sent and queues an email with the line items.", tag: "Procurement", scope: "write:billing", params: S.IdParams, body: S.SendBody, response: S.PurchaseOrder, emits: ["purchase_order.sent"] }),
+  receivePurchaseOrder: def({ id: "receivePurchaseOrder", method: "POST", path: "/purchase-orders/{id}/receive", summary: "Receive goods against a purchase order", description: "Writes `receive` stock movements, re-costs products (weighted average) and moves the order to partially_received or received.", tag: "Procurement", scope: "write:billing", params: S.IdParams, body: S.PurchaseOrderReceive, response: S.PurchaseOrderReceiveResult, emits: ["purchase_order.received"] }),
+  listSupplierBills: def({ id: "listSupplierBills", method: "GET", path: "/supplier-bills", summary: "List supplier bills", tag: "Procurement", scope: "read:billing", query: S.SupplierBillListQuery, response: S.SupplierBill, list: true }),
+  createSupplierBill: def({ id: "createSupplierBill", method: "POST", path: "/supplier-bills", summary: "Create a supplier bill", tag: "Procurement", scope: "write:billing", body: S.SupplierBillCreate, response: S.SupplierBill, status: 201, emits: ["supplier_bill.created"] }),
+  getSupplierBill: def({ id: "getSupplierBill", method: "GET", path: "/supplier-bills/{id}", summary: "Get a supplier bill", tag: "Procurement", scope: "read:billing", params: S.IdParams, response: S.SupplierBill }),
+  paySupplierBill: def({ id: "paySupplierBill", method: "POST", path: "/supplier-bills/{id}/pay", summary: "Record a payment on a supplier bill", description: "Bumps paid_minor atomically, moves the status and logs an expense (category `purchases`). Emits `supplier_bill.paid` when settled.", tag: "Procurement", scope: "write:billing", params: S.IdParams, body: S.SupplierBillPay, response: S.SupplierBillPayResult, status: 201, emits: ["supplier_bill.paid"] }),
+
   decideApproval: def({ id: "decideApproval", method: "POST", path: "/approvals/{id}/decide", summary: "Approve or reject", description: "Resumes the agent run, or executes a copilot/MCP action inline.", tag: "Agents", scope: "write:agents", params: S.IdParams, body: S.ApprovalDecide, response: S.ApprovalDecided }),
+  /* reports & dashboards */
+  listSavedReports: def({ id: "listSavedReports", method: "GET", path: "/reports/saved", summary: "List saved reports", tag: "Reports", scope: "read:reports", response: S.SavedReport, list: true, tools: ["reports.list_saved"] }),
+  getSavedReport: def({ id: "getSavedReport", method: "GET", path: "/reports/saved/{id}", summary: "Get a saved report", tag: "Reports", scope: "read:reports", params: S.IdParams, response: S.SavedReport }),
+  runSavedReport: def({ id: "runSavedReport", method: "GET", path: "/reports/saved/{id}/run", summary: "Run a saved report", description: "Executes the saved spec against live data and returns aggregated rows (max 5000) plus totals.", tag: "Reports", scope: "read:reports", params: S.IdParams, response: S.SavedReportRun, tools: ["reports.run"] }),
+  listDashboards: def({ id: "listDashboards", method: "GET", path: "/dashboards", summary: "List dashboards", description: "Role defaults and personal dashboards (layout of saved-report cards and built-in widgets).", tag: "Reports", scope: "read:reports", response: S.Dashboard, list: true }),
+
+  /* documents (e-sign) */
+  listDocumentTemplates: def({ id: "listDocumentTemplates", method: "GET", path: "/document-templates", summary: "List document templates", tag: "Documents", scope: "read:crm", response: S.DocumentTemplate, list: true }),
+  listDocuments: def({ id: "listDocuments", method: "GET", path: "/documents", summary: "List documents", tag: "Documents", scope: "read:crm", query: S.DocumentListQuery, response: S.Document, list: true, tools: ["documents.status"] }),
+  createDocument: def({ id: "createDocument", method: "POST", path: "/documents", summary: "Create a draft document", description: "From a template (merge fields rendered from the contact and org, plus `merge_data`) or a free `body_md`.", tag: "Documents", scope: "write:crm", body: S.DocumentCreate, response: S.Document, status: 201, tools: ["documents.create_from_template"] }),
+  getDocument: def({ id: "getDocument", method: "GET", path: "/documents/{id}", summary: "Get a document with signers", tag: "Documents", scope: "read:crm", params: S.IdParams, response: S.Document, tools: ["documents.status"] }),
+  sendDocument: def({ id: "sendDocument", method: "POST", path: "/documents/{id}/send", summary: "Send for e-signature", description: "Freezes the body (SHA-256 fingerprint), issues one recipient-bound signing link per signer and emails those whose turn it is.", tag: "Documents", scope: "write:crm", params: S.IdParams, body: S.DocumentSendBody, response: S.DocumentSendResult, emits: ["document.sent"], tools: ["documents.send"] }),
+
+  /* automations (v2) */
+  listAutomations: def({ id: "listAutomations", method: "GET", path: "/automations", summary: "List automations", description: "Event-driven workflows (trigger → conditions → steps). Legacy automations are converted on read.", tag: "Automations", scope: "read:agents", query: S.AutomationListQuery, response: S.Automation, list: true, tools: ["automations.list"] }),
+  getAutomation: def({ id: "getAutomation", method: "GET", path: "/automations/{id}", summary: "Get an automation", tag: "Automations", scope: "read:agents", params: S.IdParams, response: S.Automation }),
+  enableAutomation: def({ id: "enableAutomation", method: "POST", path: "/automations/{id}/enable", summary: "Enable an automation", tag: "Automations", scope: "write:agents", params: S.IdParams, response: S.Automation, tools: ["automations.toggle"] }),
+  disableAutomation: def({ id: "disableAutomation", method: "POST", path: "/automations/{id}/disable", summary: "Disable an automation", tag: "Automations", scope: "write:agents", params: S.IdParams, response: S.Automation, tools: ["automations.toggle"] }),
+  listAutomationRuns: def({ id: "listAutomationRuns", method: "GET", path: "/automations/{id}/runs", summary: "List runs of an automation", tag: "Automations", scope: "read:agents", params: S.IdParams, query: S.AutomationRunListQuery, response: S.AutomationRun, list: true, emits: ["automation.run_finished", "automation.run_failed"] }),
+  getAutomationRun: def({ id: "getAutomationRun", method: "GET", path: "/automations/runs/{id}", summary: "Get an automation run", tag: "Automations", scope: "read:agents", params: S.IdParams, response: S.AutomationRun }),
 } as const;
 
 export type RouteId = keyof typeof ROUTES;
@@ -247,4 +293,10 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Accounting", description: "Accounting connections and sync." },
   { name: "Optimize", description: "Cashflow, capacity and pricing models." },
   { name: "Agents", description: "Agents, runs and approvals." },
+  { name: "Workforce", description: "Staff profiles, shifts (rota) and leave." },
+  { name: "Automations", description: "Event-driven workflows: triggers, conditions, steps, templates and run history." },
+  { name: "Documents", description: "Templates, generated documents and e-signatures." },
+  { name: "Reports", description: "Saved reports, report runs and dashboards." },
+  { name: "Procurement", description: "Suppliers, purchase orders, receiving and supplier bills (accounts payable)." },
 ];
+

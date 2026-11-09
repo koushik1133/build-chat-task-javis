@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/supabase/server";
 import { HomeDashboard } from "./home-dashboard";
+import { YourDashboardLink } from "@/components/reports/your-dashboard-link";
 
 export const dynamic = "force-dynamic";
 
@@ -11,5 +12,10 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const { user } = await requireUser();
   const name = (user.user_metadata?.full_name as string | undefined)?.split(" ")[0] ?? user.email?.split("@")[0] ?? null;
-  return <HomeDashboard firstName={name} />;
+  return (
+    <>
+      <YourDashboardLink />
+      <HomeDashboard firstName={name} />
+    </>
+  );
 }

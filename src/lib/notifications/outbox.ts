@@ -3,6 +3,7 @@ import { query, queryOne, withRetry } from "@/lib/dsql";
 import { dispatch } from "./channels";
 import { isNotificationChannel, type NotificationChannel } from "./status";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
+import { notificationAllowed } from "./preferences";
 
 /**
  * Notification outbox: every outbound message is a row first, then the cron
@@ -40,11 +41,24 @@ export interface EnqueueInput {
 
 const MAX_ATTEMPTS = 3;
 
+/** Returned instead of an outbox id when the member's preferences turned the channel off (no row is written). */
+export const SKIPPED_PREFIX = "skipped:";
+
 export async function enqueueNotification(dataId: string, input: EnqueueInput): Promise<string> {
   if (!isNotificationChannel(input.channel)) throw new Error(`unknown channel ${String(input.channel)}`);
   if (!input.recipient?.trim()) throw new Error("recipient is required");
   const id = randomUUID();
-  const scheduled = input.scheduledAt ? new Date(input.scheduledAt) : new Date();
+  let scheduled = input.scheduledAt ? new Date(input.scheduledAt) : new Date();
+  // Preference gate: notifications that name a member (`data.member_user_id`) and a category
+  // (`data.category`) honour that member's channel matrix and quiet hours.
+  const category = input.data?.category;
+  const member = input.data?.member_user_id;
+  if (typeof category === "string" && typeof member === "string" && member) {
+    const prefChannel = input.channel === "whatsapp" ? "sms" : input.channel;
+    const decision = await notificationAllowed(dataId, member, category, prefChannel);
+    if (!decision.allowed) return `${SKIPPED_PREFIX}${id}`;
+    if (decision.deferUntil && decision.deferUntil.getTime() > scheduled.getTime()) scheduled = decision.deferUntil;
+  }
   await query(
     `INSERT INTO notification_outbox (id, user_id, channel, recipient, subject, body, data, status, attempts, scheduled_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', 0, $8)`,

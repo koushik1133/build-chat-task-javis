@@ -3,6 +3,7 @@ import { Inbox } from "lucide-react";
 import { PageContainer } from "@/components/page-container";
 import { PushToggle } from "@/components/pwa/push-toggle";
 import { InstallHint } from "@/components/pwa/install-hint";
+import { NotificationPreferences } from "@/components/settings/notification-preferences";
 
 export const metadata = { title: "Notifications · Settings" };
 
@@ -11,9 +12,10 @@ export default function NotificationSettingsPage() {
     <PageContainer
       title="Notifications"
       description="Choose how KernelHub reaches you when something needs attention."
-      tooltip="Push notifications are per device: enable them on each phone or computer you use. Email, SMS and in-app alerts are managed in the Outbox."
+      tooltip="Push notifications are per device: enable them on each phone or computer you use. Use the matrix to choose which categories reach each channel; delivery history lives in the Outbox."
     >
       <div className="space-y-4">
+        <NotificationPreferences />
         <PushToggle />
         <InstallHint />
         <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground sm:p-5">

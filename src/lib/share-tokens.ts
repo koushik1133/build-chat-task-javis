@@ -6,10 +6,11 @@ import { isUndefinedColumn, query, queryOne } from "@/lib/dsql";
  * itself is shown once (in the link) and never recoverable from the DB.
  */
 
-export type ShareKind = "quote" | "invoice" | "pay" | "portal" | "crew";
+export type ShareKind = "quote" | "invoice" | "pay" | "portal" | "crew" | "report" | "sign";
 
 /** `crew` tokens open the mobile crew mode at /m/<token> (today's tasks & bookings, clock in/out). */
-const PATHS: Record<ShareKind, string> = { quote: "/p/q", invoice: "/p/i", pay: "/p/pay", portal: "/p/portal", crew: "/m" };
+/** `report` tokens download a scheduled report as CSV at /api/p/report/<token> (7-day links in digest emails). */
+const PATHS: Record<ShareKind, string> = { quote: "/p/q", invoice: "/p/i", pay: "/p/pay", portal: "/p/portal", crew: "/m", report: "/api/p/report", sign: "/p/sign" };
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
