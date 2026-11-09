@@ -2,6 +2,35 @@
 
 Three supported shapes: **Docker / Compose** (self-hosted, plain Postgres), **Vercel** (serverless, Aurora DSQL or any reachable Postgres), and **any container host** (Cloud Run, ECS, Fly) using the same image. All of them need a Supabase project for authentication.
 
+## Database setup and upgrades on a hosted deployment
+
+The app reads many tables (organizations, memberships, contacts, invoices, ...). A database
+created by an older version will not have them, and the app now says so plainly
+("The database schema is out of date", HTTP 503, code `schema_outdated`) instead of
+showing "unauthorized".
+
+Required environment variables for the database: `DSQL_ENDPOINT` (cluster endpoint),
+`AWS_REGION`, and AWS credentials that can connect as `admin`
+(`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), plus `CRON_SECRET`.
+
+Apply the schema (it is idempotent and resumable; run it again after every deploy that
+adds migrations):
+
+```bash
+# check what is pending
+curl -s -H "Authorization: Bearer $CRON_SECRET" https://YOUR-APP/api/admin/migrate
+# apply a batch (about 40 seconds); repeat until "remaining" is 0
+curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" https://YOUR-APP/api/admin/migrate
+```
+
+Or set `AUTO_MIGRATE=1` in the deployment: the worker tick (`/api/cron/agents`) then applies
+pending migrations itself, a bounded batch per tick. From a machine with AWS access,
+`npm run migrate` does the same thing.
+
+Both runners apply the base schema (`aws/schema.sql`: chats, tasks, sites, agents, ...) first,
+then `aws/migrations.sql`. Base-schema indexes are skipped for tables that already exist, so
+upgrading an existing database does not create duplicate indexes.
+
 ## 0. Before anything: environment
 
 ```bash

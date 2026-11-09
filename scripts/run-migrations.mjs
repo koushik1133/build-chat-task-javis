@@ -36,16 +36,14 @@ if (existsSync(envFile)) {
 
 const isDryRun = process.argv.includes("--dry-run");
 
-const sql = readFileSync(join(ROOT, "aws/migrations.sql"), "utf8");
+// Base schema first (original app tables; all IF NOT EXISTS), then the consolidated migrations.
+const splitSql = (text) => text.replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean);
+const entries = [
+  ...splitSql(readFileSync(join(ROOT, "aws/schema.sql"), "utf8")).map((sql) => ({ sql, base: true })),
+  ...splitSql(readFileSync(join(ROOT, "aws/migrations.sql"), "utf8")).map((sql) => ({ sql, base: false })),
+];
 
-// Split on semicolons, keep non-empty statements, strip comments
-// Strip line comments BEFORE splitting, so a ";" inside a comment can't
-// become a statement boundary.
-const statements = sql
-  .replace(/--[^\n]*/g, "")
-  .split(";")
-  .map(s => s.trim())
-  .filter(Boolean);
+const statements = entries.map((e) => e.sql);
 
 if (isDryRun) {
   console.log(`Found ${statements.length} migration statements (DRY RUN)\n`);
@@ -136,9 +134,33 @@ async function awaitIndexJob(jobId, timeoutMs = 5 * 60_000) {
   throw new Error(`index job ${jobId} did not finish within ${timeoutMs / 1000}s`);
 }
 
+// Base-schema indexes are unnamed: skip them for tables that already existed before this run
+// (an upgraded deployment) so they are not duplicated.
+const baseIndexTable = (sql) => {
+  const m = /^CREATE\s+(?:UNIQUE\s+)?INDEX\b(?:\s+ASYNC)?(?!\s+IF\s+NOT\s+EXISTS)[\s\S]*?\bON\s+(?:public\.)?"?([a-z_][a-z0-9_]*)"?/i.exec(sql);
+  return m ? m[1].toLowerCase() : null;
+};
+const baseExisting = new Set();
+for (const e of entries) {
+  const m = e.base && /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?/i.exec(e.sql);
+  if (!m) continue;
+  const t = m[1].toLowerCase();
+  const hit = (await client.query("SELECT to_regclass($1) IS NOT NULL AS ok", [t])).rows[0]?.ok;
+  if (hit) baseExisting.add(t);
+}
+
 let ok = 0, skip = 0, fail = 0;
 
-for (const rawStmt of statements) {
+for (const [idx, rawStmt] of statements.entries()) {
+  if (entries[idx].base) {
+    const t = baseIndexTable(rawStmt);
+    if (t && baseExisting.has(t) && !applied.has(hashOf(rawStmt))) {
+      await client.query("INSERT INTO schema_migrations (hash) VALUES ($1) ON CONFLICT DO NOTHING", [hashOf(rawStmt)]);
+      console.log(`  ⟳  (existing table) ${normalise(rawStmt).slice(0, 70)}`);
+      skip++;
+      continue;
+    }
+  }
   // Local Postgres has no CREATE [UNIQUE] INDEX ASYNC — strip the DSQL-only keyword.
   const stmt = isLocal ? rawStmt.replace(/CREATE\s+(UNIQUE\s+)?INDEX\s+ASYNC/gi, "CREATE $1INDEX") : rawStmt;
   const hash = hashOf(rawStmt);

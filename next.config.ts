@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   // Prevent Next from using the wrong monorepo root (parent package-lock.json)
   outputFileTracingRoot: path.join(__dirname),
+  // The in-app migrator reads aws/migrations.sql at runtime, so it must be bundled with these functions.
+  outputFileTracingIncludes: {
+    "/api/admin/migrate": ["./aws/schema.sql", "./aws/migrations.sql"],
+    "/api/cron/agents": ["./aws/schema.sql", "./aws/migrations.sql"],
+  },
   serverExternalPackages: ["pdf-parse", "pptxgenjs", "pg", "@aws/aurora-dsql-node-postgres-connector"],
   experimental: {
     serverActions: { bodySizeLimit: "20mb" },

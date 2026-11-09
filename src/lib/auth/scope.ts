@@ -235,5 +235,27 @@ export function scopeErrorResponse(err: unknown): NextResponse | null {
   if (err instanceof Error && err.message === "UNAUTHORIZED") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  // Anything else thrown while resolving a scope is an infrastructure fault (database
+  // unreachable, schema not migrated), not a sign-in problem. Report it as such instead of
+  // letting callers fall back to a misleading 401.
+  if (err instanceof Error) return infraErrorResponse(err);
   return null;
+}
+
+/** 503 with an actionable message for database/schema faults (never leaks connection details). */
+export function infraErrorResponse(err: Error): NextResponse {
+  const cause = (err as { cause?: { message?: string; code?: string } }).cause;
+  const text = `${err.message} ${cause?.message ?? ""}`;
+  const code = (err as { code?: string }).code ?? cause?.code ?? "";
+  console.error("[scope] infrastructure error:", text.slice(0, 300));
+  if (code === "42P01" || code === "42703" || /relation .* does not exist|column .* does not exist/i.test(text)) {
+    return NextResponse.json(
+      { error: "The database schema is out of date. An administrator must run the database migrations.", code: "schema_outdated" },
+      { status: 503 }
+    );
+  }
+  if (/DSQL_ENDPOINT is not set/i.test(text)) {
+    return NextResponse.json({ error: "The database is not configured (DSQL_ENDPOINT is missing).", code: "db_not_configured" }, { status: 503 });
+  }
+  return NextResponse.json({ error: "The database is temporarily unavailable. Please try again.", code: "database_unavailable" }, { status: 503 });
 }

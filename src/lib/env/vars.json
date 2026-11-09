@@ -61,6 +61,7 @@
     { "name": "CREDENTIAL_ENCRYPTION_KEY", "group": "core", "recommended": true, "secret": true, "description": "Encrypts per-tenant integration credentials at rest (openssl rand -base64 32). Required for OAuth integrations and payments." },
 
     { "name": "PAYMENTS_PROVIDER", "group": "flag", "enum": ["simulated", "stripe", "razorpay"], "default": "simulated", "description": "Active payments provider." },
+    { "name": "AUTO_MIGRATE", "group": "flag", "enum": ["1", "0"], "default": "0", "description": "1 = the worker tick applies pending database migrations (bounded, resumable) before its other work. For hosted deployments without a shell; also see POST /api/admin/migrate." },
     { "name": "PLANS_ENFORCED", "group": "flag", "enum": ["true", "false"], "default": "false", "description": "true = enforce KernelHub plan limits and feature gates (HTTP 402 plan_limit). false = everything allowed; usage is still measured and shown." },
     { "name": "PAYMENTS_ALLOW_SIMULATED", "group": "flag", "enum": ["true", "false"], "default": "false", "description": "Production only: allow the simulated payment provider (self-service fake payments). Leave false unless this is a demo deployment; anyone who owns a workspace can mark their own plan and invoices as paid." },
     { "name": "PAYMENTS_SIMULATED_SECRET", "group": "provider", "secret": true, "description": "Signs simulated-provider webhook calls." },
@@ -109,6 +110,7 @@
     { "name": "JAVIS_DEV_PORT", "group": "dev", "description": "Port for scripts/dev.mjs.", "default": "3001" },
     { "name": "VIES_ENABLED", "group": "flag", "enum": ["0", "1"], "default": "0", "description": "Set to 1 to run live EU VIES VAT-ID lookups (fixed public EC endpoint); otherwise lookups are format-only/simulated." },
     { "name": "UPDATE_GOLDEN", "group": "dev", "description": "Tests only: set to 1 to rewrite the tax e-invoice golden fixtures." },
+    { "name": "MIGRATE_FRESH", "group": "dev", "description": "Tests only: 1 runs the empty-database migration test (needs a throwaway DB_NAME)." },
     { "name": "KH_BASE_URL", "group": "dev", "description": "Base URL for scripts/seed-demo.mjs and scripts/smoke.mjs." },
     { "name": "KH_API_KEY", "group": "dev", "secret": true, "description": "API key for scripts/seed-demo.mjs." }
   ],

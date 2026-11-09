@@ -45,6 +45,7 @@ vi.mock("@/lib/tax-compliance/reminders", () => ({ taxFilingReminders: vi.fn(asy
 vi.mock("@/lib/engagement/surveys", () => ({ processEngagementEvents: vi.fn(async () => ({})) }));
 vi.mock("@/lib/engagement/loyalty", () => ({ expirePoints: vi.fn(async () => ({})) }));
 vi.mock("@/lib/engagement/giftcards", () => ({ expireGiftCards: vi.fn(async () => ({})) }));
+vi.mock("@/lib/db/migrate", () => ({ runPendingMigrations: vi.fn(async () => ({ applied: 0, skipped: 0, failed: [], remaining: 0, total: 0, budgetExhausted: false })) }));
 vi.mock("@/lib/plans/cron", () => ({ renewDue: vi.fn(async () => ({ renewed: 0 })), grantMonthlyCredits: vi.fn(async () => ({ granted: 0 })) }));
 vi.mock("@/lib/alerts/process", () => ({ processAlerts: vi.fn(async () => ({ evaluated: 0 })) }));
 vi.mock("@/lib/projects/overdue", () => ({ markOverdueTasks: vi.fn(async () => ({ notified: 0 })) }));

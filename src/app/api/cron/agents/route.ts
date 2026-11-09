@@ -30,6 +30,7 @@ import { remindUpcomingShifts } from "@/lib/workforce/shifts";
 import { processCalendarEvents, syncDue as calendarSyncDue } from "@/lib/calsync/sync";
 import { processChatEvents } from "@/lib/chatops/process";
 import { processAlerts } from "@/lib/alerts/process";
+import { runPendingMigrations } from "@/lib/db/migrate";
 import { grantMonthlyCredits, renewDue } from "@/lib/plans/cron";
 import { billDue, sweepExpiring } from "@/lib/memberships/billing";
 import { advanceSimulated, syncTracking } from "@/lib/shipping/tracking";
@@ -134,7 +135,19 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, report_schedules: 0, digests: 0, documents_expired: 0, tasks_overdue: 0, carts_abandoned: 0, marketing_sent: 0, marketing_delivery: 0, sequence_steps: 0, sequence_joins: 0, attachments_purged: 0, shift_reminders: 0, calsync_events: 0, calsync_synced: 0, chat_events: 0, alerts: 0, plans_renewed: 0, plan_credits: 0, memberships_billed: 0, memberships_swept: 0, shipments_advanced: 0, shipments_synced: 0, tax_reminders: 0, engagement_events: 0, points_expired: 0, gift_cards_expired: 0, hourly_ran: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, report_schedules: 0, digests: 0, documents_expired: 0, tasks_overdue: 0, carts_abandoned: 0, marketing_sent: 0, marketing_delivery: 0, sequence_steps: 0, sequence_joins: 0, attachments_purged: 0, shift_reminders: 0, calsync_events: 0, calsync_synced: 0, chat_events: 0, alerts: 0, migrations_applied: 0, migrations_remaining: 0, plans_renewed: 0, plan_credits: 0, memberships_billed: 0, memberships_swept: 0, shipments_advanced: 0, shipments_synced: 0, tax_reminders: 0, engagement_events: 0, points_expired: 0, gift_cards_expired: 0, hourly_ran: 0, ms: 0 };
+
+  // Optional self-migration so a hosted deployment keeps its schema current without a shell.
+  if (process.env.AUTO_MIGRATE === "1") {
+    try {
+      const m = await runPendingMigrations({ budgetMs: 20_000 });
+      counts.migrations_applied = m.applied;
+      counts.migrations_remaining = m.remaining;
+      if (m.failed.length) console.error("[cron/agents] migration failures:", m.failed.slice(0, 3));
+    } catch (err) {
+      console.error("[cron/agents] auto-migrate failed:", err);
+    }
+  }
 
   try {
     const promoted = await promoteDueTriggers(new Date());
