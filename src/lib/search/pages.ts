@@ -32,6 +32,7 @@ const AREA_BY_PREFIX: Array<[string, Area]> = [
   ["/settings/accounting", "billing"],
   ["/settings/privacy", "settings"],
   ["/voice", "messaging"],
+  ["/documents", "crm"],
   ["/crm", "crm"],
   ["/leads", "leads"],
   ["/messaging", "messaging"],
@@ -49,8 +50,11 @@ const AREA_BY_PREFIX: Array<[string, Area]> = [
   ["/knowledge", "knowledge"],
   ["/r", "crm"],
   ["/billing", "billing"],
+  ["/procurement", "billing"],
+  ["/inventory", "billing"],
   ["/calendar", "calendar"],
   ["/helpdesk", "helpdesk"],
+  ["/workforce", "team"],
   ["/analytics", "reports"],
 ];
 
@@ -75,6 +79,7 @@ const EXTRA: Array<{ href: string; label: string }> = [
   { href: "/settings/accounting", label: "Accounting" },
   { href: "/settings/privacy", label: "Privacy & data" },
   { href: "/voice", label: "Voice Campaigns" },
+  { href: "/documents", label: "Documents" },
   { href: "/helpdesk", label: "Helpdesk" },
   { href: "/knowledge", label: "Knowledge Base" },
   { href: "/r", label: "Records" },
@@ -82,6 +87,8 @@ const EXTRA: Array<{ href: string; label: string }> = [
   { href: "/settings/sso", label: "SSO & SCIM" },
   { href: "/insights", label: "Insights" },
   { href: "/marketplace", label: "Marketplace" },
+  { href: "/workforce", label: "Workforce" },
+  { href: "/procurement", label: "Procurement" },
 ];
 
 /** Static list of app routes (sidebar + a few settings pages), deduplicated by href. */

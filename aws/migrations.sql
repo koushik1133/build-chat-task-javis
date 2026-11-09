@@ -2346,3 +2346,500 @@ CREATE INDEX ASYNC IF NOT EXISTS idx_chat_sessions_conversation ON chat_sessions
 
 ALTER TABLE sites ADD COLUMN IF NOT EXISTS widget_config TEXT;
 
+
+-- ==== PHASE 7 LANE A ====
+-- Phase 7 / Lane A: procurement (suppliers, purchase orders, receiving, supplier bills, bill payments)
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- ── suppliers ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS suppliers (
+  id                  TEXT PRIMARY KEY,
+  user_id             TEXT NOT NULL,
+  name                TEXT NOT NULL,
+  email               TEXT,
+  phone               TEXT,
+  tax_number          TEXT,
+  address             TEXT,                       -- JSON {line1,line2,city,region,postal_code,country} or plain text
+  payment_terms_days  INTEGER NOT NULL DEFAULT 30,
+  currency            TEXT NOT NULL DEFAULT 'USD',
+  notes               TEXT,
+  active              BOOLEAN NOT NULL DEFAULT TRUE,
+  deleted_at          TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_suppliers_user ON suppliers (user_id, deleted_at, name);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_suppliers_user_created ON suppliers (user_id, created_at);
+
+-- ── purchase_orders ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  supplier_id     TEXT NOT NULL,
+  number          TEXT NOT NULL,                  -- PO-000001 via doc_counters kind purchase_order
+  status          TEXT NOT NULL DEFAULT 'draft',  -- draft|sent|partially_received|received|cancelled
+  items           TEXT NOT NULL DEFAULT '[]',     -- JSON [{description, qty, unit_minor, product_id, tax_rate_bp, tax_rate_id}]
+  subtotal_minor  BIGINT NOT NULL DEFAULT 0,
+  tax_minor       BIGINT NOT NULL DEFAULT 0,
+  total_minor     BIGINT NOT NULL DEFAULT 0,
+  currency        TEXT NOT NULL DEFAULT 'USD',
+  expected_at     TIMESTAMPTZ,
+  notes           TEXT,
+  sent_at         TIMESTAMPTZ,
+  received_at     TIMESTAMPTZ,
+  created_by      TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_purchase_orders_user_created ON purchase_orders (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_purchase_orders_user_status ON purchase_orders (user_id, status, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_purchase_orders_supplier ON purchase_orders (user_id, supplier_id);
+
+-- ── po_receipts: one row per goods receipt against a PO ──────────────────────
+CREATE TABLE IF NOT EXISTS po_receipts (
+  id                 TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL,
+  purchase_order_id  TEXT NOT NULL,
+  received_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  lines              TEXT NOT NULL DEFAULT '[]',  -- JSON [{product_id, qty}]
+  note               TEXT,
+  created_by         TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_po_receipts_po ON po_receipts (user_id, purchase_order_id, received_at);
+
+-- ── supplier_bills (accounts payable) ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS supplier_bills (
+  id                 TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL,
+  supplier_id        TEXT NOT NULL,
+  purchase_order_id  TEXT,
+  number             TEXT NOT NULL,               -- BILL-000001 via doc_counters kind supplier_bill
+  supplier_ref       TEXT,                        -- the supplier's own invoice number
+  status             TEXT NOT NULL DEFAULT 'draft', -- draft|open|partially_paid|paid|void
+  items              TEXT NOT NULL DEFAULT '[]',
+  subtotal_minor     BIGINT NOT NULL DEFAULT 0,
+  tax_minor          BIGINT NOT NULL DEFAULT 0,
+  total_minor        BIGINT NOT NULL DEFAULT 0,
+  currency           TEXT NOT NULL DEFAULT 'USD',
+  issued_at          TIMESTAMPTZ,
+  due_at             TIMESTAMPTZ,
+  paid_minor         BIGINT NOT NULL DEFAULT 0,
+  paid_at            TIMESTAMPTZ,
+  notes              TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_supplier_bills_user_created ON supplier_bills (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_supplier_bills_user_status_due ON supplier_bills (user_id, status, due_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_supplier_bills_supplier ON supplier_bills (user_id, supplier_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_supplier_bills_po ON supplier_bills (user_id, purchase_order_id);
+
+-- ── bill_payments ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS bill_payments (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  bill_id       TEXT NOT NULL,
+  amount_minor  BIGINT NOT NULL,
+  currency      TEXT NOT NULL DEFAULT 'USD',
+  paid_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  method        TEXT,                             -- bank|card|cash|cheque|other
+  ref           TEXT,
+  note          TEXT,
+  expense_id    TEXT,                             -- the expenses row this payment created
+  created_by    TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_bill_payments_bill ON bill_payments (user_id, bill_id, paid_at);
+
+-- ── products: preferred supplier + last purchase cost ────────────────────────
+ALTER TABLE products ADD COLUMN IF NOT EXISTS preferred_supplier_id TEXT;
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS last_cost_minor BIGINT;
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_products_preferred_supplier ON products (user_id, preferred_supplier_id);
+
+
+-- ==== PHASE 7 LANE B ====
+-- Phase 7 / Lane B: workforce (staff profiles, shifts/rota, swaps, leave, balances, attendance, payroll export)
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- ── staff_profiles: a person on the rota. May have no login (field crew); membership_id links to a seat when they do.
+CREATE TABLE IF NOT EXISTS staff_profiles (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  membership_id    TEXT,
+  display_name     TEXT NOT NULL,
+  email            TEXT,
+  phone            TEXT,
+  role_title       TEXT,
+  employment_type  TEXT NOT NULL DEFAULT 'full_time',   -- full_time|part_time|contractor
+  hourly_rate_minor BIGINT NOT NULL DEFAULT 0,
+  currency         TEXT NOT NULL DEFAULT 'USD',
+  weekly_hours     INTEGER NOT NULL DEFAULT 40,
+  skills           TEXT,                                 -- JSON array of strings
+  location         TEXT,
+  start_date       DATE,
+  end_date         DATE,
+  active           BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_staff_profiles_user ON staff_profiles (user_id, active, display_name);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_staff_profiles_membership ON staff_profiles (user_id, membership_id);
+
+-- ── shifts: one scheduled block of work. staff_id NULL = open/unfilled shift.
+CREATE TABLE IF NOT EXISTS shifts (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  staff_id       TEXT,
+  role_title     TEXT,
+  starts_at      TIMESTAMPTZ NOT NULL,
+  ends_at        TIMESTAMPTZ NOT NULL,
+  break_minutes  INTEGER NOT NULL DEFAULT 0,
+  location       TEXT,
+  notes          TEXT,
+  status         TEXT NOT NULL DEFAULT 'draft',        -- draft|published|confirmed|swapped|cancelled
+  published_at   TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_shifts_user_start ON shifts (user_id, starts_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_shifts_user_staff_start ON shifts (user_id, staff_id, starts_at);
+
+-- ── shift_swaps: a request to hand a shift to a colleague.
+CREATE TABLE IF NOT EXISTS shift_swaps (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  shift_id       TEXT NOT NULL,
+  from_staff_id  TEXT NOT NULL,
+  to_staff_id    TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'requested',    -- requested|approved|rejected
+  note           TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  decided_at     TIMESTAMPTZ
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_shift_swaps_user_status ON shift_swaps (user_id, status, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_shift_swaps_shift ON shift_swaps (user_id, shift_id);
+
+-- ── leave_requests
+CREATE TABLE IF NOT EXISTS leave_requests (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  staff_id    TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'vacation',       -- vacation|sick|unpaid|other
+  starts_on   DATE NOT NULL,
+  ends_on     DATE NOT NULL,
+  hours       INTEGER NOT NULL DEFAULT 0,
+  status      TEXT NOT NULL DEFAULT 'pending',        -- pending|approved|rejected|cancelled
+  note        TEXT,
+  decided_by  TEXT,
+  decided_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_leave_requests_user_status ON leave_requests (user_id, status, starts_on);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_leave_requests_staff ON leave_requests (user_id, staff_id, starts_on);
+
+-- ── leave_balances: per staff / kind / year allotment and usage (hours).
+CREATE TABLE IF NOT EXISTS leave_balances (
+  user_id         TEXT NOT NULL,
+  staff_id        TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  year            INTEGER NOT NULL,
+  allotted_hours  INTEGER NOT NULL DEFAULT 0,
+  used_hours      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, staff_id, kind, year)
+);
+
+-- ── attendance: actual clock in/out, from crew links, manual entry or a shift confirmation.
+CREATE TABLE IF NOT EXISTS attendance (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  staff_id    TEXT NOT NULL,
+  shift_id    TEXT,
+  clock_in    TIMESTAMPTZ NOT NULL,
+  clock_out   TIMESTAMPTZ,
+  source      TEXT NOT NULL DEFAULT 'manual',        -- crew|manual|shift
+  minutes     INTEGER,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_attendance_user_in ON attendance (user_id, clock_in);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_attendance_staff_open ON attendance (user_id, staff_id, clock_out);
+
+-- ── links into existing tables
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS staff_id TEXT;
+
+ALTER TABLE share_tokens ADD COLUMN IF NOT EXISTS staff_id TEXT;
+
+
+-- ==== PHASE 7 LANE C ====
+-- Phase 7 / Lane C: automations v2 (event-driven workflows with conditions, tool steps, templates, run history)
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- ── automations: v2 columns (legacy trigger_event/action_type rows keep working through legacyToV2) ──
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS trigger_type TEXT;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS trigger_config TEXT;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS conditions TEXT;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS steps TEXT;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS version INTEGER;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS enabled BOOLEAN;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS autonomy TEXT;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS description TEXT;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS template_key TEXT;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS last_error TEXT;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS error_count INTEGER;
+
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+
+UPDATE automations SET enabled = (status = 'active') WHERE enabled IS NULL;
+
+UPDATE automations SET version = 1 WHERE version IS NULL;
+
+UPDATE automations SET error_count = 0 WHERE error_count IS NULL;
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_automations_user_trigger ON automations (user_id, trigger_type, enabled);
+
+-- ── automation_runs: one row per (automation × trigger event) ─────────────────
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  automation_id    TEXT NOT NULL,
+  trigger_event_id TEXT,
+  status           TEXT NOT NULL DEFAULT 'queued',   -- queued|running|waiting|done|failed|skipped
+  context          TEXT,                             -- JSON {event, entity, org, steps}
+  step_results     TEXT,                             -- JSON array of step outcomes
+  step_index       INTEGER NOT NULL DEFAULT 0,
+  approval_id      TEXT,
+  error            TEXT,
+  attempt          INTEGER NOT NULL DEFAULT 1,
+  started_at       TIMESTAMPTZ,
+  finished_at      TIMESTAMPTZ,
+  resume_at        TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_automation_runs_user_auto ON automation_runs (user_id, automation_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_automation_runs_status_resume ON automation_runs (status, resume_at, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_automation_runs_approval ON automation_runs (approval_id);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_automation_runs_auto_event ON automation_runs (automation_id, trigger_event_id);
+
+-- ── automation_cursors: fan-out watermark (same pattern as webhook_cursors) ────
+CREATE TABLE IF NOT EXISTS automation_cursors (
+  name          TEXT PRIMARY KEY,
+  last_event_at TIMESTAMPTZ,
+  last_event_id TEXT,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ==== PHASE 7 LANE D ====
+-- Phase 7 / Lane D: report builder, saved reports, schedules, dashboards, notification preferences
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- ── saved_reports: a report spec (dataset, filters, group-bys, measures) + chart config ──
+CREATE TABLE IF NOT EXISTS saved_reports (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  description  TEXT,
+  spec         TEXT NOT NULL,                 -- JSON ReportSpec
+  chart        TEXT,                          -- JSON {type: table|bar|line|pie|kpi, x, y, series}
+  visibility   TEXT NOT NULL DEFAULT 'org',   -- private|org
+  created_by   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_saved_reports_user ON saved_reports (user_id, updated_at);
+
+-- ── report_schedules: deliver a saved report on a cadence ──
+CREATE TABLE IF NOT EXISTS report_schedules (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  report_id     TEXT NOT NULL,
+  cadence       TEXT NOT NULL DEFAULT 'weekly',  -- daily|weekly|monthly
+  hour          INTEGER NOT NULL DEFAULT 8,      -- 0-23 in the org timezone
+  weekday       INTEGER,                         -- 0 (Sun) - 6, weekly only
+  day_of_month  INTEGER,                         -- 1-28, monthly only
+  recipients    TEXT NOT NULL DEFAULT '[]',      -- JSON string[] of emails
+  format        TEXT NOT NULL DEFAULT 'inline',  -- csv|pdf|inline
+  enabled       BOOLEAN NOT NULL DEFAULT TRUE,
+  last_sent_at  TIMESTAMPTZ,
+  next_run_at   TIMESTAMPTZ,
+  created_by    TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_report_schedules_due ON report_schedules (enabled, next_run_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_report_schedules_user ON report_schedules (user_id, report_id);
+
+-- ── dashboards: grid of report cards + built-in KPI tiles, optionally the default for a role ──
+CREATE TABLE IF NOT EXISTS dashboards (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  role        TEXT,                              -- owner|admin|manager|member|viewer or NULL (personal)
+  layout      TEXT NOT NULL DEFAULT '[]',        -- JSON [{report_id|builtin, w, h, x, y}]
+  is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+  created_by  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_dashboards_user_role ON dashboards (user_id, role, is_default);
+
+-- ── notification_preferences: per member channel matrix, digest cadence and quiet hours ──
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,                -- org data id
+  member_user_id  TEXT NOT NULL,                -- the member these prefs belong to
+  email           TEXT,                         -- digest recipient (captured from the session when saved)
+  channel_prefs   TEXT NOT NULL DEFAULT '{}',   -- JSON {category: {in_app, email, push, sms}}
+  digest          TEXT NOT NULL DEFAULT 'off',  -- daily|weekly|off
+  digest_hour     INTEGER NOT NULL DEFAULT 8,
+  digest_weekday  INTEGER,                      -- 0-6, weekly only
+  quiet_hours     TEXT,                         -- JSON {start: "22:00", end: "07:00"}
+  last_digest_at  TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_notification_preferences_member ON notification_preferences (user_id, member_user_id);
+
+
+-- ==== PHASE 7 LANE E ====
+-- Phase 7 / Lane E: attachments on any entity, document templates, generic e-sign documents + signers.
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- ── attachments: files attached to any entity (private storage; soft delete) ──
+CREATE TABLE IF NOT EXISTS attachments (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  entity_kind   TEXT NOT NULL,              -- contact|lead|quote|invoice|ticket|record|booking|task|product|purchase_order|document
+  entity_id     TEXT NOT NULL,
+  file_name     TEXT NOT NULL,
+  content_type  TEXT NOT NULL,
+  size_bytes    BIGINT NOT NULL DEFAULT 0,
+  storage_path  TEXT NOT NULL,
+  sha256        TEXT NOT NULL,
+  uploaded_by   TEXT,
+  visibility    TEXT NOT NULL DEFAULT 'internal', -- internal|portal
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at    TIMESTAMPTZ
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_attachments_entity ON attachments (user_id, entity_kind, entity_id, created_at);
+
+-- ── document_templates: markdown bodies with {{merge.fields}} ──
+CREATE TABLE IF NOT EXISTS document_templates (
+  id                 TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL,
+  name               TEXT NOT NULL,
+  kind               TEXT NOT NULL DEFAULT 'other', -- contract|proposal|nda|letter|form|other
+  body_md            TEXT NOT NULL DEFAULT '',
+  fields             TEXT,                           -- JSON [{key,label,source}]
+  requires_signature BOOLEAN NOT NULL DEFAULT TRUE,
+  signer_roles       TEXT,                           -- JSON ["client","company"]
+  version            INTEGER NOT NULL DEFAULT 1,
+  starter_slug       TEXT,                           -- set when installed from a built-in starter
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_document_templates_user ON document_templates (user_id, created_at);
+
+-- ── documents: rendered instances sent for signature ──
+CREATE TABLE IF NOT EXISTS documents (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  template_id      TEXT,
+  title            TEXT NOT NULL,
+  kind             TEXT NOT NULL DEFAULT 'other',
+  body_md          TEXT NOT NULL DEFAULT '',
+  merge_data       TEXT,                             -- JSON
+  status           TEXT NOT NULL DEFAULT 'draft',    -- draft|sent|viewed|signed|declined|expired|void
+  signing_order    TEXT NOT NULL DEFAULT 'parallel', -- sequential|parallel
+  contact_id       TEXT,
+  record_id        TEXT,
+  quote_id         TEXT,
+  pdf_hash         TEXT,
+  signed_pdf_hash  TEXT,
+  sent_at          TIMESTAMPTZ,
+  viewed_at        TIMESTAMPTZ,
+  completed_at     TIMESTAMPTZ,
+  expires_at       TIMESTAMPTZ,
+  created_by       TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_documents_user_status ON documents (user_id, status, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_documents_contact ON documents (user_id, contact_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_documents_expiry ON documents (status, expires_at);
+
+-- ── document_signers: one row per signer; OTP challenge + consent snapshot ──
+CREATE TABLE IF NOT EXISTS document_signers (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  document_id     TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  email           TEXT NOT NULL,
+  role            TEXT,
+  order_index     INTEGER NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'pending', -- pending|viewed|signed|declined
+  signed_at       TIMESTAMPTZ,
+  signature_text  TEXT,
+  ip              TEXT,
+  user_agent      TEXT,
+  consent_text    TEXT,
+  otp_hash        TEXT,
+  otp_expires_at  TIMESTAMPTZ,
+  otp_attempts    INTEGER NOT NULL DEFAULT 0,
+  share_token_id  TEXT,
+  decline_reason  TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_document_signers_doc ON document_signers (document_id, order_index);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_document_signers_user ON document_signers (user_id, email);
+

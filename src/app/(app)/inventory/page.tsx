@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, Boxes, Loader2, Package, Pencil, Plus, RefreshCw, Trash2, Undo2, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
@@ -184,6 +185,10 @@ export default function InventoryPage() {
           <button type="button" className="rounded font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setLowOnly(true)}>
             Show only low stock
           </button>
+          {" · "}
+          <Link href="/procurement?tab=reorder" className="rounded font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            Reorder from suppliers
+          </Link>
         </Banner>
       )}
 

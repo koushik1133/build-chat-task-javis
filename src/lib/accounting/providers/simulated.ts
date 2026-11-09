@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import type {
-  AccountOption, AccountingContact, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct,
+  AccountOption, AccountingBill, AccountingContact, AccountingExpense, AccountingSupplier, AccountingInvoice, AccountingPayment, AccountingProduct,
   ConnectionContext, LiveAccountingProvider, PullPaymentsResult, PushResult, RemotePayment, RemoteRef,
 } from "../types";
-import { qboCustomer, qboInvoice, qboItem, qboPayment, qboPurchase } from "../mapping";
+import { qboBill, qboCustomer, qboInvoice, qboItem, qboPayment, qboPurchase, qboVendor } from "../mapping";
 
 /**
  * In-database fake accounting system. Pushed payloads (QuickBooks-shaped, so
@@ -72,6 +72,8 @@ export const simulatedProvider: LiveAccountingProvider = {
   async pushPayment(_a, conn, payment: AccountingPayment, existing) { return store(await ownerOf(conn.id), conn, "Payment", qboPayment(payment, conn.settings), existing); },
   async pushExpense(_a, conn, expense: AccountingExpense, existing) { return store(await ownerOf(conn.id), conn, "Purchase", qboPurchase(expense, conn.settings), existing); },
   async pushItem(_a, conn, product: AccountingProduct, existing) { return store(await ownerOf(conn.id), conn, "Item", qboItem(product, conn.settings), existing); },
+  async pushVendor(_a, conn, supplier: AccountingSupplier, existing) { return store(await ownerOf(conn.id), conn, "Vendor", qboVendor(supplier), existing); },
+  async pushBill(_a, conn, bill: AccountingBill, existing) { return store(await ownerOf(conn.id), conn, "Bill", qboBill(bill, conn.settings), existing); },
 
   async pullPayments(_a, conn, cursor): Promise<PullPaymentsResult> {
     const rows = await query<SimObjectRow>(

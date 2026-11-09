@@ -9,6 +9,7 @@ import { overdueCard } from "./overdue-card";
 import { leadFollowUp } from "./lead-follow-up";
 import { socialGap } from "./social-gap";
 import { ticketAutoResolve } from "./ticket-auto-resolve";
+import { understaffedDay } from "./understaffed-day";
 
 export type { PlaybookDef } from "./types";
 
@@ -19,7 +20,7 @@ export type { PlaybookDef } from "./types";
  * `runPlaybook` is also reachable from the UI ("Run now"). Dedupe lives in
  * `playbook_runs`; per-user opt-out lives in `playbook_settings`.
  */
-export const PLAYBOOKS: PlaybookDef[] = [stalledDeal, unansweredInbound, overdueCard, leadFollowUp, socialGap, ticketAutoResolve];
+export const PLAYBOOKS: PlaybookDef[] = [stalledDeal, unansweredInbound, overdueCard, leadFollowUp, socialGap, ticketAutoResolve, understaffedDay];
 
 export function getPlaybook(id: string): PlaybookDef | undefined {
   return PLAYBOOKS.find((p) => p.id === id);

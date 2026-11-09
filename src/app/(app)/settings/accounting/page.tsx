@@ -23,7 +23,7 @@ type Detail = { connection: Omit<AccountingConnectionView, "counts">; accounts: 
 
 const STATUS_TONE: Record<string, Tone> = { connected: "success", error: "danger", disabled: "neutral" };
 const LOG_TONE: Record<string, Tone> = { ok: "success", error: "danger", skipped: "neutral" };
-const KINDS: AccountingEntityKind[] = ["invoice", "payment", "expense", "contact", "product"];
+const KINDS: AccountingEntityKind[] = ["invoice", "payment", "expense", "contact", "product", "supplier", "bill"];
 
 const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);

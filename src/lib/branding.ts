@@ -205,7 +205,7 @@ export function cssVarsToStyleString(vars: Record<string, string>): string {
  * Work out which org a public URL belongs to and return its branding.
  *   /book/<org-slug>/...     → organizations.slug
  *   /book/cancel/<token>     → bookings.cancel_token_hash
- *   /p/q|i|pay|c/<token>     → share_tokens (quote|invoice|pay|portal)
+ *   /p/q|i|pay|c|sign/<token> → share_tokens (quote|invoice|pay|portal|sign)
  * Any failure (bad token, missing table) yields the defaults.
  */
 export async function resolvePublicBranding(pathname: string | null | undefined): Promise<Branding> {
@@ -237,7 +237,7 @@ export async function resolvePublicBranding(pathname: string | null | undefined)
       return row ? getBranding(row.user_id) : DEFAULT_BRANDING;
     }
     if (parts[0] === "p" && parts[1] && parts[2]) {
-      const kinds: Record<string, "quote" | "invoice" | "pay" | "portal"> = { q: "quote", i: "invoice", pay: "pay", c: "portal" };
+      const kinds: Record<string, "quote" | "invoice" | "pay" | "portal" | "sign"> = { q: "quote", i: "invoice", pay: "pay", c: "portal", sign: "sign" };
       const kind = kinds[parts[1]];
       if (!kind) return DEFAULT_BRANDING;
       const { resolveShareToken } = await import("@/lib/share-tokens");

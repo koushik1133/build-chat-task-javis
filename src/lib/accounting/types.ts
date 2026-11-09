@@ -44,7 +44,7 @@ export function isLiveAccountingProviderId(v: unknown): v is LiveAccountingProvi
   return typeof v === "string" && (LIVE_ACCOUNTING_PROVIDERS as readonly string[]).includes(v);
 }
 
-export const ACCOUNTING_ENTITY_KINDS = ["contact", "invoice", "payment", "expense", "product"] as const;
+export const ACCOUNTING_ENTITY_KINDS = ["contact", "invoice", "payment", "expense", "product", "supplier", "bill"] as const;
 export type AccountingEntityKind = (typeof ACCOUNTING_ENTITY_KINDS)[number];
 export function isAccountingEntityKind(v: unknown): v is AccountingEntityKind {
   return typeof v === "string" && (ACCOUNTING_ENTITY_KINDS as readonly string[]).includes(v);
@@ -251,6 +251,42 @@ export interface AccountingProduct {
   track_stock: boolean;
 }
 
+/** Supplier (vendor) — Phase 7 procurement. */
+export interface AccountingSupplier {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  tax_number: string | null;
+}
+
+export interface AccountingBillLine {
+  description: string;
+  qty: number;
+  unit_minor: number;
+  tax_rate_bp: number;
+  product_id?: string | null;
+  item_remote_id?: string | null;
+}
+
+/** Supplier bill (accounts payable) → QBO Bill / Xero ACCPAY invoice. */
+export interface AccountingBill {
+  id: string;
+  number: string;
+  supplier_ref: string | null;
+  status: string;
+  currency: string;
+  subtotal_minor: number;
+  tax_minor: number;
+  total_minor: number;
+  issued_at: string;
+  due_at: string | null;
+  notes: string | null;
+  items: AccountingBillLine[];
+  supplier_remote_id: string | null;
+  supplier_name: string;
+}
+
 export interface LiveAccountingProvider {
   readonly id: LiveAccountingProviderId;
   readonly label: string;
@@ -266,5 +302,7 @@ export interface LiveAccountingProvider {
   pushPayment(auth: AccountingAuth, conn: ConnectionContext, payment: AccountingPayment, existing: RemoteRef | null): Promise<PushResult>;
   pushExpense(auth: AccountingAuth, conn: ConnectionContext, expense: AccountingExpense, existing: RemoteRef | null): Promise<PushResult>;
   pushItem(auth: AccountingAuth, conn: ConnectionContext, product: AccountingProduct, existing: RemoteRef | null): Promise<PushResult>;
+  pushVendor(auth: AccountingAuth, conn: ConnectionContext, supplier: AccountingSupplier, existing: RemoteRef | null): Promise<PushResult>;
+  pushBill(auth: AccountingAuth, conn: ConnectionContext, bill: AccountingBill, existing: RemoteRef | null): Promise<PushResult>;
   pullPayments(auth: AccountingAuth, conn: ConnectionContext, cursor: string | null): Promise<PullPaymentsResult>;
 }

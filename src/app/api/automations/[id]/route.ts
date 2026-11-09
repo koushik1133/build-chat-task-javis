@@ -1,24 +1,76 @@
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
-import { query } from "@/lib/dsql";
+import { AutomationDefinitionSchema, AutomationPatchSchema } from "@/lib/automations/schema";
+import { definitionOf, deleteAutomation, getAutomation, saveAutomation, toAutomationDTO } from "@/lib/automations/store";
+import { recordAudit } from "@/lib/audit";
 
-export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type Ctx = { params: Promise<{ id: string }> };
+
+export async function GET(_req: Request, ctx: Ctx) {
   let scope;
-  try { scope = await requireScope({ area: "agents", edit: true }); }
-  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  try {
+    scope = await requireScope({ area: "agents", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const { id } = await ctx.params;
-  const rawBody = await req.json().catch(() => null);
-  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  const { status } = rawBody;
-  await query("UPDATE automations SET status = $1 WHERE id = $2 AND user_id = $3", [status, id, scope.dataId]);
-  return NextResponse.json({ ok: true });
+  const row = await getAutomation(scope.dataId, id).catch(() => null);
+  if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+  return NextResponse.json({ automation: toAutomationDTO(row) });
 }
 
-export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+/** PATCH: partial update of the v2 definition (legacy rows are converted and persisted on first save). Accepts legacy `{status}` too. */
+export async function PATCH(req: Request, ctx: Ctx) {
   let scope;
-  try { scope = await requireScope({ area: "agents", edit: true }); }
-  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  try {
+    scope = await requireScope({ area: "agents", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const { id } = await ctx.params;
-  await query("DELETE FROM automations WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
+  const raw = await req.json().catch(() => null);
+  if (!raw || typeof raw !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const body = { ...(raw as Record<string, unknown>) };
+  if (typeof body.status === "string") {
+    body.enabled = body.status === "active";
+    delete body.status;
+  }
+  const patch = AutomationPatchSchema.safeParse(body);
+  if (!patch.success) return NextResponse.json({ error: "Invalid patch", details: patch.error.flatten() }, { status: 400 });
+  const row = await getAutomation(scope.dataId, id).catch(() => null);
+  if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const current = definitionOf(row);
+  const merged = AutomationDefinitionSchema.safeParse({
+    name: current.name,
+    description: current.description ?? null,
+    trigger_type: current.trigger_type,
+    trigger_config: current.trigger_config,
+    conditions: current.conditions,
+    steps: current.steps,
+    autonomy: current.autonomy,
+    enabled: current.enabled,
+    ...patch.data,
+  });
+  if (!merged.success) return NextResponse.json({ error: "Invalid automation", details: merged.error.flatten() }, { status: 400 });
+  const saved = await saveAutomation(scope.dataId, id, merged.data);
+  if (!saved) return NextResponse.json({ error: "not found" }, { status: 404 });
+  void recordAudit({ dataId: scope.dataId, userId: scope.userId }, { action: "automation.updated", entity: "automation", entityId: id, after: { enabled: merged.data.enabled, version: saved.version } }).catch(() => undefined);
+  return NextResponse.json({ automation: toAutomationDTO(saved), ok: true });
+}
+
+export async function DELETE(_req: Request, ctx: Ctx) {
+  let scope;
+  try {
+    scope = await requireScope({ area: "agents", edit: true });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const { id } = await ctx.params;
+  const ok = await deleteAutomation(scope.dataId, id).catch(() => false);
+  if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
+  void recordAudit({ dataId: scope.dataId, userId: scope.userId }, { action: "automation.deleted", entity: "automation", entityId: id }).catch(() => undefined);
   return NextResponse.json({ ok: true });
 }

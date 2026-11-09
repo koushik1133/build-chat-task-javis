@@ -19,6 +19,7 @@ import { PRIORITY_TONE, SlaBadge, TICKET_STATUS_TONE } from "@/components/helpde
 import { cn, timeAgo } from "@/lib/utils";
 import { TICKET_PRIORITIES, TICKET_STATUSES, type TicketPriority, type TicketStatus } from "@/lib/helpdesk/sla";
 import type { SlaPolicyRow, TicketDetail, TicketMessageRow, TicketRow } from "@/lib/helpdesk/tickets";
+import { AttachmentPanel } from "@/components/attachments/attachment-panel";
 
 type StatusFilter = "active" | TicketStatus | "all";
 
@@ -574,6 +575,8 @@ function TicketPane({
           </li>
         ))}
       </ol>
+
+      <AttachmentPanel entityKind="ticket" entityId={ticket.id} allowPortal compact className="border-t border-border pt-4" />
 
       <form
         className="space-y-2 border-t border-border pt-4"

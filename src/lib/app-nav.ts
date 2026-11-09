@@ -53,6 +53,9 @@ import {
   Activity,
   LayoutDashboard,
   MessageSquareCode,
+  Truck,
+  CalendarClock,
+  FileSignature,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -100,6 +103,7 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/calendar", label: "Calendar", icon: CalendarDays },
       { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
       { href: "/knowledge", label: "Knowledge Base", icon: BookOpen },
+      { href: "/documents", label: "Documents", icon: FileSignature },
     ],
   },
   {
@@ -119,6 +123,8 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/tasks", label: "Tasks", icon: ListTodo },
       { href: "/billing", label: "Billing", icon: Receipt },
       { href: "/inventory", label: "Inventory", icon: Package },
+      { href: "/procurement", label: "Procurement", icon: Truck },
+      { href: "/workforce", label: "Workforce", icon: CalendarClock },
       { href: "/finance", label: "Finance", icon: Wallet },
       { href: "/reports", label: "Reports", icon: PieChart },
       { href: "/insights", label: "Insights", icon: TrendingUp },

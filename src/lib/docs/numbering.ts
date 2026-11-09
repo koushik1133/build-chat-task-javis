@@ -8,9 +8,9 @@ import { query, queryOne, withRetry } from "@/lib/dsql";
  * either way we retry via withRetry.
  */
 
-export type DocKind = "quote" | "invoice" | "credit_note";
+export type DocKind = "quote" | "invoice" | "credit_note" | "purchase_order" | "supplier_bill";
 
-const PREFIX: Record<DocKind, string> = { quote: "Q", invoice: "INV", credit_note: "CN" };
+const PREFIX: Record<DocKind, string> = { quote: "Q", invoice: "INV", credit_note: "CN", purchase_order: "PO", supplier_bill: "BILL" };
 
 /** `prefix` overrides the default (org numbering settings); invalid values fall back. */
 export function formatDocNumber(kind: DocKind, n: number, prefix?: string | null): string {

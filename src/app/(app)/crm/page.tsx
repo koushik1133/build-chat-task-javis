@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Globe, Plus, Search, Filter, Users, DollarSign,
-  Mail, Phone, Building2, Tag, X, Loader2, Pencil, Trash2, Check, FileText
+  Mail, Phone, Building2, Tag, X, Loader2, Pencil, Trash2, Check, FileText, Paperclip
 } from "lucide-react";
+import { FilesDialog, type FilesTarget } from "@/components/attachments/files-dialog";
 import { Button } from "@/components/ui/button";
 import { LoadMore } from "@/components/ui/load-more";
 
@@ -71,6 +72,7 @@ function parseTagsSafe(tags: unknown): string[] {
 }
 
 export default function CrmPage() {
+  const [filesFor, setFilesFor] = useState<FilesTarget | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -370,6 +372,10 @@ export default function CrmPage() {
                               className="flex h-11 w-11 touch-manipulation items-center justify-center rounded hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors motion-reduce:transition-none sm:h-7 sm:w-7">
                               <FileText className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                             </a>
+                            <button type="button" onClick={() => setFilesFor({ kind: "contact", id: contact.id, label: contact.full_name })} aria-label={`Files for ${contact.full_name}`} title="Files"
+                              className="flex h-11 w-11 touch-manipulation items-center justify-center rounded hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors motion-reduce:transition-none sm:h-7 sm:w-7">
+                              <Paperclip className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                            </button>
                             <button type="button" onClick={() => openEdit(contact)} aria-label={`Edit ${contact.full_name}`}
                               className="flex h-11 w-11 touch-manipulation items-center justify-center rounded hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors motion-reduce:transition-none sm:h-7 sm:w-7">
                               <Pencil className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
@@ -483,6 +489,7 @@ export default function CrmPage() {
           </div>
         </div>
       )}
+      {filesFor && <FilesDialog target={filesFor} onClose={() => setFilesFor(null)} />}
     </div>
   );
 }

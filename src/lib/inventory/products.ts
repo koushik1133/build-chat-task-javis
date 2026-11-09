@@ -31,6 +31,8 @@ export interface ProductRow {
   stock_on_hand: number;
   stock_reserved: number;
   reorder_point: number;
+  preferred_supplier_id?: string | null;
+  last_cost_minor?: string | number | null;
   active: boolean;
   deleted_at: string | null;
   created_at: string;
@@ -55,6 +57,10 @@ export interface ProductDTO {
   stock_available: number;
   reorder_point: number;
   low_stock: boolean;
+  /** Supplier reorder suggestions group by; null = unassigned. */
+  preferred_supplier_id: string | null;
+  /** Unit cost on the most recent receipt (null until something was received). */
+  last_cost_minor: number | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -91,6 +97,8 @@ export function toProductDTO(r: ProductRow): ProductDTO {
     stock_available: stock_on_hand - stock_reserved,
     reorder_point,
     low_stock: isLowStock({ track_stock: Boolean(r.track_stock), stock_on_hand, stock_reserved, reorder_point }),
+    preferred_supplier_id: r.preferred_supplier_id ?? null,
+    last_cost_minor: r.last_cost_minor === null || r.last_cost_minor === undefined ? null : Number(r.last_cost_minor),
     active: Boolean(r.active),
     created_at: r.created_at,
     updated_at: r.updated_at,
@@ -98,7 +106,7 @@ export function toProductDTO(r: ProductRow): ProductDTO {
 }
 
 const COLS =
-  "id, user_id, sku, name, description, kind, unit, unit_price_minor, cost_minor, currency, tax_rate_bp, track_stock, stock_on_hand, stock_reserved, reorder_point, active, deleted_at, created_at, updated_at";
+  "id, user_id, sku, name, description, kind, unit, unit_price_minor, cost_minor, currency, tax_rate_bp, track_stock, stock_on_hand, stock_reserved, reorder_point, preferred_supplier_id, last_cost_minor, active, deleted_at, created_at, updated_at";
 
 export const ProductInputSchema = z
   .object({
@@ -114,6 +122,7 @@ export const ProductInputSchema = z
     track_stock: z.boolean().default(false),
     stock_on_hand: z.number().int().min(0).max(100_000_000).default(0),
     reorder_point: z.number().int().min(0).max(100_000_000).default(0),
+    preferred_supplier_id: z.string().max(100).nullable().optional(),
     active: z.boolean().default(true),
   })
   .strict();
@@ -189,11 +198,11 @@ export async function createProduct(dataId: string, input: ProductInput, actorId
   const id = randomUUID();
   await query(
     `INSERT INTO products (id, user_id, sku, name, description, kind, unit, unit_price_minor, cost_minor, currency, tax_rate_bp,
-       track_stock, stock_on_hand, stock_reserved, reorder_point, active)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15)`,
+       track_stock, stock_on_hand, stock_reserved, reorder_point, active, preferred_supplier_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16)`,
     [
       id, dataId, sku, input.name, input.description ?? null, input.kind, input.unit, input.unit_price_minor, input.cost_minor,
-      input.currency, input.tax_rate_bp, input.track_stock, input.track_stock ? input.stock_on_hand : 0, input.reorder_point, input.active,
+      input.currency, input.tax_rate_bp, input.track_stock, input.track_stock ? input.stock_on_hand : 0, input.reorder_point, input.active, input.preferred_supplier_id ?? null,
     ]
   );
   if (input.track_stock && input.stock_on_hand > 0) {
@@ -237,6 +246,7 @@ export async function updateProduct(dataId: string, id: string, patch: ProductPa
   if (patch.tax_rate_bp !== undefined) push("tax_rate_bp", patch.tax_rate_bp);
   if (patch.track_stock !== undefined) push("track_stock", patch.track_stock);
   if (patch.reorder_point !== undefined) push("reorder_point", patch.reorder_point);
+  if (patch.preferred_supplier_id !== undefined) push("preferred_supplier_id", patch.preferred_supplier_id);
   if (patch.active !== undefined) push("active", patch.active);
   await query(`UPDATE products SET ${sets.join(", ")} WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`, params);
   const out = await getProduct(dataId, id);

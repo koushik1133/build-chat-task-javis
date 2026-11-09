@@ -3,6 +3,10 @@ import { query, queryOne } from "@/lib/dsql";
 import { resolveShareToken, type ShareTokenRow } from "@/lib/share-tokens";
 import { tableExists } from "@/lib/table-exists";
 import { minutesBetween } from "@/lib/finance/time";
+import { clockInStaff, clockOutStaff, openAttendance } from "@/lib/workforce/attendance";
+import { requestLeave } from "@/lib/workforce/leave";
+import { WorkforceError } from "@/lib/workforce/staff";
+import { LEAVE_KINDS, type LeaveKind } from "@/lib/workforce/pure";
 
 /** Crew clock-ins are ordinary time_entries rows keyed by ref_kind/ref_id = crew/<token id>. */
 export const CREW_REF_KIND = "crew";
@@ -30,6 +34,16 @@ export interface CrewBooking {
   notes: string | null;
 }
 
+/** A published shift as shown to the person it belongs to. */
+export interface CrewShift {
+  id: string;
+  starts_at: string;
+  ends_at: string;
+  role_title: string | null;
+  location: string | null;
+  status: string;
+}
+
 export interface CrewDay {
   workspace: string;
   label: string;
@@ -40,6 +54,12 @@ export interface CrewDay {
   openTickets: number | null;
   timeTracking: boolean;
   clockedInAt: string | null;
+  /** Set when the crew link is tied to a staff profile (Workforce → Staff → crew link). */
+  staff: { id: string; name: string } | null;
+  /** Next 14 days of published shifts for the linked staff member. */
+  upcomingShifts: CrewShift[];
+  /** Pending leave requests for the linked staff member. */
+  pendingLeave: number;
 }
 
 export function isValidTimeZone(tz: string | null | undefined): tz is string {
@@ -65,11 +85,15 @@ export function dayRangeInTz(tz: string, now = new Date()): { date: string; star
   return { date, start, end };
 }
 
-export async function resolveCrewToken(token: string): Promise<ShareTokenRow & { label: string | null } | null> {
+export type CrewToken = ShareTokenRow & { label: string | null; staff_id: string | null };
+
+export async function resolveCrewToken(token: string): Promise<CrewToken | null> {
   const row = await resolveShareToken("crew", token);
   if (!row) return null;
-  const extra = await queryOne<{ label: string | null }>(`SELECT label FROM share_tokens WHERE id = $1`, [row.id]).catch(() => null);
-  return { ...row, label: extra?.label ?? null };
+  const extra = await queryOne<{ label: string | null; staff_id: string | null }>(`SELECT label, staff_id FROM share_tokens WHERE id = $1`, [row.id]).catch(
+    async () => (await queryOne<{ label: string | null }>(`SELECT label FROM share_tokens WHERE id = $1`, [row.id]).catch(() => null)) as { label: string | null; staff_id?: string | null } | null
+  );
+  return { ...row, label: extra?.label ?? null, staff_id: extra?.staff_id ?? null };
 }
 
 async function defaultTimezone(dataId: string): Promise<string> {
@@ -77,7 +101,7 @@ async function defaultTimezone(dataId: string): Promise<string> {
   return isValidTimeZone(cal?.timezone) ? cal.timezone : "UTC";
 }
 
-export async function getCrewDay(t: ShareTokenRow & { label: string | null }, tzParam?: string | null): Promise<CrewDay> {
+export async function getCrewDay(t: CrewToken, tzParam?: string | null): Promise<CrewDay> {
   const dataId = t.user_id;
   const timezone = isValidTimeZone(tzParam) ? tzParam : await defaultTimezone(dataId);
   const { date, start, end } = dayRangeInTz(timezone);
@@ -113,6 +137,28 @@ export async function getCrewDay(t: ShareTokenRow & { label: string | null }, tz
     clockedInAt = open?.started_at ? new Date(open.started_at).toISOString() : null;
   }
 
+  // Workforce self-service: the person's own published shifts and leave, when the link is tied to a staff profile.
+  let staff: CrewDay["staff"] = null;
+  let upcomingShifts: CrewShift[] = [];
+  let pendingLeave = 0;
+  if (t.staff_id) {
+    const [profile, shifts, leave, openAtt] = await Promise.all([
+      queryOne<{ id: string; display_name: string }>(`SELECT id, display_name FROM staff_profiles WHERE user_id = $1 AND id = $2 AND active = TRUE`, [dataId, t.staff_id]).catch(() => null),
+      query<CrewShift>(
+        `SELECT id, starts_at, ends_at, role_title, location, status FROM shifts WHERE user_id = $1 AND staff_id = $2 AND status IN ('published','confirmed','swapped') AND ends_at >= $3 AND starts_at < $4 ORDER BY starts_at ASC LIMIT 50`,
+        [dataId, t.staff_id, start.toISOString(), new Date(start.getTime() + 14 * 86_400_000).toISOString()]
+      ).catch(() => [] as CrewShift[]),
+      queryOne<{ n: string }>(`SELECT COUNT(*)::text AS n FROM leave_requests WHERE user_id = $1 AND staff_id = $2 AND status = 'pending'`, [dataId, t.staff_id]).catch(() => null),
+      openAttendance(dataId, t.staff_id).catch(() => null),
+    ]);
+    if (profile) {
+      staff = { id: profile.id, name: profile.display_name };
+      upcomingShifts = shifts.map((s) => ({ ...s, starts_at: new Date(s.starts_at).toISOString(), ends_at: new Date(s.ends_at).toISOString() }));
+      pendingLeave = Number(leave?.n ?? 0);
+      if (!clockedInAt && openAtt) clockedInAt = openAtt.clock_in;
+    }
+  }
+
   return {
     workspace: org?.name ?? "Workspace",
     label: t.label ?? "Crew",
@@ -121,8 +167,11 @@ export async function getCrewDay(t: ShareTokenRow & { label: string | null }, tz
     tasks: tasks.map((r) => ({ ...r, created_at: new Date(r.created_at).toISOString() })),
     bookings: bookings.map((b) => ({ ...b, starts_at: new Date(b.starts_at).toISOString(), ends_at: new Date(b.ends_at).toISOString() })),
     openTickets,
-    timeTracking: hasTime,
+    timeTracking: hasTime || Boolean(staff),
     clockedInAt,
+    staff,
+    upcomingShifts,
+    pendingLeave,
   };
 }
 
@@ -130,7 +179,8 @@ export type CrewAction =
   | { action: "complete_task"; taskId: string; done?: boolean }
   | { action: "add_note"; note: string; bookingId?: string | null }
   | { action: "clock_in" }
-  | { action: "clock_out" };
+  | { action: "clock_out" }
+  | { action: "request_leave"; kind: LeaveKind; starts_on: string; ends_on: string; note?: string | null };
 
 export class CrewActionError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -139,7 +189,7 @@ export class CrewActionError extends Error {
   }
 }
 
-export async function runCrewAction(t: ShareTokenRow & { label: string | null }, a: CrewAction): Promise<Record<string, unknown>> {
+export async function runCrewAction(t: CrewToken, a: CrewAction): Promise<Record<string, unknown>> {
   const dataId = t.user_id;
   const who = t.label ?? "Crew";
   switch (a.action) {
@@ -169,9 +219,27 @@ export async function runCrewAction(t: ShareTokenRow & { label: string | null },
       );
       return { ok: true };
     }
+    case "request_leave": {
+      if (!t.staff_id) throw new CrewActionError(403, "This link is not tied to a staff profile.");
+      if (!LEAVE_KINDS.includes(a.kind)) throw new CrewActionError(400, "Unknown leave kind.");
+      try {
+        const leave = await requestLeave(dataId, { staff_id: t.staff_id, kind: a.kind, starts_on: a.starts_on, ends_on: a.ends_on, note: a.note ?? null }, `crew:${t.id}`);
+        return { leave };
+      } catch (err) {
+        if (err instanceof WorkforceError) throw new CrewActionError(err.status, err.message);
+        throw err;
+      }
+    }
     case "clock_in":
     case "clock_out": {
-      if (!(await tableExists("time_entries"))) throw new CrewActionError(501, "Time tracking is not enabled for this workspace.");
+      const hasTime = await tableExists("time_entries");
+      if (!hasTime && !t.staff_id) throw new CrewActionError(501, "Time tracking is not enabled for this workspace.");
+      // Attendance (workforce) when the link is tied to a staff profile; time_entries keeps the billing/job-costing trail.
+      if (t.staff_id) {
+        const att = a.action === "clock_in" ? await clockInStaff(dataId, t.staff_id, "crew").catch(() => null) : await clockOutStaff(dataId, t.staff_id).catch(() => null);
+        if (!att && !hasTime) throw new CrewActionError(409, a.action === "clock_in" ? "Already clocked in." : "Not clocked in.");
+        if (att && !hasTime) return a.action === "clock_in" ? { attendanceId: att.id, startedAt: att.clock_in } : { attendanceId: att.id, startedAt: att.clock_in, endedAt: att.clock_out };
+      }
       try {
         if (a.action === "clock_in") {
           // Conditional INSERT: one open crew timer per token, decided inside the statement.
@@ -184,6 +252,7 @@ export async function runCrewAction(t: ShareTokenRow & { label: string | null },
              RETURNING id`,
             [id, dataId, CREW_REF_KIND, t.id, `Crew: ${who}`, startedAt]
           );
+          if (inserted.length && t.staff_id) await query(`UPDATE time_entries SET staff_id = $3 WHERE id = $1 AND user_id = $2`, [id, dataId, t.staff_id]).catch(() => undefined);
           if (inserted.length === 0) throw new CrewActionError(409, "Already clocked in.");
           return { entryId: id, startedAt };
         }

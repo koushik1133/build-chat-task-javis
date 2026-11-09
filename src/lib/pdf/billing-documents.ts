@@ -149,3 +149,96 @@ export function renderStatementPdf(st: StatementDocInput, branding: DocBranding,
   drawFooters(doc, [brand, branding.support_email ?? null, "Customer statement"].filter(Boolean).join("  ·  "), 48);
   return doc.render();
 }
+
+/* ─── Procurement: purchase orders and supplier bills ─────────────────────── */
+
+export interface PurchaseOrderDocInput {
+  number: string;
+  status: string;
+  currency: string;
+  items: DocLineItem[];
+  subtotal_minor: number;
+  tax_minor: number;
+  total_minor: number;
+  expected_at: string | null;
+  notes: string | null;
+  supplier_name: string | null;
+  supplier_email?: string | null;
+  created_at: string;
+  sent_at?: string | null;
+  /** Supplier address / tax number ride in `contact_*`; issuer tax id as usual. */
+  parties?: DocParties;
+}
+
+/** Purchase order: our business orders from the supplier (unit = unit cost). */
+export function renderPurchaseOrderPdf(po: PurchaseOrderDocInput, branding: DocBranding, opts: RenderOptions = {}): Uint8Array {
+  const brand = branding.brand_name?.trim() || opts.business?.trim() || "Purchase order";
+  const accent = hexColor(branding.primary_color) ?? [0.97, 0.45, 0.09];
+  const doc = new PdfDocument({ title: `Purchase order ${po.number}`, author: brand, subject: `Purchase order ${po.number}` });
+  const meta: Array<[string, string]> = [
+    ["Date", fmtDateOnly(po.sent_at ?? po.created_at)],
+    ["Status", po.status.replace(/_/g, " ")],
+  ];
+  if (po.expected_at) meta.push(["Expected by", fmtDateOnly(po.expected_at)]);
+  const flow = new Flow(doc, (p) => drawHeader(p, { brand, kindLabel: "PURCHASE ORDER", number: po.number, accent, meta }, 48));
+  drawParty(flow, "Ordered by", [brand, ...issuerLines(po.parties)]);
+  drawParty(flow, "Supplier", customerLines(po.supplier_name, po.supplier_email, po.parties));
+  drawItemsTable(flow, po.items, po.currency, po.parties?.rate_labels);
+  flow.gap(6);
+  drawTotals(flow, [
+    ["Subtotal", fmtMinor(po.subtotal_minor, po.currency)],
+    ...taxRows(po.tax_minor, po.currency),
+    ["Order total", fmtMinor(po.total_minor, po.currency), true],
+  ]);
+  if (po.notes) drawSection(flow, "Notes", po.notes);
+  drawFooters(doc, [brand, branding.support_email ?? null, `Purchase order ${po.number}`].filter(Boolean).join("  ·  "), 48);
+  return doc.render();
+}
+
+export interface SupplierBillDocInput {
+  number: string;
+  supplier_ref: string | null;
+  po_number: string | null;
+  status: string;
+  currency: string;
+  items: DocLineItem[];
+  subtotal_minor: number;
+  tax_minor: number;
+  total_minor: number;
+  paid_minor: number;
+  issued_at: string | null;
+  due_at: string | null;
+  notes: string | null;
+  supplier_name: string | null;
+  created_at: string;
+  parties?: DocParties;
+}
+
+/** Supplier bill (accounts payable): what we owe a supplier, for the internal record. */
+export function renderSupplierBillPdf(bill: SupplierBillDocInput, branding: DocBranding, opts: RenderOptions = {}): Uint8Array {
+  const brand = branding.brand_name?.trim() || opts.business?.trim() || "Supplier bill";
+  const accent = hexColor(branding.primary_color) ?? [0.97, 0.45, 0.09];
+  const doc = new PdfDocument({ title: `Supplier bill ${bill.number}`, author: brand, subject: `Supplier bill ${bill.number}` });
+  const meta: Array<[string, string]> = [
+    ["Issued", fmtDateOnly(bill.issued_at ?? bill.created_at)],
+    ["Due", fmtDateOnly(bill.due_at)],
+    ["Status", bill.status.replace(/_/g, " ")],
+  ];
+  if (bill.supplier_ref) meta.push(["Supplier ref", bill.supplier_ref]);
+  if (bill.po_number) meta.push(["Purchase order", bill.po_number]);
+  const flow = new Flow(doc, (p) => drawHeader(p, { brand, kindLabel: "SUPPLIER BILL", number: bill.number, accent, meta }, 48));
+  drawParty(flow, "Billed to", [brand, ...issuerLines(bill.parties)]);
+  drawParty(flow, "Supplier", customerLines(bill.supplier_name, null, bill.parties));
+  drawItemsTable(flow, bill.items, bill.currency, bill.parties?.rate_labels);
+  flow.gap(6);
+  const outstanding = Math.max(bill.total_minor - bill.paid_minor, 0);
+  drawTotals(flow, [
+    ["Subtotal", fmtMinor(bill.subtotal_minor, bill.currency)],
+    ...taxRows(bill.tax_minor, bill.currency),
+    ["Total", fmtMinor(bill.total_minor, bill.currency), true],
+    ...(bill.paid_minor > 0 ? ([["Paid", fmtMinor(-bill.paid_minor, bill.currency)], ["Outstanding", fmtMinor(outstanding, bill.currency), true]] as Array<[string, string, boolean?]>) : []),
+  ]);
+  if (bill.notes) drawSection(flow, "Notes", bill.notes);
+  drawFooters(doc, [brand, branding.support_email ?? null, `Supplier bill ${bill.number}`].filter(Boolean).join("  ·  "), 48);
+  return doc.render();
+}

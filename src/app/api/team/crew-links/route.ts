@@ -17,6 +17,8 @@ const CreateBody = z
   .object({
     label: z.string().trim().min(1).max(80),
     expiresDays: z.number().int().min(1).max(365).optional(),
+    /** Workforce: tie the link to a staff profile so clock-ins feed attendance and the person sees their own shifts. */
+    staff_id: z.string().trim().max(100).nullable().optional(),
   })
   .strict();
 
@@ -71,17 +73,23 @@ export async function POST(req: NextRequest) {
   }
   const parsed = await parseBody(req, CreateBody, 4_096);
   if (!parsed.ok) return parsed.res;
-  const { label, expiresDays = 30 } = parsed.data;
+  const { label, expiresDays = 30, staff_id = null } = parsed.data;
 
   try {
+    if (staff_id) {
+      const staff = await query<{ id: string }>(`SELECT id FROM staff_profiles WHERE user_id = $1 AND id = $2 AND active = TRUE`, [scope.dataId, staff_id]).catch(() => []);
+      if (!staff.length) return NextResponse.json({ error: "bad_request", detail: "staff_id is not an active staff profile" }, { status: 400 });
+    }
     const issued = await issueShareToken(scope.dataId, "crew", scope.orgId, expiresDays);
     const row = await query<{ id: string }>(
-      `UPDATE share_tokens SET label = $3 WHERE user_id = $1 AND kind = 'crew' AND token_hash = $2 RETURNING id`,
-      [scope.dataId, hashToken(issued.token), label]
+      staff_id
+        ? `UPDATE share_tokens SET label = $3, staff_id = $4 WHERE user_id = $1 AND kind = 'crew' AND token_hash = $2 RETURNING id`
+        : `UPDATE share_tokens SET label = $3 WHERE user_id = $1 AND kind = 'crew' AND token_hash = $2 RETURNING id`,
+      staff_id ? [scope.dataId, hashToken(issued.token), label, staff_id] : [scope.dataId, hashToken(issued.token), label]
     );
     const id = row[0]?.id ?? null;
-    void recordAudit(scope, { action: "create", entity: "crew_link", entityId: id, after: { label, expiresDays }, req }).catch(() => undefined);
-    return NextResponse.json({ id, label, url: issued.url, path: issued.path, expiresAt: issued.expiresAt }, { status: 201 });
+    void recordAudit(scope, { action: "create", entity: "crew_link", entityId: id, after: { label, expiresDays, staff_id }, req }).catch(() => undefined);
+    return NextResponse.json({ id, label, staffId: staff_id, url: issued.url, path: issued.path, expiresAt: issued.expiresAt }, { status: 201 });
   } catch (err) {
     console.error("[crew-links] create failed:", err);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });

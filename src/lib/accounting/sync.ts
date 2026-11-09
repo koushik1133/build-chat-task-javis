@@ -8,9 +8,10 @@ import {
 } from "./connections";
 import { payloadHash, pulledPaymentProvider, selectNewRemotePayments, stripVolatile } from "./mapping";
 import type {
-  AccountingConnectionRow, AccountingContact, AccountingEntityKind, AccountingExpense, AccountingInvoice, AccountingInvoiceLine, AccountingPayment,
-  AccountingProduct, LiveAccountingProvider, PushResult, RemoteRef,
+  AccountingBill, AccountingBillLine, AccountingConnectionRow, AccountingContact, AccountingEntityKind, AccountingExpense, AccountingInvoice, AccountingInvoiceLine, AccountingPayment,
+  AccountingProduct, AccountingSupplier, LiveAccountingProvider, PushResult, RemoteRef,
 } from "./types";
+import { parsePoLines } from "@/lib/procurement/purchase-orders";
 
 /**
  * Push/pull orchestration.
@@ -111,11 +112,30 @@ async function loadInvoice(dataId: string, id: string): Promise<InvoiceRowLite |
   return queryOne<InvoiceRowLite>(`SELECT id, contact_id, number, status, currency, subtotal_minor, tax_minor, total_minor, due_at, created_at, notes, items FROM invoices WHERE id = $1 AND user_id = $2`, [id, dataId]);
 }
 
-async function loadExpense(dataId: string, id: string): Promise<AccountingExpense | null> {
-  const r = await queryOne<{ id: string; category: string; vendor: string | null; description: string | null; amount_minor: string | number; tax_minor: string | number; currency: string; spent_at: string }>(
-    `SELECT id, category, vendor, description, amount_minor, tax_minor, currency, spent_at FROM expenses WHERE id = $1 AND user_id = $2`, [id, dataId]
+async function loadExpense(dataId: string, id: string): Promise<(AccountingExpense & { ref_kind: string | null }) | null> {
+  const r = await queryOne<{ id: string; category: string; vendor: string | null; description: string | null; amount_minor: string | number; tax_minor: string | number; currency: string; spent_at: string; ref_kind: string | null }>(
+    `SELECT id, category, vendor, description, amount_minor, tax_minor, currency, spent_at, ref_kind FROM expenses WHERE id = $1 AND user_id = $2`, [id, dataId]
   );
   return r ? { ...r, amount_minor: Number(r.amount_minor), tax_minor: Number(r.tax_minor), spent_at: new Date(r.spent_at).toISOString() } : null;
+}
+
+async function loadSupplier(dataId: string, id: string): Promise<AccountingSupplier | null> {
+  const r = await queryOne<{ id: string; name: string; email: string | null; phone: string | null; tax_number: string | null }>(
+    `SELECT id, name, email, phone, tax_number FROM suppliers WHERE id = $1 AND user_id = $2`, [id, dataId]
+  );
+  return r ? { id: r.id, name: r.name, email: r.email, phone: r.phone, tax_number: r.tax_number } : null;
+}
+
+interface BillRowLite {
+  id: string; supplier_id: string; number: string; supplier_ref: string | null; status: string; currency: string; subtotal_minor: string | number; tax_minor: string | number;
+  total_minor: string | number; issued_at: string | null; due_at: string | null; created_at: string; notes: string | null; items: string | null; supplier_name: string | null;
+}
+
+async function loadBill(dataId: string, id: string): Promise<BillRowLite | null> {
+  return queryOne<BillRowLite>(
+    `SELECT b.id, b.supplier_id, b.number, b.supplier_ref, b.status, b.currency, b.subtotal_minor, b.tax_minor, b.total_minor, b.issued_at, b.due_at, b.created_at, b.notes, b.items, s.name AS supplier_name
+       FROM supplier_bills b LEFT JOIN suppliers s ON s.id = b.supplier_id WHERE b.id = $1 AND b.user_id = $2`, [id, dataId]
+  );
 }
 
 async function loadProduct(dataId: string, id: string): Promise<AccountingProduct | null> {
@@ -194,9 +214,42 @@ async function pushPaymentEntity(s: Session, id: string): Promise<PushOutcome> {
 }
 
 async function pushExpenseEntity(s: Session, id: string): Promise<PushOutcome> {
-  const e = await loadExpense(s.conn.user_id, id);
-  if (!e) return { kind: "expense", id, status: "error", message: "Expense not found" };
+  const row = await loadExpense(s.conn.user_id, id);
+  if (!row) return { kind: "expense", id, status: "error", message: "Expense not found" };
+  // Bill payments are represented by the Bill itself in the accounting system; pushing the cash-out again would double count.
+  if (row.ref_kind === "bill") return { kind: "expense", id, status: "skipped", message: "tracked via supplier bill" };
+  const { ref_kind: _rk, ...e } = row; void _rk;
   return pushWithHash(s, "expense", id, { ...e, settings: s.ctx.settings }, (existing) => s.provider.pushExpense(s.auth, s.ctx, e, existing));
+}
+
+async function pushSupplier(s: Session, id: string): Promise<PushOutcome> {
+  const sup = await loadSupplier(s.conn.user_id, id);
+  if (!sup) return { kind: "supplier", id, status: "error", message: "Supplier not found" };
+  return pushWithHash(s, "supplier", id, { ...sup }, (existing) => s.provider.pushVendor(s.auth, s.ctx, sup, existing));
+}
+
+const PUSHABLE_BILL_STATUSES = ["open", "partially_paid", "paid"];
+
+async function pushBill(s: Session, id: string, opts: { force?: boolean } = {}): Promise<PushOutcome> {
+  const row = await loadBill(s.conn.user_id, id);
+  if (!row) return { kind: "bill", id, status: "error", message: "Bill not found" };
+  if (!opts.force && !PUSHABLE_BILL_STATUSES.includes(row.status)) return { kind: "bill", id, status: "skipped", message: `bill is ${row.status}` };
+  const sup = await pushSupplier(s, row.supplier_id);
+  if (sup.status === "error") return { kind: "bill", id, status: "error", message: `Vendor push failed: ${sup.message}` };
+  const items: AccountingBillLine[] = [];
+  for (const it of parsePoLines(row.items)) {
+    let itemRemoteId: string | null = null;
+    if (it.product_id) itemRemoteId = (await getLink(s.conn.id, "product", it.product_id))?.remote_id ?? null;
+    items.push({ description: it.description, qty: it.qty, unit_minor: it.unit_minor, tax_rate_bp: it.tax_rate_bp ?? 0, product_id: it.product_id ?? null, item_remote_id: itemRemoteId });
+  }
+  const bill: AccountingBill = {
+    id: row.id, number: row.number, supplier_ref: row.supplier_ref, status: row.status, currency: row.currency, subtotal_minor: Number(row.subtotal_minor), tax_minor: Number(row.tax_minor),
+    total_minor: Number(row.total_minor), issued_at: new Date(row.issued_at ?? row.created_at).toISOString(), due_at: row.due_at ? new Date(row.due_at).toISOString() : null,
+    notes: row.notes, items, supplier_remote_id: sup.remoteId ?? null, supplier_name: row.supplier_name ?? "Supplier",
+  };
+  // Status excluded from the hash: paid flips are payments, not a re-send of the bill.
+  const { status: _st, ...hashable } = bill; void _st;
+  return pushWithHash(s, "bill", id, { ...hashable, settings: s.ctx.settings }, (existing) => s.provider.pushBill(s.auth, s.ctx, bill, existing));
 }
 
 /** Push one entity (and what it depends on) to one connection. */
@@ -229,6 +282,8 @@ async function pushForSession(s: Session, kind: AccountingEntityKind, id: string
     case "payment": return pushPaymentEntity(s, id);
     case "expense": return pushExpenseEntity(s, id);
     case "product": return pushProduct(s, id);
+    case "supplier": return pushSupplier(s, id);
+    case "bill": return pushBill(s, id, opts);
   }
 }
 
@@ -267,10 +322,17 @@ async function dueForConnection(conn: AccountingConnectionRow, limit: number): P
   if (settings.push_expenses !== false) {
     const expenses = await query<{ id: string }>(
       `SELECT e.id FROM expenses e LEFT JOIN accounting_links l ON l.connection_id = $2 AND l.entity_kind = 'expense' AND l.entity_id = e.id
-        WHERE e.user_id = $1 AND l.id IS NULL ORDER BY e.created_at ASC LIMIT $3`,
+        WHERE e.user_id = $1 AND l.id IS NULL AND COALESCE(e.ref_kind, '') <> 'bill' ORDER BY e.created_at ASC LIMIT $3`,
       [conn.user_id, conn.id, limit]
     );
     for (const r of expenses) out.push({ kind: "expense", id: r.id });
+    const bills = await query<{ id: string }>(
+      `SELECT b.id FROM supplier_bills b LEFT JOIN accounting_links l ON l.connection_id = $2 AND l.entity_kind = 'bill' AND l.entity_id = b.id
+        WHERE b.user_id = $1 AND b.status = ANY($3::text[]) AND (l.id IS NULL OR (l.error IS NULL AND b.updated_at > COALESCE(l.last_pushed_at, 'epoch'::timestamptz)))
+        ORDER BY b.updated_at ASC LIMIT $4`,
+      [conn.user_id, conn.id, PUSHABLE_BILL_STATUSES, limit]
+    ).catch(() => [] as Array<{ id: string }>);
+    for (const r of bills) out.push({ kind: "bill", id: r.id });
   }
   return out.slice(0, limit);
 }
@@ -387,14 +449,14 @@ export async function syncConnection(connectionId: string, limit = 100): Promise
 // ── Event-driven auto-push ───────────────────────────────────────────────────
 
 const CURSOR_NAME = "events";
-const RELEVANT = new Set(["invoice.sent", "invoice.paid", "expense.created"]);
+const RELEVANT = new Set(["invoice.sent", "invoice.paid", "expense.created", "supplier_bill.created", "supplier_bill.paid"]);
 
 export interface AccountingEventRow { id: string; user_id: string; type: string; entity: string; entity_id: string; created_at: string | Date }
 
 /** Called per new event: pushes the entity to every connected integration of that org. */
 export async function onAccountingRelevantEvent(evt: Pick<AccountingEventRow, "user_id" | "type" | "entity" | "entity_id">): Promise<PushOutcome[]> {
   if (!RELEVANT.has(evt.type)) return [];
-  const kind: AccountingEntityKind = evt.type.startsWith("expense.") ? "expense" : "invoice";
+  const kind: AccountingEntityKind = evt.type.startsWith("expense.") ? "expense" : evt.type.startsWith("supplier_bill.") ? "bill" : "invoice";
   return pushToAll(evt.user_id, kind, evt.entity_id);
 }
 

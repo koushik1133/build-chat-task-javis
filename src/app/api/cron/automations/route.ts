@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/dsql";
 import { runAutomation } from "@/lib/automation-runner";
 import { getLocalNow, isScheduleDue } from "@/lib/automation-scheduler";
+import { fanOutEvents, fireDueSchedules } from "@/lib/automations/triggers";
+import { runQueued } from "@/lib/automations/engine";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -36,7 +38,7 @@ async function handleCron(req: Request) {
     `SELECT id, user_id, name, action_type, action_config, trigger_event,
             schedule_time, schedule_timezone, schedule_days, last_scheduled_date
      FROM automations
-     WHERE status = 'active' AND trigger_event = 'Scheduled (Daily)'`
+     WHERE status = 'active' AND trigger_event = 'Scheduled (Daily)' AND trigger_type IS NULL`
   ).catch(() => []);
 
   const scheduled = rows as ScheduledRow[];
@@ -128,8 +130,15 @@ async function handleCron(req: Request) {
     })
   );
 
+  // v2 engine: events → queued runs, due schedules, then execute/resume.
+  const v2 = { fanout: 0, schedules: 0, done: 0, waiting: 0, failed: 0 };
+  try { v2.fanout = (await fanOutEvents(200)).queued; } catch (err) { console.error("[cron/automations] fan-out failed:", err); }
+  try { v2.schedules = (await fireDueSchedules()).queued; } catch (err) { console.error("[cron/automations] schedules failed:", err); }
+  try { const r = await runQueued(50); v2.done = r.done; v2.waiting = r.waiting; v2.failed = r.failed; } catch (err) { console.error("[cron/automations] run queue failed:", err); }
+
   return NextResponse.json({
     ok: true,
+    v2,
     checked: scheduled.length,
     due: due.length,
     ran,

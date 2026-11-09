@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
+import { emitEvent } from "@/lib/events/bus";
 import { getPlaybook } from "@/lib/agents/playbooks";
 import { createType, getType } from "@/lib/records/store";
 import { tableExists } from "@/lib/table-exists";
@@ -151,5 +152,6 @@ export async function installListing(dataId: string, listingId: string): Promise
       await query(`UPDATE marketplace_listings SET install_count = install_count + 1 WHERE id = $1`, [listing.id]).catch(() => undefined);
     }
   }
+  void emitEvent(dataId, { type: "marketplace.installed", entity: "marketplace_install", entityId: out.entityId, data: { listing_id: listing.id, kind: listing.kind, title: listing.title, version: listing.version } });
   return { listing: { ...listing, installed: true, install_count: listing.install_count + 1 }, entityKind: listing.kind, entityId: out.entityId, created: true, note: out.note };
 }

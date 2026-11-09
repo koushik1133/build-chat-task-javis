@@ -8,6 +8,8 @@
     { "name": "CRON_SECRET", "group": "core", "required": true, "secret": true, "minLength": 16, "description": "Bearer token for /api/cron/agents. openssl rand -hex 32." },
     { "name": "NEXT_PUBLIC_APP_URL", "group": "core", "required": true, "format": "url", "description": "Canonical public origin (links in emails, OAuth redirects, portal URLs)." },
 
+    { "name": "ATTACHMENTS_LOCAL_DIR", "group": "flag", "description": "Dev-only: store attachments in this local directory instead of Supabase Storage (ignored in production).", "default": ".data/attachments" },
+
     { "name": "DB_USER", "group": "database", "description": "Plain Postgres user (only when DSQL_ENDPOINT is localhost/127.0.0.1).", "default": "postgres" },
     { "name": "DB_PASSWORD", "group": "database", "secret": true, "description": "Plain Postgres password (local mode)." },
     { "name": "DB_NAME", "group": "database", "description": "Plain Postgres database (local mode).", "default": "postgres" },

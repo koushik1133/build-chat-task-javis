@@ -3,12 +3,14 @@ import { getBranding } from "@/lib/branding";
 import { businessName, type QuoteDTO } from "@/lib/money/quotes";
 import type { InvoiceDTO } from "@/lib/money/invoices";
 import { documentHash, renderInvoicePdf, renderQuotePdf, type DocParties, type SignatureStamp } from "./quote-document";
-import { renderCreditNotePdf, renderStatementPdf } from "./billing-documents";
+import { renderCreditNotePdf, renderPurchaseOrderPdf, renderStatementPdf, renderSupplierBillPdf } from "./billing-documents";
 import { getBillingSettings } from "@/lib/money/settings";
 import { listTaxRates } from "@/lib/money/tax-rates";
 import { rateLabel } from "@/lib/money/tax";
 import type { CreditNoteDTO } from "@/lib/money/credit-notes";
 import type { Statement } from "@/lib/money/statements";
+import type { PurchaseOrderDTO } from "@/lib/procurement/purchase-orders";
+import type { SupplierBillDTO } from "@/lib/procurement/bills";
 
 /**
  * Server-side glue between the money tables and the pure PDF renderers:
@@ -145,6 +147,27 @@ export async function buildStatementPdf(dataId: string, statement: Statement): P
   const bytes = renderStatementPdf({ ...statement, parties }, branding, { business, timezone });
   const safe = statement.contact.name.replace(/[^A-Za-z0-9]+/g, "-").slice(0, 40);
   return { bytes, filename: `Statement-${safe}-${statement.to.slice(0, 10)}.pdf`, hash: documentHash(bytes), signed: false };
+}
+
+/** Supplier address / tax number in the `contact_*` slots so the party helpers can print them. */
+async function supplierParties(dataId: string, supplierId: string): Promise<DocParties> {
+  const [base, supplier] = await Promise.all([
+    docParties(dataId, null),
+    queryOne<{ tax_number: string | null; address: string | null }>(`SELECT tax_number, address FROM suppliers WHERE id = $1 AND user_id = $2`, [supplierId, dataId]).catch(() => null),
+  ]);
+  return { ...base, contact_tax_number: supplier?.tax_number ?? null, contact_billing_address: supplier?.address ?? null };
+}
+
+export async function buildPurchaseOrderPdf(dataId: string, po: PurchaseOrderDTO): Promise<BuiltPdf> {
+  const [{ branding, timezone, business }, parties] = await Promise.all([docContext(dataId), supplierParties(dataId, po.supplier_id)]);
+  const bytes = renderPurchaseOrderPdf({ ...po, parties }, branding, { business, timezone });
+  return { bytes, filename: `PurchaseOrder-${po.number}.pdf`, hash: documentHash(bytes), signed: false };
+}
+
+export async function buildSupplierBillPdf(dataId: string, bill: SupplierBillDTO): Promise<BuiltPdf> {
+  const [{ branding, timezone, business }, parties] = await Promise.all([docContext(dataId), supplierParties(dataId, bill.supplier_id)]);
+  const bytes = renderSupplierBillPdf({ ...bill, parties }, branding, { business, timezone });
+  return { bytes, filename: `SupplierBill-${bill.number}.pdf`, hash: documentHash(bytes), signed: false };
 }
 
 /**

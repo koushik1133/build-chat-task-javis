@@ -107,14 +107,14 @@ describe("GET /api/automations", () => {
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
-  it("returns 200 with a workflows array when authenticated", async () => {
+  it("returns 200 with an automations array (and the legacy workflows alias) when authenticated", async () => {
     authedWithOrg();
     const res = await automationsGET();
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ workflows: [] });
+    await expect(res.json()).resolves.toEqual({ automations: [], workflows: [] });
     const call = dataQueryCall("FROM automations");
     expect(call).toBeDefined();
-    expect(call?.[1]).toEqual([AUTH_USER.id]);
+    expect(call?.[1]?.[0]).toEqual(AUTH_USER.id);
   });
 });
 

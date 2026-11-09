@@ -1,62 +1,46 @@
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
-import { query, queryOne } from "@/lib/dsql";
+import { rateLimitAsync } from "@/lib/request-limits";
+import { AutomationDefinitionSchema } from "@/lib/automations/schema";
+import { createAutomation, listAutomations, runStats, toAutomationDTO } from "@/lib/automations/store";
+import { recordAudit } from "@/lib/audit";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/** GET: every automation (legacy rows converted on read) + per-automation run stats. */
 export async function GET() {
   let scope;
-  try { scope = await requireScope({ area: "agents", edit: false }); }
-  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const workflows = await query(
-    "SELECT * FROM automations WHERE user_id = $1 ORDER BY created_at DESC",
-    [scope.dataId]
-  ).catch(() => []);
-  return NextResponse.json({ workflows });
+  try {
+    scope = await requireScope({ area: "agents", edit: false });
+  } catch (err) {
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const [rows, stats] = await Promise.all([listAutomations(scope.dataId).catch(() => []), runStats(scope.dataId)]);
+  const automations = rows.map(toAutomationDTO).map((a) => ({ ...a, stats: stats[a.id] ?? { total: 0, failed: 0, waiting: 0 } }));
+  return NextResponse.json({ automations, workflows: automations });
 }
 
+/** POST: create a v2 automation. */
 export async function POST(req: Request) {
   let scope;
-  try { scope = await requireScope({ area: "agents", edit: true }); }
-  catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
-  const rawBody = await req.json().catch(() => null);
-  if (!rawBody || typeof rawBody !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  const {
-    name, trigger, action, kanban_label, action_config,
-    schedule_time, schedule_timezone, schedule_days,
-  } = rawBody;
-  if (!name?.trim()) return NextResponse.json({ error: "name required" }, { status: 400 });
-
-  const isScheduled = trigger === "Scheduled (Daily)";
-  if (isScheduled && !schedule_time) {
-    return NextResponse.json({ error: "schedule_time required for daily automations" }, { status: 400 });
-  }
-  if (!isScheduled && !kanban_label?.trim()) {
-    return NextResponse.json({ error: "kanban_label required for Kanban automations" }, { status: 400 });
-  }
-
   try {
-    const workflow = await queryOne(
-      `INSERT INTO automations
-         (user_id, name, trigger_event, action_type, kanban_label, action_config,
-          schedule_time, schedule_timezone, schedule_days, status, run_count)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', 0) RETURNING *`,
-      [
-        scope.dataId,
-        name.trim(),
-        trigger ?? "Scheduled (Daily)",
-        action ?? "Send Notification",
-        isScheduled ? null : kanban_label?.trim(),
-        JSON.stringify(action_config ?? {}),
-        isScheduled ? schedule_time : null,
-        isScheduled ? (schedule_timezone ?? "America/Chicago") : null,
-        isScheduled ? (schedule_days ?? "daily") : null,
-      ]
-    );
-    if (!workflow) {
-      return NextResponse.json({ error: "Failed to create workflow" }, { status: 500 });
-    }
-    return NextResponse.json({ workflow });
+    scope = await requireScope({ area: "agents", edit: true });
   } catch (err) {
-    console.error("[automations] create workflow failed:", err);
-    return NextResponse.json({ error: "Failed to create workflow" }, { status: 503 });
+    return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const rl = await rateLimitAsync(`automations:create:${scope.dataId}`, 60, 60_000);
+  if (!rl.allowed) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  const raw = await req.json().catch(() => null);
+  if (!raw || typeof raw !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const parsed = AutomationDefinitionSchema.safeParse(raw);
+  if (!parsed.success) return NextResponse.json({ error: "Invalid automation", details: parsed.error.flatten() }, { status: 400 });
+  try {
+    const row = await createAutomation(scope.dataId, parsed.data);
+    void recordAudit({ dataId: scope.dataId, userId: scope.userId }, { action: "automation.created", entity: "automation", entityId: row.id, after: { name: parsed.data.name, trigger_type: parsed.data.trigger_type } }).catch(() => undefined);
+    return NextResponse.json({ automation: toAutomationDTO(row) }, { status: 201 });
+  } catch (err) {
+    console.error("[automations] create failed:", err);
+    return NextResponse.json({ error: "Failed to create automation" }, { status: 503 });
   }
 }

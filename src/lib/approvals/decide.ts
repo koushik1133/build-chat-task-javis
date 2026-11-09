@@ -4,6 +4,7 @@ import { getTool } from "@/lib/agents/registry";
 import { rememberCorrection } from "@/lib/agents/memory";
 import { keyMayUseTool, scopeForTool } from "@/lib/agents/tool-scopes";
 import type { ToolContext } from "@/lib/agents/types";
+import { APPROVAL_RUN_PREFIX } from "@/lib/automations/types";
 
 /**
  * Approval decisions, shared by the in-app route (`/api/approvals/[id]`) and
@@ -168,7 +169,15 @@ export async function decideApproval(dataId: string, id: string, input: DecideIn
 
   let updated: ApprovalRow = row;
   let outcome: string | null = null;
-  if (row.run_id && row.run_id !== "mcp") {
+  if (row.run_id && row.run_id.startsWith(APPROVAL_RUN_PREFIX)) {
+    // Automation run (src/lib/automations): finish the gated step and continue inline.
+    const { resumeAutomationRun } = await import("@/lib/automations/engine");
+    const status = await resumeAutomationRun(dataId, row.run_id.slice(APPROVAL_RUN_PREFIX.length), { id: row.id, status: row.status, tool_name: row.tool_name, input: row.input }).catch((err) => {
+      console.error("[approvals] automation resume failed", err);
+      return null;
+    });
+    outcome = status ? `Automation run ${status}` : null;
+  } else if (row.run_id && row.run_id !== "mcp") {
     await enqueueJob(dataId, { kind: "resume", runId: row.run_id, approvalId: row.id }).catch((err) => console.error("[approvals] failed to enqueue resume", err));
   } else if (decision === "approved") {
     outcome = await executeDirectly(dataId, row);

@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Ban, Copy, FileCheck2, FileDown, FileMinus, Link2, Loader2, Plus, Receipt, RefreshCw, RotateCcw, Send, Sparkles, Trash2, XCircle } from "lucide-react";
+import { Ban, Copy, FileCheck2, FileDown, FileMinus, Link2, Loader2, Paperclip, Plus, Receipt, RefreshCw, RotateCcw, Send, Sparkles, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import { BLANK_ITEM, LineItemsEditor, StatusPill, TotalsSummary, useDocTotals, u
 import { RecurringTab } from "@/components/billing/recurring-tab";
 import { SettingsTab } from "@/components/billing/settings-tab";
 import { CreditNoteDialog, CreditNoteList, RefundDialog, type CreditNote } from "@/components/billing/credit-notes";
+import { FilesDialog, type FilesTarget } from "@/components/attachments/files-dialog";
 
 interface Contact { id: string; full_name: string; email: string | null; company: string | null }
 interface Quote {
@@ -55,6 +56,7 @@ export default function BillingPage() {
   const [dialog, setDialog] = useState<null | "quote" | "invoice">(null);
   const [creditFor, setCreditFor] = useState<Invoice | null>(null);
   const [refundFor, setRefundFor] = useState<Invoice | null>(null);
+  const [filesFor, setFilesFor] = useState<FilesTarget | null>(null);
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [invoiceView, setInvoiceView] = useState<InvoiceView>("invoices");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -198,6 +200,7 @@ export default function BillingPage() {
             <QuoteList
               quotes={quotes}
               busyId={busyId}
+              onFiles={(q) => setFilesFor({ kind: "quote", id: q.id, label: q.number })}
               onNew={() => setDialog("quote")}
               onSend={(q) =>
                 act(q.id, async () => {
@@ -267,6 +270,7 @@ export default function BillingPage() {
               invoices={invoices}
               syncState={syncState}
               busyId={busyId}
+              onFiles={(i) => setFilesFor({ kind: "invoice", id: i.id, label: i.number })}
               onNew={() => setDialog("invoice")}
               onCopy={copy}
               onCreditNote={(i) => setCreditFor(i)}
@@ -297,6 +301,8 @@ export default function BillingPage() {
           )}
         </div>
       </TabPanel>
+
+      {filesFor && <FilesDialog target={filesFor} onClose={() => setFilesFor(null)} />}
 
       {creditFor && (
         <CreditNoteDialog
@@ -339,8 +345,8 @@ export default function BillingPage() {
 
 /* ───────────────────────── lists ───────────────────────── */
 
-function QuoteList({ quotes, busyId, onNew, onSend, onConvert, onDelete, onDecline, onSuggest }: {
-  quotes: Quote[]; busyId: string | null; onNew: () => void;
+function QuoteList({ quotes, busyId, onNew, onSend, onConvert, onDelete, onDecline, onSuggest, onFiles }: {
+  quotes: Quote[]; busyId: string | null; onNew: () => void; onFiles: (q: Quote) => void;
   onSend: (q: Quote) => void; onConvert: (q: Quote) => void; onDelete: (q: Quote) => void; onDecline: (q: Quote) => void; onSuggest: (q: Quote) => void;
 }) {
   if (quotes.length === 0) {
@@ -360,14 +366,14 @@ function QuoteList({ quotes, busyId, onNew, onSend, onConvert, onDelete, onDecli
   return (
     <ul className="divide-y divide-border rounded-xl border border-border bg-card" aria-label="Quotes">
       {quotes.map((q) => (
-        <QuoteRow key={q.id} q={q} busy={busyId === q.id} onSend={onSend} onConvert={onConvert} onDelete={onDelete} onDecline={onDecline} onSuggest={onSuggest} />
+        <QuoteRow key={q.id} q={q} busy={busyId === q.id} onFiles={onFiles} onSend={onSend} onConvert={onConvert} onDelete={onDelete} onDecline={onDecline} onSuggest={onSuggest} />
       ))}
     </ul>
   );
 }
 
-const QuoteRow = memo(function QuoteRow({ q, busy, onSend, onConvert, onDelete, onDecline, onSuggest }: {
-  q: Quote; busy: boolean;
+const QuoteRow = memo(function QuoteRow({ q, busy, onSend, onConvert, onDelete, onDecline, onSuggest, onFiles }: {
+  q: Quote; busy: boolean; onFiles: (q: Quote) => void;
   onSend: (q: Quote) => void; onConvert: (q: Quote) => void; onDelete: (q: Quote) => void; onDecline: (q: Quote) => void; onSuggest: (q: Quote) => void;
 }) {
   const canSend = ["draft", "sent", "viewed"].includes(q.status);
@@ -403,6 +409,9 @@ const QuoteRow = memo(function QuoteRow({ q, busy, onSend, onConvert, onDelete, 
             <FileCheck2 className="h-3.5 w-3.5" aria-hidden /> Invoice
           </Button>
         )}
+        <Button size="sm" variant="outline" touch onClick={() => onFiles(q)} title="Files attached to this quote" aria-label={`Files for ${q.number}`}>
+          <Paperclip className="h-3.5 w-3.5" aria-hidden /> Files
+        </Button>
         <Button asChild size="sm" variant="outline" touch title={q.status === "accepted" ? "Download the signed PDF" : "Download PDF"}>
           <a href={`/api/quotes/${q.id}/pdf`} target="_blank" rel="noopener" aria-label={`Download PDF for ${q.number}`}>
             <FileDown className="h-3.5 w-3.5" aria-hidden /> PDF
@@ -429,8 +438,8 @@ const QuoteRow = memo(function QuoteRow({ q, busy, onSend, onConvert, onDelete, 
   );
 });
 
-function InvoiceList({ invoices, syncState, busyId, onNew, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund }: {
-  invoices: Invoice[]; syncState: Record<string, SyncState> | null; busyId: string | null; onNew: () => void;
+function InvoiceList({ invoices, syncState, busyId, onNew, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles }: {
+  invoices: Invoice[]; syncState: Record<string, SyncState> | null; busyId: string | null; onNew: () => void; onFiles: (i: Invoice) => void;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
   onCreditNote: (i: Invoice) => void; onRefund: (i: Invoice) => void;
 }) {
@@ -451,14 +460,14 @@ function InvoiceList({ invoices, syncState, busyId, onNew, onSend, onPayLink, on
   return (
     <ul className="divide-y divide-border rounded-xl border border-border bg-card" aria-label="Invoices">
       {invoices.map((i) => (
-        <InvoiceRow key={i.id} i={i} sync={syncState ? (syncState[i.id] ?? (i.status === "draft" || i.status === "void" ? null : "pending")) : null} busy={busyId === i.id} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} onCreditNote={onCreditNote} onRefund={onRefund} />
+        <InvoiceRow key={i.id} i={i} sync={syncState ? (syncState[i.id] ?? (i.status === "draft" || i.status === "void" ? null : "pending")) : null} busy={busyId === i.id} onFiles={onFiles} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} onCreditNote={onCreditNote} onRefund={onRefund} />
       ))}
     </ul>
   );
 }
 
-const InvoiceRow = memo(function InvoiceRow({ i, sync, busy, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund }: {
-  i: Invoice; sync: SyncState | null; busy: boolean;
+const InvoiceRow = memo(function InvoiceRow({ i, sync, busy, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles }: {
+  i: Invoice; sync: SyncState | null; busy: boolean; onFiles: (i: Invoice) => void;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
   onCreditNote: (i: Invoice) => void; onRefund: (i: Invoice) => void;
 }) {
@@ -504,6 +513,9 @@ const InvoiceRow = memo(function InvoiceRow({ i, sync, busy, onSend, onPayLink, 
             <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Refund
           </Button>
         )}
+        <Button size="sm" variant="outline" touch onClick={() => onFiles(i)} title="Files attached to this invoice" aria-label={`Files for ${i.number}`}>
+          <Paperclip className="h-3.5 w-3.5" aria-hidden /> Files
+        </Button>
         <Button asChild size="sm" variant="outline" touch title="Download PDF">
           <a href={`/api/invoices/${i.id}/pdf`} target="_blank" rel="noopener" aria-label={`Download PDF for ${i.number}`}>
             <FileDown className="h-3.5 w-3.5" aria-hidden /> PDF

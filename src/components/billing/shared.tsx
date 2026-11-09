@@ -139,13 +139,15 @@ export const BLANK_ITEM: LineItem = { description: "", qty: 1, unit_minor: 0, ta
  * notes. Tax is picked from the catalogue when one exists; otherwise a manual
  * percentage is typed. Totals (with breakdown) are computed client-side.
  */
-export function LineItemsEditor({ items, onChange, rates, max = 100, currency }: {
+export function LineItemsEditor({ items, onChange, rates, max = 100, currency, unitLabel = "Unit price" }: {
   items: LineItem[];
   onChange: (next: LineItem[]) => void;
   rates: TaxRateOption[];
   max?: number;
   /** When given, each line shows its net amount (useful on phones where columns stack). */
   currency?: string;
+  /** Column label for `unit_minor` ("Unit cost" on purchase orders). */
+  unitLabel?: string;
 }) {
   const hasCatalogue = rates.length > 0;
   const setItem = (i: number, patch: Partial<LineItem>) => onChange(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
@@ -166,7 +168,7 @@ export function LineItemsEditor({ items, onChange, rates, max = 100, currency }:
                 <Field label="Qty" className={srOnly}>
                   <Input type="number" inputMode="decimal" min={0} step="0.01" value={it.qty} onChange={(e) => setItem(i, { qty: Number(e.target.value) || 0 })} />
                 </Field>
-                <Field label="Unit price" className={srOnly}>
+                <Field label={unitLabel} className={srOnly}>
                   <Input type="number" inputMode="decimal" min={0} step="0.01" value={(it.unit_minor / 100).toString()} onChange={(e) => setItem(i, { unit_minor: Math.round((Number(e.target.value) || 0) * 100) })} />
                 </Field>
                 {hasCatalogue ? (

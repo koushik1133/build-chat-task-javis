@@ -1,8 +1,8 @@
 import type {
-  AccountOption, AccountingAuth, AccountingContact, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct,
+  AccountOption, AccountingAuth, AccountingBill, AccountingContact, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingSupplier,
   ConnectionContext, LiveAccountingProvider, PullPaymentsResult, PushResult, RemotePayment, RemoteRef,
 } from "../types";
-import { majorToMinor, xeroBankTransaction, xeroContact, xeroInvoice, xeroItem, xeroPayment, type XeroPayload } from "../mapping";
+import { majorToMinor, xeroBankTransaction, xeroBill, xeroContact, xeroInvoice, xeroItem, xeroPayment, xeroSupplierContact, type XeroPayload } from "../mapping";
 
 /**
  * Xero via the Accounting API (no SDK). App credentials come from
@@ -57,6 +57,7 @@ async function token(params: Record<string, string>): Promise<AccountingAuth> {
 }
 
 type Collection = "Contacts" | "Invoices" | "Payments" | "BankTransactions" | "Items";
+// Bills are ACCPAY documents in the Invoices collection; suppliers are Contacts with IsSupplier.
 const ID_FIELD: Record<Collection, string> = { Contacts: "ContactID", Invoices: "InvoiceID", Payments: "PaymentID", BankTransactions: "BankTransactionID", Items: "ItemID" };
 
 async function upsert(auth: AccountingAuth, conn: ConnectionContext, collection: Collection, payload: XeroPayload, existing: RemoteRef | null): Promise<PushResult> {
@@ -126,6 +127,8 @@ export const xeroProvider: LiveAccountingProvider = {
   async pushPayment(auth, conn, payment: AccountingPayment, existing) { return upsert(auth, conn, "Payments", xeroPayment(payment, conn.settings), existing); },
   async pushExpense(auth, conn, expense: AccountingExpense, existing) { return upsert(auth, conn, "BankTransactions", xeroBankTransaction(expense, conn.settings), existing); },
   async pushItem(auth, conn, product: AccountingProduct, existing) { return upsert(auth, conn, "Items", xeroItem(product, conn.settings), existing); },
+  async pushVendor(auth, conn, supplier: AccountingSupplier, existing) { return upsert(auth, conn, "Contacts", xeroSupplierContact(supplier), existing); },
+  async pushBill(auth, conn, bill: AccountingBill, existing) { return upsert(auth, conn, "Invoices", xeroBill(bill, conn.settings), existing); },
 
   async pullPayments(auth, conn, cursor): Promise<PullPaymentsResult> {
     const headers: Record<string, string> = {};

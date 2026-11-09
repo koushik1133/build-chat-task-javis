@@ -38,11 +38,28 @@ export interface CapacityTimeEntry {
   ref_kind?: string | null;
 }
 
+/** A scheduled shift (workforce rota) used as real supply instead of the availability-rule estimate. */
+export interface CapacityShift {
+  id: string;
+  member_id: string | null;
+  starts_at: string;
+  ends_at: string;
+  /** Paid minutes (span minus break). */
+  minutes: number;
+}
+
 export interface CapacityInputs {
   bookings: CapacityBooking[];
   availability: CapacityRule[];
   timeEntries: CapacityTimeEntry[];
   members: CapacityMember[];
+  /**
+   * Optional: when present and non-empty, weekly supply comes from the shifts
+   * that fall in each week (per member when `member_id` matches) rather than
+   * from `availability × people`. Weeks with no shifts keep the rule estimate
+   * so an unpublished future week does not read as zero capacity.
+   */
+  shifts?: CapacityShift[];
 }
 
 export interface CapacityOptions {
@@ -145,6 +162,29 @@ export function capacityPlan(inputs: CapacityInputs, opts: CapacityOptions = {})
     if (t < first || t >= first + total * WEEK_MS) return null;
     return Math.floor((t - first) / WEEK_MS);
   };
+
+  // Shifts as supply: replace the rule estimate for any week that has at least one shift.
+  if (inputs.shifts && inputs.shifts.length > 0) {
+    const weekSupply = new Array<number>(total).fill(0);
+    const memberSupply = new Map<string, number[]>();
+    for (const sh of inputs.shifts) {
+      const mins = Number(sh.minutes) || 0;
+      if (mins <= 0) continue;
+      const i = idx(new Date(sh.starts_at).getTime());
+      if (i === null) continue;
+      weekSupply[i] += mins;
+      if (sh.member_id && memberWeeks.has(sh.member_id)) {
+        const arr = memberSupply.get(sh.member_id) ?? new Array<number>(total).fill(0);
+        arr[i] += mins;
+        memberSupply.set(sh.member_id, arr);
+      }
+    }
+    for (let i = 0; i < total; i++) {
+      if (weekSupply[i] <= 0) continue;
+      weeks[i].availableMinutes = Math.round(weekSupply[i]);
+      for (const [mid, list] of memberWeeks) list[i].availableMinutes = Math.round(memberSupply.get(mid)?.[i] ?? 0);
+    }
+  }
 
   // Bookings: split across week boundaries.
   for (const b of inputs.bookings) {

@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import type { AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingContact, AccountingSettings } from "./types";
+import type { AccountingBill, AccountingExpense, AccountingInvoice, AccountingPayment, AccountingProduct, AccountingContact, AccountingSettings, AccountingSupplier } from "./types";
 
 /**
  * Pure payload builders for QuickBooks Online and Xero. No I/O, no DB — the
@@ -49,6 +49,7 @@ export function canonical(v: unknown): string {
 }
 
 const VOLATILE = new Set(["Id", "SyncToken", "sparse", "InvoiceID", "ContactID", "PaymentID", "BankTransactionID", "ItemID", "UpdatedDateUTC", "MetaData"]);
+// (Bills reuse InvoiceID on Xero and Id/SyncToken on QBO, so nothing extra to strip.)
 /** Strip optimistic-locking / server-assigned fields so hashes compare content, not versions. */
 export function stripVolatile(p: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(p).filter(([k]) => !VOLATILE.has(k)));
@@ -151,6 +152,41 @@ export function qboItem(p: AccountingProduct, s: AccountingSettings): QboPayload
   return out;
 }
 
+export function qboVendor(s: AccountingSupplier): QboPayload {
+  const p: QboPayload = { DisplayName: s.name.slice(0, 500) };
+  if (s.email) p.PrimaryEmailAddr = { Address: s.email };
+  if (s.phone) p.PrimaryPhone = { FreeFormNumber: s.phone.slice(0, 30) };
+  if (s.tax_number) p.TaxIdentifier = s.tax_number.slice(0, 20);
+  return p;
+}
+
+/** Supplier bill → QBO Bill (account-based lines on the expense account; item lines when the product is linked). */
+export function qboBill(bill: AccountingBill, s: AccountingSettings): QboPayload {
+  if (!bill.supplier_remote_id) throw new Error("Bill needs a vendor before it can be pushed to QuickBooks");
+  if (!s.expense_account_id) throw new Error("Choose an expense account in Accounting settings before pushing bills");
+  const cur = bill.currency;
+  const lines = bill.items.map((it, idx) => {
+    const amount = minorToMajor(Math.round(it.qty * it.unit_minor), cur);
+    const tax = { value: it.tax_rate_bp > 0 ? (s.tax_code_id ?? "TAX") : (s.zero_tax_code_id ?? "NON") };
+    if (it.item_remote_id) {
+      return { LineNum: idx + 1, Description: it.description.slice(0, 4000), Amount: amount, DetailType: "ItemBasedExpenseLineDetail", ItemBasedExpenseLineDetail: { ItemRef: { value: it.item_remote_id }, Qty: it.qty, UnitPrice: minorToMajor(it.unit_minor, cur), TaxCodeRef: tax } };
+    }
+    return { LineNum: idx + 1, Description: it.description.slice(0, 4000), Amount: amount, DetailType: "AccountBasedExpenseLineDetail", AccountBasedExpenseLineDetail: { AccountRef: { value: s.expense_account_id }, TaxCodeRef: tax } };
+  });
+  const p: QboPayload = {
+    DocNumber: (bill.supplier_ref ?? bill.number).slice(0, 21),
+    VendorRef: { value: bill.supplier_remote_id },
+    TxnDate: dateOnly(bill.issued_at),
+    CurrencyRef: { value: cur },
+    Line: lines,
+    PrivateNote: `KernelHub bill ${bill.number} (${bill.id})`,
+  };
+  if (bill.due_at) p.DueDate = dateOnly(bill.due_at);
+  if (bill.notes) p.Memo = bill.notes.slice(0, 1000);
+  if (bill.tax_minor > 0) p.TxnTaxDetail = { TotalTax: minorToMajor(bill.tax_minor, cur) };
+  return p;
+}
+
 // ── Xero ─────────────────────────────────────────────────────────────────────
 
 export type XeroPayload = Record<string, unknown>;
@@ -243,6 +279,45 @@ export function xeroItem(p: AccountingProduct, s: AccountingSettings): XeroPaylo
   if (p.description) out.Description = p.description.slice(0, 4000);
   if (p.cost_minor > 0) out.PurchaseDetails = { UnitPrice: minorToMajor(p.cost_minor, p.currency), ...(s.expense_account_id ? { AccountCode: s.expense_account_id } : {}) };
   return out;
+}
+
+export function xeroSupplierContact(s: AccountingSupplier): XeroPayload {
+  const p: XeroPayload = { Name: s.name.slice(0, 255), IsSupplier: true };
+  if (s.email) p.EmailAddress = s.email;
+  if (s.phone) p.Phones = [{ PhoneType: "DEFAULT", PhoneNumber: s.phone.slice(0, 50) }];
+  if (s.tax_number) p.TaxNumber = s.tax_number.slice(0, 50);
+  return p;
+}
+
+/** Supplier bill → Xero ACCPAY invoice. */
+export function xeroBill(bill: AccountingBill, s: AccountingSettings): XeroPayload {
+  if (!bill.supplier_remote_id) throw new Error("Bill needs a supplier contact before it can be pushed to Xero");
+  if (!s.expense_account_id) throw new Error("Choose an expense account in Accounting settings before pushing bills");
+  const cur = bill.currency;
+  const p: XeroPayload = {
+    Type: "ACCPAY",
+    Contact: { ContactID: bill.supplier_remote_id },
+    InvoiceNumber: (bill.supplier_ref ?? bill.number).slice(0, 255),
+    Reference: `KernelHub ${bill.number}`,
+    Date: dateOnly(bill.issued_at),
+    CurrencyCode: cur,
+    LineAmountTypes: "Exclusive",
+    Status: bill.status === "draft" ? "DRAFT" : "AUTHORISED",
+    LineItems: bill.items.map((it) => {
+      const li: XeroPayload = {
+        Description: it.description.slice(0, 4000),
+        Quantity: it.qty,
+        UnitAmount: minorToMajor(it.unit_minor, cur),
+        AccountCode: s.expense_account_id,
+        TaxType: it.tax_rate_bp > 0 ? (s.tax_code_id ?? "INPUT") : (s.zero_tax_code_id ?? "NONE"),
+        LineAmount: minorToMajor(Math.round(it.qty * it.unit_minor), cur),
+      };
+      if (it.item_remote_id) li.ItemCode = it.item_remote_id;
+      return li;
+    }),
+  };
+  if (bill.due_at) p.DueDate = dateOnly(bill.due_at);
+  return p;
 }
 
 // ── Pull de-dup ──────────────────────────────────────────────────────────────

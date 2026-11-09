@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { AlertTriangle, CalendarDays, Check, CheckCircle2, Circle, Clock, LifeBuoy, ListTodo, Loader2, MessageSquarePlus, Phone, RefreshCw } from "lucide-react";
+import { AlertTriangle, CalendarClock, CalendarDays, CalendarOff, Check, CheckCircle2, Circle, Clock, LifeBuoy, ListTodo, Loader2, MessageSquarePlus, Phone, RefreshCw } from "lucide-react";
 import type { CrewDay } from "@/lib/crew";
 import { cn } from "@/lib/utils";
 
 type Notice = { tone: "ok" | "error"; text: string };
 
 const time = (iso: string, tz: string) => new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: tz }).format(new Date(iso));
+const shortDay = (iso: string, tz: string) => new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: tz }).format(new Date(iso));
+const todayYmd = () => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const longDate = (ymd: string) => new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(`${ymd}T00:00:00Z`));
 
 function Skeleton() {
@@ -32,6 +34,7 @@ export default function CrewPage() {
   const [note, setNote] = useState("");
   const [noteBooking, setNoteBooking] = useState<string>("");
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  const [leave, setLeave] = useState({ kind: "vacation", starts_on: "", ends_on: "", note: "" });
   const tz = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
 
   const load = useCallback(async () => {
@@ -79,6 +82,13 @@ export default function CrewPage() {
       setNote("");
       setNoteBooking("");
     }
+  }
+
+  async function submitLeave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!leave.starts_on || !leave.ends_on) return;
+    const ok = await act("leave", { action: "request_leave", kind: leave.kind, starts_on: leave.starts_on, ends_on: leave.ends_on, note: leave.note.trim() || null }, "Leave requested. The office will confirm.");
+    if (ok) setLeave({ kind: "vacation", starts_on: "", ends_on: "", note: "" });
   }
 
   if (error) {
@@ -140,6 +150,33 @@ export default function CrewPage() {
                 {busy === "clock" ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <Clock className="h-5 w-5" aria-hidden />}
                 {clockedIn ? "Clock out" : "Clock in"}
               </button>
+            </section>
+          )}
+
+          {day.staff && (
+            <section aria-labelledby="shifts-heading">
+              <h2 id="shifts-heading" className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <CalendarClock className="h-4 w-4 text-primary" aria-hidden /> Your shifts (next 14 days)
+              </h2>
+              {day.upcomingShifts.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">No published shifts yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {day.upcomingShifts.map((s) => (
+                    <li key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">{shortDay(s.starts_at, day.timezone)}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {time(s.starts_at, day.timezone)} – {time(s.ends_at, day.timezone)}
+                          {s.role_title ? ` · ${s.role_title}` : ""}
+                          {s.location ? ` · ${s.location}` : ""}
+                        </p>
+                      </div>
+                      {s.status === "swapped" && <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium">Swapped</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           )}
 
@@ -252,6 +289,47 @@ export default function CrewPage() {
               </button>
             </form>
           </section>
+
+          {day.staff && (
+            <section aria-labelledby="leave-heading" className="rounded-2xl border border-border bg-card p-4">
+              <h2 id="leave-heading" className="flex items-center gap-2 text-sm font-semibold">
+                <CalendarOff className="h-4 w-4 text-primary" aria-hidden /> Request time off
+              </h2>
+              {day.pendingLeave > 0 && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {day.pendingLeave} request{day.pendingLeave === 1 ? "" : "s"} waiting for approval.
+                </p>
+              )}
+              <form onSubmit={(e) => void submitLeave(e)} className="mt-3 space-y-3">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs font-medium text-muted-foreground">Kind</span>
+                  <select value={leave.kind} onChange={(e) => setLeave((l) => ({ ...l, kind: e.target.value }))} className="h-12 w-full rounded-lg border border-border bg-background px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <option value="vacation">Vacation</option>
+                    <option value="sick">Sick</option>
+                    <option value="unpaid">Unpaid</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-xs font-medium text-muted-foreground">From</span>
+                    <input type="date" required min={todayYmd()} value={leave.starts_on} onChange={(e) => setLeave((l) => ({ ...l, starts_on: e.target.value, ends_on: l.ends_on && l.ends_on < e.target.value ? e.target.value : l.ends_on }))} className="h-12 w-full rounded-lg border border-border bg-background px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-xs font-medium text-muted-foreground">To</span>
+                    <input type="date" required min={leave.starts_on || todayYmd()} value={leave.ends_on} onChange={(e) => setLeave((l) => ({ ...l, ends_on: e.target.value }))} className="h-12 w-full rounded-lg border border-border bg-background px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  </label>
+                </div>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs font-medium text-muted-foreground">Note (optional)</span>
+                  <input value={leave.note} onChange={(e) => setLeave((l) => ({ ...l, note: e.target.value }))} maxLength={2000} className="h-12 w-full rounded-lg border border-border bg-background px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                </label>
+                <button type="submit" disabled={busy === "leave"} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background text-base font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
+                  {busy === "leave" ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <CalendarOff className="h-5 w-5" aria-hidden />} Send request
+                </button>
+              </form>
+            </section>
+          )}
 
           {day.openTickets !== null && day.openTickets > 0 && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">

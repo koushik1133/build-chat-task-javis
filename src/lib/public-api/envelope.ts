@@ -92,6 +92,7 @@ export function errorToResponse(err: unknown, extraHeaders: Record<string, strin
     const name = err.name;
     const msg = err.message;
     if (name === "RecordValidationError" || name === "BookingValidationError") return fail(422, "validation_failed", msg, (err as { errors?: unknown }).errors, extraHeaders);
+    if (name === "DocumentError" || name === "AttachmentError") return fail((err as { status?: number }).status === 404 ? 404 : 422, (err as { status?: number }).status === 404 ? "not_found" : "unprocessable", msg, undefined, extraHeaders);
     if (name === "BookingConflictError") return fail(409, "conflict", msg, undefined, extraHeaders);
     if (name === "InsufficientStockError") return fail(409, "conflict", msg, undefined, extraHeaders);
     if (/not found/i.test(msg)) return fail(404, "not_found", msg, undefined, extraHeaders);

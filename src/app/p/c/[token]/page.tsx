@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { CalendarDays, FileText, Fingerprint, Kanban, LifeBuoy, Loader2, Receipt } from "lucide-react";
+import { CalendarDays, FileSignature, FileText, Fingerprint, Kanban, LifeBuoy, Loader2, Paperclip, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SupportTab } from "@/components/portal/support-tab";
 import { PrivacyTab } from "@/components/portal/privacy-tab";
+import { DocumentsTab } from "@/components/portal/documents-tab";
+import { FilesTab } from "@/components/portal/files-tab";
 import { cn } from "@/lib/utils";
 import type { PortalData } from "@/lib/portal";
 
@@ -29,7 +31,7 @@ export default function ClientPortalPage() {
   const [data, setData] = useState<PortalData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "support" | "privacy">("overview");
+  const [tab, setTab] = useState<"overview" | "documents" | "files" | "support" | "privacy">("overview");
 
   const load = useCallback(async () => {
     try {
@@ -79,8 +81,8 @@ export default function ClientPortalPage() {
         )}
       </header>
 
-      <div role="tablist" aria-label="Portal sections" className="inline-flex rounded-lg border border-border bg-card p-1">
-        {([["overview", "Overview", FileText], ["support", "Support", LifeBuoy], ["privacy", "Privacy", Fingerprint]] as const).map(([id, label, Icon]) => (
+      <div role="tablist" aria-label="Portal sections" className="flex flex-wrap gap-0.5 rounded-lg border border-border bg-card p-1">
+        {([["overview", "Overview", FileText], ["documents", "Documents", FileSignature], ["files", "Files", Paperclip], ["support", "Support", LifeBuoy], ["privacy", "Privacy", Fingerprint]] as const).map(([id, label, Icon]) => (
           <button
             key={id}
             role="tab"
@@ -97,7 +99,11 @@ export default function ClientPortalPage() {
         ))}
       </div>
 
-      {tab === "support" ? (
+      {tab === "documents" ? (
+        <DocumentsTab token={params.token} />
+      ) : tab === "files" ? (
+        <FilesTab token={params.token} />
+      ) : tab === "support" ? (
         <SupportTab token={params.token} />
       ) : tab === "privacy" ? (
         <PrivacyTab token={params.token} />

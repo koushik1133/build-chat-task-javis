@@ -33,6 +33,8 @@ vi.mock("@/lib/privacy/retention", () => ({ applyRetention: state.applyRetention
 vi.mock("@/lib/money/dunning", () => ({ markOverdue: vi.fn(async () => ({ marked: 0 })), sendReminders: vi.fn(async () => ({ sent: 0 })) }));
 vi.mock("@/lib/money/recurring", () => ({ runDueSchedules: vi.fn(async () => ({ created: 0 })) }));
 vi.mock("@/lib/vitals", () => ({ pruneVitals: vi.fn(async () => 0) }));
+vi.mock("@/lib/reports/digest", () => ({ sendDueDigests: vi.fn(async () => ({ sent: 0 })), sendDueReportSchedules: vi.fn(async () => ({ sent: 0 })) }));
+vi.mock("@/lib/documents/documents", () => ({ expireDocuments: vi.fn(async () => ({ expired: 0 })) }));
 
 import { GET } from "@/app/api/cron/agents/route";
 

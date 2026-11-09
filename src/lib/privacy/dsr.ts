@@ -1,6 +1,7 @@
 import { createHash, randomInt, randomUUID, timingSafeEqual } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { recordAudit } from "@/lib/audit";
+import { emitEvent } from "@/lib/events/bus";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { likeContains } from "@/lib/like";
 import { revokeShareTokens } from "@/lib/share-tokens";
@@ -9,6 +10,7 @@ import { anonymizeRow, ERASED_CUSTOMER_LABEL, ERASED_NAME, REDACTED, stripIntern
 import { computeDueAt, DSR_REMINDER_DAYS, type DsrKind, type DsrStatus, type DsrSubjectKind } from "./constants";
 import { listForSubject, writeTombstones } from "./consent";
 import { getPrivacySettings } from "./settings";
+import { attachmentsForSubject, eraseAttachmentsForSubject } from "@/lib/attachments/store";
 
 /**
  * Data subject requests: intake, verification (email OTP, same pattern as
@@ -130,6 +132,7 @@ export async function openRequest(dataId: string, input: OpenRequestInput): Prom
     body: `A ${row.kind} request was opened via ${row.source}. It is due ${due.toDateString()}.`,
     data: { kind: "dsr_opened", request_id: row.id, href: "/settings/privacy" },
   }).catch(() => undefined);
+  void emitEvent(dataId, { type: "privacy.dsr.received", entity: "dsr_request", entityId: row.id, data: { kind: row.kind, subject_kind: row.subject_kind, subject_id: row.subject_id, source: row.source, due_at: due.toISOString() } });
   return row;
 }
 
@@ -259,6 +262,9 @@ export interface SubjectExport {
   opt_outs: Array<Record<string, unknown>>;
   consents: Array<Record<string, unknown>>;
   requests: Array<Record<string, unknown>>;
+  /** Files attached to the subject's entities — metadata only (name, type, size, hash), never bytes. */
+  attachments: Array<Record<string, unknown>>;
+  documents: Array<Record<string, unknown>>;
 }
 
 /** Column whitelists — never SELECT *; never staff ids. */
@@ -276,6 +282,7 @@ const W = {
   conversation: "id, channel, from_number, messages, created_at, updated_at",
   voice: "id, phone, first_name, status, attempts, last_attempt_at, outcome, created_at",
   optout: "id, channel, reason, created_at",
+  document: "id, title, kind, status, sent_at, completed_at, expires_at, created_at",
 } as const;
 
 /**
@@ -325,7 +332,7 @@ export async function buildSubjectExport(dataId: string, subject: Subject): Prom
   const byContactOrEmail = (col = "contact_id", emailCol = "email") =>
     `user_id = $1 AND (($2::text IS NOT NULL AND ${col} = $2) OR ($3::text IS NOT NULL AND lower(${emailCol}) = $3))`;
 
-  const [bookings, tickets, quotes, invoices, records, mail, conversations, voice, optouts, consents, requests] = await Promise.all([
+  const [bookings, tickets, quotes, invoices, records, mail, conversations, voice, optouts, consents, requests, attachments, documents] = await Promise.all([
     safeRows("bookings", `SELECT ${W.booking} FROM bookings WHERE ${byContactOrEmail()} ORDER BY starts_at DESC LIMIT 500`, [dataId, contactId, email]),
     safeRows<Record<string, unknown> & { id: string }>("tickets", `SELECT ${W.ticket} FROM tickets WHERE ${byContactOrEmail("contact_id", "requester_email")} ORDER BY created_at DESC LIMIT 500`, [dataId, contactId, email]),
     contactId ? safeRows("quotes", `SELECT ${W.quote} FROM quotes WHERE user_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 500`, [dataId, contactId]) : Promise.resolve([]),
@@ -337,6 +344,8 @@ export async function buildSubjectExport(dataId: string, subject: Subject): Prom
     safeRows("contact_optouts", `SELECT ${W.optout} FROM contact_optouts WHERE user_id = $1 AND (($2::text IS NOT NULL AND contact_id = $2) OR ($3::text IS NOT NULL AND lower(email) = $3) OR ($4::text IS NOT NULL AND phone = $4)) LIMIT 200`, [dataId, contactId, email, phone]),
     listForSubject(dataId, subject, 500),
     listRequests(dataId, { subject, limit: 100 }),
+    contactId ? attachmentsForSubject(dataId, contactId).catch(() => []) : Promise.resolve([]),
+    contactId ? safeRows("documents", `SELECT ${W.document} FROM documents WHERE user_id = $1 AND contact_id = $2 AND status <> 'draft' ORDER BY created_at DESC LIMIT 500`, [dataId, contactId]) : Promise.resolve([]),
   ]);
 
   const ticketMessages = tickets.length
@@ -361,6 +370,8 @@ export async function buildSubjectExport(dataId: string, subject: Subject): Prom
     opt_outs: expandJson(optouts, []),
     consents: expandJson(consents.map((c) => ({ purpose: c.purpose, status: c.status, source: c.source, evidence: c.evidence, occurred_at: c.occurred_at })), ["evidence"]),
     requests: requests.map((r) => ({ id: r.id, kind: r.kind, status: r.status, requested_at: r.requested_at, due_at: r.due_at, completed_at: r.completed_at })),
+    attachments: attachments.map((a) => ({ id: a.id, entity_kind: a.entity_kind, entity_id: a.entity_id, file_name: a.file_name, content_type: a.content_type, size_bytes: a.size_bytes, sha256: a.sha256, visibility: a.visibility, created_at: a.created_at })),
+    documents: expandJson(documents, []),
   };
   return stripInternalKeys(bundle);
 }
@@ -443,6 +454,10 @@ export async function eraseSubject(dataId: string, subject: Subject, opts: { mod
     affected.voice_campaign_targets = await run("voice_campaign_targets", `UPDATE voice_campaign_targets SET first_name = NULL, status = CASE WHEN status = 'queued' THEN 'opted_out' ELSE status END WHERE user_id = $1 AND contact_id = $2`, [dataId, contactId]);
     await revokeShareTokens("portal", contactId).catch(() => undefined);
     affected.share_tokens = 1;
+    // Files on the subject's entities: bytes and rows go (not retained like financial records).
+    affected.attachments = await eraseAttachmentsForSubject(dataId, contactId);
+    affected.documents = await run("documents", `UPDATE documents SET contact_id = NULL, merge_data = NULL, updated_at = NOW() WHERE user_id = $1 AND contact_id = $2`, [dataId, contactId]);
+    affected.document_signers = await run("document_signers", `UPDATE document_signers SET name = $3, email = '', ip = NULL, user_agent = NULL, signature_text = NULL WHERE user_id = $1 AND document_id IN (SELECT id FROM documents WHERE user_id = $1 AND (contact_id = $2 OR contact_id IS NULL)) AND lower(email) = $4`, [dataId, contactId, ERASED_CUSTOMER_LABEL, email ?? ''])
   }
   if (email) {
     affected.mail_messages = await run("mail_messages", `UPDATE mail_messages SET body_text = NULL, body_html = NULL, snippet = NULL, subject = $3 WHERE user_id = $1 AND (lower(from_addr) = $2 OR lower(to_addrs) LIKE $4)`, [dataId, email, REDACTED, mailAddressPattern(email)]);

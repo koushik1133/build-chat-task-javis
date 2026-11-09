@@ -32,6 +32,7 @@ import {
 } from "@/components/records/shared";
 import type { ActivityRow, FieldDef, LinkRow, RecordItem, RecordType } from "@/lib/records/types";
 import { LINK_KINDS } from "@/lib/records/types";
+import { AttachmentPanel } from "@/components/attachments/attachment-panel";
 
 type View = "board" | "table";
 
@@ -907,6 +908,10 @@ function DetailDrawer({
             {linking ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Link2 className="h-4 w-4" aria-hidden />} Link
           </Button>
         </form>
+      </section>
+
+      <section aria-label="Files" className="mb-6">
+        <AttachmentPanel entityKind="record" entityId={rec.id} allowPortal compact />
       </section>
 
       <section aria-labelledby="activity-heading">
