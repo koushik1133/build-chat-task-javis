@@ -1,6 +1,7 @@
 import type { Messages } from "./en";
 
 export const hi: Messages = {
+  "nav.home": "होम",
   "nav.chat": "चैट",
   "nav.files": "फ़ाइलें",
   "nav.github": "GitHub",
@@ -41,6 +42,7 @@ export const hi: Messages = {
   "nav.settings.system": "सिस्टम स्थिति",
   "nav.settings.developers": "डेवलपर",
   "nav.settings.mail": "ईमेल इनबॉक्स",
+  "nav.settings.accounting": "लेखांकन",
   "nav.voice": "वॉइस अभियान",
   "nav.settings": "सेटिंग्स",
   "nav.helpdesk": "हेल्पडेस्क",

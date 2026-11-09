@@ -6,6 +6,7 @@
  */
 export const en = {
   // ── Navigation ──────────────────────────────────────────────────────────
+  "nav.home": "Home",
   "nav.chat": "Chat",
   "nav.files": "Files",
   "nav.github": "GitHub",
@@ -46,6 +47,7 @@ export const en = {
   "nav.settings.system": "System health",
   "nav.settings.developers": "Developers",
   "nav.settings.mail": "Email Inbox",
+  "nav.settings.accounting": "Accounting",
   "nav.voice": "Voice Campaigns",
   "nav.settings": "Settings",
   "nav.helpdesk": "Helpdesk",

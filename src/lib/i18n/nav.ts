@@ -8,6 +8,7 @@
 import type { MessageKey, TVars } from "./index";
 
 const NAV_KEYS: Record<string, MessageKey> = {
+  "/home": "nav.home",
   "/chat": "nav.chat",
   "/files": "nav.files",
   "/github": "nav.github",
@@ -48,6 +49,7 @@ const NAV_KEYS: Record<string, MessageKey> = {
   "/settings/system": "nav.settings.system",
   "/settings/developers": "nav.settings.developers",
   "/settings/mail": "nav.settings.mail",
+  "/settings/accounting": "nav.settings.accounting",
   "/settings/privacy": "nav.settings.privacy",
   "/voice": "nav.voice",
   "/helpdesk": "nav.helpdesk",

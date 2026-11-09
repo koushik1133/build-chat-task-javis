@@ -26,6 +26,8 @@ import "./helpdesk";
 import "./marketplace";
 import "./credits";
 import "./optimize";
+import "./accounting";
+import "./privacy";
 // END tool-module imports
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 import type { Messages } from "./en";
 
 export const es: Messages = {
+  "nav.home": "Inicio",
   "nav.chat": "Chat",
   "nav.files": "Archivos",
   "nav.github": "GitHub",
@@ -41,6 +42,7 @@ export const es: Messages = {
   "nav.settings.system": "Estado del sistema",
   "nav.settings.developers": "Desarrolladores",
   "nav.settings.mail": "Bandeja de correo",
+  "nav.settings.accounting": "Contabilidad",
   "nav.voice": "Campañas de voz",
   "nav.settings": "Ajustes",
   "nav.helpdesk": "Soporte",

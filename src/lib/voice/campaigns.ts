@@ -1,5 +1,6 @@
 import { query, queryOne } from "@/lib/dsql";
 import { escapeLike } from "@/lib/like";
+import { grantedSubset } from "@/lib/privacy/consent";
 import { firstNameOf } from "./twiml";
 import { CAMPAIGN_STATUSES, emptyStats, filterDnc, normalizePhone, parseTags, type CampaignStats, type CampaignStatus } from "./window";
 
@@ -20,6 +21,8 @@ export interface CampaignRow {
   window_end: string;
   timezone: string;
   max_attempts: number;
+  /** NULL = true: skip contacts without a marketing_voice consent grant. */
+  require_consent: boolean | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -53,7 +56,7 @@ export interface CallRow {
   created_at: string;
 }
 
-const CAMPAIGN_COLS = `id, user_id, name, script, voice, status, schedule_at, window_start, window_end, timezone, max_attempts, created_by, created_at, updated_at`;
+const CAMPAIGN_COLS = `id, user_id, name, script, voice, status, schedule_at, window_start, window_end, timezone, max_attempts, require_consent, created_by, created_at, updated_at`;
 const TARGET_COLS = `id, user_id, campaign_id, contact_id, phone, first_name, status, attempts, last_attempt_at, call_sid, outcome, created_at`;
 
 export interface CreateCampaignInput {
@@ -65,14 +68,16 @@ export interface CreateCampaignInput {
   window_end: string;
   timezone: string;
   max_attempts: number;
+  /** Default true: only contacts with marketing_voice consent are dialled. */
+  require_consent?: boolean;
   created_by: string | null;
 }
 
 export async function createCampaign(dataId: string, input: CreateCampaignInput): Promise<CampaignRow> {
   const row = await queryOne<CampaignRow>(
-    `INSERT INTO voice_campaigns (user_id, name, script, voice, status, schedule_at, window_start, window_end, timezone, max_attempts, created_by, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,'draft',$5,$6,$7,$8,$9,$10,NOW(),NOW()) RETURNING ${CAMPAIGN_COLS}`,
-    [dataId, input.name, input.script, input.voice, input.schedule_at, input.window_start, input.window_end, input.timezone, input.max_attempts, input.created_by]
+    `INSERT INTO voice_campaigns (user_id, name, script, voice, status, schedule_at, window_start, window_end, timezone, max_attempts, require_consent, created_by, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,'draft',$5,$6,$7,$8,$9,$10,$11,NOW(),NOW()) RETURNING ${CAMPAIGN_COLS}`,
+    [dataId, input.name, input.script, input.voice, input.schedule_at, input.window_start, input.window_end, input.timezone, input.max_attempts, input.require_consent ?? true, input.created_by]
   );
   if (!row) throw new Error("Insert returned no row");
   return row;
@@ -228,14 +233,23 @@ export async function loadDnc(dataId: string): Promise<{ phones: string[]; conta
 export interface AddTargetsResult {
   added: number;
   skipped_dnc: number;
+  /** Contacts without a current marketing_voice consent grant (campaign.require_consent). */
+  skipped_no_consent: number;
   skipped_duplicate: number;
   skipped_invalid: number;
 }
 
 /** Build/extend the target list for a campaign from contacts and/or raw phones, honouring DNC. */
 export async function addTargets(dataId: string, campaignId: string, input: AudienceInput): Promise<AddTargetsResult> {
-  const result: AddTargetsResult = { added: 0, skipped_dnc: 0, skipped_duplicate: 0, skipped_invalid: 0 };
-  const contacts = await resolveContacts(dataId, input);
+  const result: AddTargetsResult = { added: 0, skipped_dnc: 0, skipped_no_consent: 0, skipped_duplicate: 0, skipped_invalid: 0 };
+  let contacts = await resolveContacts(dataId, input);
+  // Consent gate (DPDP s.6 / GDPR art. 6): unless the campaign opted out, only dial contacts with a live grant.
+  const campaign = await queryOne<{ require_consent: boolean | null }>(`SELECT require_consent FROM voice_campaigns WHERE id = $1 AND user_id = $2`, [campaignId, dataId]).catch(() => null);
+  if (campaign?.require_consent !== false) {
+    const granted = await grantedSubset(dataId, "contact", contacts.map((c) => c.id), "marketing_voice");
+    result.skipped_no_consent = contacts.filter((c) => !granted.has(c.id)).length;
+    contacts = contacts.filter((c) => granted.has(c.id));
+  }
   const candidates: Array<{ phone: string; contact_id: string | null; first_name: string | null; tags: string[] }> = [];
   for (const c of contacts) {
     const phone = normalizePhone(c.phone);

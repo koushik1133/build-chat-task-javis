@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { CalendarDays, FileText, Kanban, LifeBuoy, Loader2, Receipt } from "lucide-react";
+import { CalendarDays, FileText, Fingerprint, Kanban, LifeBuoy, Loader2, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SupportTab } from "@/components/portal/support-tab";
+import { PrivacyTab } from "@/components/portal/privacy-tab";
 import { cn } from "@/lib/utils";
 import type { PortalData } from "@/lib/portal";
 
@@ -28,7 +29,7 @@ export default function ClientPortalPage() {
   const [data, setData] = useState<PortalData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "support">("overview");
+  const [tab, setTab] = useState<"overview" | "support" | "privacy">("overview");
 
   const load = useCallback(async () => {
     try {
@@ -79,7 +80,7 @@ export default function ClientPortalPage() {
       </header>
 
       <div role="tablist" aria-label="Portal sections" className="inline-flex rounded-lg border border-border bg-card p-1">
-        {([["overview", "Overview", FileText], ["support", "Support", LifeBuoy]] as const).map(([id, label, Icon]) => (
+        {([["overview", "Overview", FileText], ["support", "Support", LifeBuoy], ["privacy", "Privacy", Fingerprint]] as const).map(([id, label, Icon]) => (
           <button
             key={id}
             role="tab"
@@ -98,6 +99,8 @@ export default function ClientPortalPage() {
 
       {tab === "support" ? (
         <SupportTab token={params.token} />
+      ) : tab === "privacy" ? (
+        <PrivacyTab token={params.token} />
       ) : (
         <>
       <Section icon={CalendarDays} title="Upcoming appointments">

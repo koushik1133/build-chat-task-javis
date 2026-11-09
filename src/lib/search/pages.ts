@@ -29,6 +29,8 @@ const AREA_BY_PREFIX: Array<[string, Area]> = [
   ["/settings/webhooks", "settings"],
   ["/settings/developers", "settings"],
   ["/settings/mail", "settings"],
+  ["/settings/accounting", "billing"],
+  ["/settings/privacy", "settings"],
   ["/voice", "messaging"],
   ["/crm", "crm"],
   ["/leads", "leads"],
@@ -63,11 +65,15 @@ export function areaForHref(href: string): Area | null {
 }
 
 const EXTRA: Array<{ href: string; label: string }> = [
+  { href: "/home", label: "Home" },
+  { href: "/onboarding", label: "Setup wizard" },
   { href: "/settings/branding", label: "Branding" },
   { href: "/settings/integrations", label: "Connections" },
   { href: "/settings/webhooks", label: "Webhooks" },
   { href: "/settings/developers", label: "Developers" },
   { href: "/settings/mail", label: "Email Inbox" },
+  { href: "/settings/accounting", label: "Accounting" },
+  { href: "/settings/privacy", label: "Privacy & data" },
   { href: "/voice", label: "Voice Campaigns" },
   { href: "/helpdesk", label: "Helpdesk" },
   { href: "/knowledge", label: "Knowledge Base" },
