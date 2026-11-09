@@ -45,9 +45,12 @@ export interface PlanGridProps {
   /** In-app: choose handler. On the public page pass `hrefFor` instead. */
   onChoose?: (plan: PlanKey, interval: BillingInterval) => void;
   hrefFor?: (plan: PlanKey, interval: BillingInterval) => string;
+  /** Public pricing page: links go to sign-in then back to the plan page (serialisable alternative to `hrefFor`). */
+  publicMode?: boolean;
 }
 
-export function PlanGrid({ currency, current, initialInterval = "month", busy, onChoose, hrefFor }: PlanGridProps) {
+export function PlanGrid({ currency, current, initialInterval = "month", busy, onChoose, hrefFor: hrefForProp, publicMode }: PlanGridProps) {
+  const hrefFor = hrefForProp ?? (publicMode ? (plan: PlanKey, interval: BillingInterval) => `/login?next=${encodeURIComponent(`/settings/plan?upgrade=${plan}&interval=${interval}`)}` : undefined);
   const [interval, setInterval] = useState<BillingInterval>(initialInterval);
   const groupId = useId();
   const plans = listPlans();

@@ -16,7 +16,7 @@ export default function PricingPage() {
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">Plans that grow with your team</h1>
         <p className="mt-2 text-muted-foreground">Every new workspace starts with a 14-day Growth trial. No card needed. After the trial you keep your data and move to Free unless you pick a plan.</p>
       </header>
-      <PlanGrid currency="USD" hrefFor={(plan, interval) => `/login?next=${encodeURIComponent(`/settings/plan?upgrade=${plan}&interval=${interval}`)}`} />
+      <PlanGrid currency="USD" publicMode />
       <p className="mt-6 text-sm text-muted-foreground">
         Already have an account? <Link className="underline underline-offset-2" href="/login">Sign in</Link> to manage your plan.
       </p>
