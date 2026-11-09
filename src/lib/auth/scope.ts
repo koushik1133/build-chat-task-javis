@@ -34,9 +34,12 @@ import { AREAS, DEFAULT_MATRIX, isRole, type Area, type AreaPermission, type Rol
 export const ORG_COOKIE = "kh_org";
 
 export class ScopeError extends Error {
-  constructor(public readonly code: "UNAUTHORIZED" | "FORBIDDEN" | "NO_ORG", message?: string) {
+  /** For code "UNAVAILABLE": the underlying infrastructure error (database down, schema not migrated). */
+  public readonly underlying?: Error;
+  constructor(public readonly code: "UNAUTHORIZED" | "FORBIDDEN" | "NO_ORG" | "UNAVAILABLE", message?: string, underlying?: Error) {
     super(message ?? code);
     this.name = "ScopeError";
+    this.underlying = underlying;
   }
 }
 
@@ -178,8 +181,16 @@ export async function requireScope(opts: RequireScopeOptions = {}): Promise<Scop
   }
   const email = user.email ?? null;
 
-  // Personal org always exists so single-user flows keep working unchanged.
-  const personal = await memoPersonalOrg(user.id, email);
+  // Personal org always exists so single-user flows keep working unchanged. A failure here is an
+  // infrastructure fault (database unreachable, schema not migrated), not a sign-in problem, so it
+  // is surfaced as UNAVAILABLE (HTTP 503 with an actionable message) instead of a misleading 401.
+  let personal: OrgRow;
+  try {
+    personal = await memoPersonalOrg(user.id, email);
+  } catch (err) {
+    if (err instanceof ScopeError) throw err;
+    throw new ScopeError("UNAVAILABLE", "database unavailable", err instanceof Error ? err : new Error(String(err)));
+  }
 
   let wantedOrg = opts.orgId ?? null;
   if (!wantedOrg) {
@@ -228,6 +239,7 @@ export async function requireScope(opts: RequireScopeOptions = {}): Promise<Scop
 /** Map a thrown error to a JSON response, or null when it is not a scope error. */
 export function scopeErrorResponse(err: unknown): NextResponse | null {
   if (err instanceof ScopeError) {
+    if (err.code === "UNAVAILABLE") return infraErrorResponse(err.underlying ?? err);
     if (err.code === "UNAUTHORIZED") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     if (err.code === "FORBIDDEN") return NextResponse.json({ error: "forbidden", detail: err.message }, { status: 403 });
     return NextResponse.json({ error: "no_organization" }, { status: 403 });
@@ -235,10 +247,6 @@ export function scopeErrorResponse(err: unknown): NextResponse | null {
   if (err instanceof Error && err.message === "UNAUTHORIZED") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  // Anything else thrown while resolving a scope is an infrastructure fault (database
-  // unreachable, schema not migrated), not a sign-in problem. Report it as such instead of
-  // letting callers fall back to a misleading 401.
-  if (err instanceof Error) return infraErrorResponse(err);
   return null;
 }
 
