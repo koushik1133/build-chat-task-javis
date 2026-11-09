@@ -30,6 +30,9 @@ vi.mock("@/lib/errors/capture", () => ({ captureError: vi.fn(async () => null) }
 vi.mock("@/lib/accounting/sync", () => ({ processAccountingEvents: vi.fn(async () => ({ pushed: 0 })), pushDue: vi.fn(async () => ({ pushed: 0 })), pullDue: vi.fn(async () => ({ recorded: 0 })) }));
 vi.mock("@/lib/privacy/dsr", () => ({ remindDueSoon: vi.fn(async () => ({ reminded: 0 })) }));
 vi.mock("@/lib/privacy/retention", () => ({ applyRetention: state.applyRetention }));
+vi.mock("@/lib/money/dunning", () => ({ markOverdue: vi.fn(async () => ({ marked: 0 })), sendReminders: vi.fn(async () => ({ sent: 0 })) }));
+vi.mock("@/lib/money/recurring", () => ({ runDueSchedules: vi.fn(async () => ({ created: 0 })) }));
+vi.mock("@/lib/vitals", () => ({ pruneVitals: vi.fn(async () => 0) }));
 
 import { GET } from "@/app/api/cron/agents/route";
 

@@ -1,5 +1,17 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "next build",
-  "installCommand": "npm install"
+  "crons": [
+    { "path": "/api/cron/agents", "schedule": "* * * * *" }
+  ],
+  "functions": {
+    "src/app/api/import/preview/route.ts": { "maxDuration": 60 },
+    "src/app/api/invoices/[id]/pdf/route.ts": { "maxDuration": 60 },
+    "src/app/api/quotes/[id]/pdf/route.ts": { "maxDuration": 60 },
+    "src/app/api/p/invoices/[token]/pdf/route.ts": { "maxDuration": 60 },
+    "src/app/api/p/quotes/[token]/pdf/route.ts": { "maxDuration": 60 },
+    "src/app/api/export/[entity]/route.ts": { "maxDuration": 60 },
+    "src/app/api/export/accounting/route.ts": { "maxDuration": 60 },
+    "src/app/api/privacy/requests/[id]/export/route.ts": { "maxDuration": 60 }
+  }
 }

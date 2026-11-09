@@ -16,7 +16,7 @@ export interface SecurityHeaderEnv {
 }
 
 /** Route patterns (Next `headers()` sources) that third parties may frame. */
-export const EMBEDDABLE_ROUTE_SOURCES = ["/p/:path*", "/book/:path*", "/api/leads/widget/:path*"] as const;
+export const EMBEDDABLE_ROUTE_SOURCES = ["/p/:path*", "/book/:path*", "/api/leads/widget/:path*", "/widget-demo", "/api/widget/:path*", "/api/widget.js"] as const;
 
 const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 

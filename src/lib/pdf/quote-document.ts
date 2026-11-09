@@ -16,6 +16,45 @@ export interface DocLineItem {
   qty: number;
   unit_minor: number;
   tax_rate_bp?: number;
+  tax_rate_id?: string | null;
+  tax_rate_ids?: string[];
+}
+
+export interface DocTaxRow {
+  name: string;
+  rate_bp: number;
+  taxable_minor: number;
+  tax_minor: number;
+}
+
+/** Party details printed under the names (issuer and customer). */
+export interface DocParties {
+  /** e.g. "VAT ID: GB123" — label + number of the issuing business. */
+  issuer_tax_label?: string | null;
+  issuer_tax_number?: string | null;
+  contact_tax_number?: string | null;
+  /** Free text or JSON address object ({line1, line2, city, region, postal_code, country}). */
+  contact_billing_address?: string | null;
+  /** Labels for tax rates referenced by line items (id → "GST 10%"). */
+  rate_labels?: Record<string, string>;
+}
+
+/** Turn a stored billing address (JSON object or plain text) into printable lines. */
+export function addressLines(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const t = raw.trim();
+  if (!t) return [];
+  if (t.startsWith("{")) {
+    try {
+      const o = JSON.parse(t) as Record<string, unknown>;
+      const pick = (k: string) => (typeof o[k] === "string" && (o[k] as string).trim() ? (o[k] as string).trim() : null);
+      const cityLine = [pick("city"), pick("region"), pick("postal_code") ?? pick("postcode") ?? pick("zip")].filter(Boolean).join(", ");
+      return [pick("line1") ?? pick("street"), pick("line2"), cityLine || null, pick("country")].filter((x): x is string => Boolean(x));
+    } catch {
+      /* plain text below */
+    }
+  }
+  return t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 6);
 }
 
 export interface QuoteDocInput {
@@ -36,6 +75,8 @@ export interface QuoteDocInput {
   sent_at?: string | null;
   accepted_at?: string | null;
   current_version?: number;
+  tax_breakdown?: DocTaxRow[];
+  parties?: DocParties;
 }
 
 export interface InvoiceDocInput {
@@ -55,6 +96,9 @@ export interface InvoiceDocInput {
   sent_at?: string | null;
   paid_at?: string | null;
   quote_number?: string | null;
+  tax_breakdown?: DocTaxRow[];
+  parties?: DocParties;
+  terms_days?: number | null;
 }
 
 /** Everything stamped onto an accepted quote. */
@@ -94,10 +138,10 @@ export const CONSENT_TEXT =
 
 /* ─── helpers ────────────────────────────────────────────────────────────── */
 
-const INK: Rgb = [0.1, 0.1, 0.12];
-const MUTED: Rgb = [0.45, 0.45, 0.5];
-const RULE: Rgb = [0.82, 0.82, 0.85];
-const PANEL: Rgb = [0.96, 0.96, 0.97];
+export const INK: Rgb = [0.1, 0.1, 0.12];
+export const MUTED: Rgb = [0.45, 0.45, 0.5];
+export const RULE: Rgb = [0.82, 0.82, 0.85];
+export const PANEL: Rgb = [0.96, 0.96, 0.97];
 
 export function documentHash(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -154,7 +198,7 @@ function hexColor(c: string | null | undefined): Rgb | null {
 }
 
 /** Simple flowing layout cursor with automatic page breaks. */
-class Flow {
+export class Flow {
   page: PdfPage;
   y: number;
   readonly margin = 48;
@@ -184,7 +228,7 @@ class Flow {
   }
 }
 
-interface HeaderSpec {
+export interface HeaderSpec {
   brand: string;
   kindLabel: string;
   number: string;
@@ -192,7 +236,7 @@ interface HeaderSpec {
   meta: Array<[string, string]>;
 }
 
-function drawHeader(page: PdfPage, spec: HeaderSpec, margin: number): number {
+export function drawHeader(page: PdfPage, spec: HeaderSpec, margin: number): number {
   const right = page.width - margin;
   page.rect(0, 0, page.width, 6, { fill: spec.accent });
   page.text(margin, 48 + 14, spec.brand, { size: 16, font: "Helvetica-Bold", color: INK });
@@ -208,7 +252,7 @@ function drawHeader(page: PdfPage, spec: HeaderSpec, margin: number): number {
   return y + 20;
 }
 
-function drawFooters(doc: PdfDocument, label: string, margin: number): void {
+export function drawFooters(doc: PdfDocument, label: string, margin: number): void {
   const pages = doc.getPages();
   pages.forEach((p, i) => {
     p.line(margin, p.height - 44, p.width - margin, p.height - 44, { color: RULE });
@@ -217,7 +261,7 @@ function drawFooters(doc: PdfDocument, label: string, margin: number): void {
   });
 }
 
-function drawParty(flow: Flow, title: string, lines: string[]): void {
+export function drawParty(flow: Flow, title: string, lines: string[]): void {
   const clean = lines.filter((l) => l && l.trim());
   if (clean.length === 0) return;
   flow.ensure(16 + clean.length * 13);
@@ -230,9 +274,16 @@ function drawParty(flow: Flow, title: string, lines: string[]): void {
   flow.gap(8);
 }
 
-const COLS = { qty: 60, unit: 90, tax: 50, amount: 100 } as const;
+export const COLS = { qty: 60, unit: 90, tax: 80, amount: 100 } as const;
 
-function drawItemsTable(flow: Flow, items: DocLineItem[], currency: string): void {
+function lineTaxLabel(it: DocLineItem, labels?: Record<string, string>): string {
+  const ids = it.tax_rate_ids && it.tax_rate_ids.length > 0 ? it.tax_rate_ids : it.tax_rate_id ? [it.tax_rate_id] : [];
+  const named = ids.map((id) => labels?.[id]).filter((x): x is string => Boolean(x));
+  if (named.length > 0) return named.join(" + ");
+  return `${((it.tax_rate_bp ?? 0) / 100).toFixed(2)}%`;
+}
+
+export function drawItemsTable(flow: Flow, items: DocLineItem[], currency: string, rateLabels?: Record<string, string>): void {
   const x0 = flow.margin;
   const xAmount = flow.right;
   const xTax = xAmount - COLS.amount;
@@ -266,14 +317,14 @@ function drawItemsTable(flow: Flow, items: DocLineItem[], currency: string): voi
     const { nextY } = flow.page.textBlock(x0 + 6, flow.y + 4, it.description, { size: 10, maxWidth: descWidth, lineHeight: 13, color: INK });
     flow.page.text(xQty, flow.y + 4, String(Number(it.qty)), { size: 10, align: "right", color: INK });
     flow.page.text(xUnit, flow.y + 4, fmtMinor(it.unit_minor, currency), { size: 10, align: "right", color: INK });
-    flow.page.text(xTax, flow.y + 4, `${((it.tax_rate_bp ?? 0) / 100).toFixed(2)}%`, { size: 10, align: "right", color: INK });
+    flow.page.text(xTax, flow.y + 4, lineTaxLabel(it, rateLabels), { size: 8.5, align: "right", color: INK });
     flow.page.text(xAmount, flow.y + 4, fmtMinor(lineMinor, currency), { size: 10, align: "right", color: INK });
     flow.y = Math.max(nextY, flow.y + 13) + 4;
     flow.page.line(x0, flow.y - 4, flow.right, flow.y - 4, { color: RULE });
   }
 }
 
-function drawTotals(flow: Flow, rows: Array<[string, string, boolean?]>): void {
+export function drawTotals(flow: Flow, rows: Array<[string, string, boolean?]>): void {
   flow.ensure(rows.length * 16 + 10);
   const labelX = flow.right - COLS.amount - 10;
   for (const [label, value, bold] of rows) {
@@ -284,7 +335,7 @@ function drawTotals(flow: Flow, rows: Array<[string, string, boolean?]>): void {
   flow.gap(10);
 }
 
-function drawSection(flow: Flow, title: string, body: string, opts: { size?: number } = {}): void {
+export function drawSection(flow: Flow, title: string, body: string, opts: { size?: number } = {}): void {
   const text = body.trim();
   if (!text) return;
   flow.ensure(40);
@@ -354,6 +405,21 @@ function drawSignature(flow: Flow, stamp: SignatureStamp, tz: string | null | un
   flow.y = top + h + 12;
 }
 
+/** Totals rows: one line per tax rate when a breakdown exists, else a single "Tax" line. */
+export function taxRows(taxMinor: number, currency: string, breakdown?: DocTaxRow[]): Array<[string, string, boolean?]> {
+  if (!breakdown || breakdown.length === 0) return [["Tax", fmtMinor(taxMinor, currency)]];
+  return breakdown.map((b) => [`${b.name} ${(b.rate_bp / 100).toFixed(2).replace(/\.?0+$/, "")}% on ${fmtMinor(b.taxable_minor, currency)}`, fmtMinor(b.tax_minor, currency)]);
+}
+
+export function issuerLines(p?: DocParties): string[] {
+  if (!p?.issuer_tax_number) return [];
+  return [`${p.issuer_tax_label?.trim() || "Tax ID"}: ${p.issuer_tax_number}`];
+}
+
+export function customerLines(name: string | null | undefined, email: string | null | undefined, p?: DocParties): string[] {
+  return [name ?? "", email ?? "", ...addressLines(p?.contact_billing_address), p?.contact_tax_number ? `Tax ID: ${p.contact_tax_number}` : ""];
+}
+
 /* ─── public renderers ───────────────────────────────────────────────────── */
 
 export function renderQuotePdf(quote: QuoteDocInput, stamp: SignatureStamp | null, branding: DocBranding, opts: RenderOptions = {}): Uint8Array {
@@ -370,12 +436,13 @@ export function renderQuotePdf(quote: QuoteDocInput, stamp: SignatureStamp | nul
 
   const flow = new Flow(doc, (p) => drawHeader(p, { brand, kindLabel: "QUOTE", number: quote.number, accent, meta }, 48));
 
-  drawParty(flow, "Prepared for", [quote.contact_name ?? "", quote.contact_email ?? ""]);
-  drawItemsTable(flow, quote.items, quote.currency);
+  if (issuerLines(quote.parties).length) drawParty(flow, "From", [brand, ...issuerLines(quote.parties)]);
+  drawParty(flow, "Prepared for", customerLines(quote.contact_name, quote.contact_email, quote.parties));
+  drawItemsTable(flow, quote.items, quote.currency, quote.parties?.rate_labels);
   flow.gap(6);
   drawTotals(flow, [
     ["Subtotal", fmtMinor(quote.subtotal_minor, quote.currency)],
-    ["Tax", fmtMinor(quote.tax_minor, quote.currency)],
+    ...taxRows(quote.tax_minor, quote.currency, quote.tax_breakdown),
     ["Total", fmtMinor(quote.total_minor, quote.currency), true],
   ]);
   if (quote.notes) drawSection(flow, "Notes", quote.notes);
@@ -399,15 +466,17 @@ export function renderInvoicePdf(invoice: InvoiceDocInput, branding: DocBranding
     ["Status", invoice.status.replace(/_/g, " ")],
   ];
   if (invoice.quote_number) meta.push(["Quote", invoice.quote_number]);
+  if (invoice.terms_days !== null && invoice.terms_days !== undefined) meta.push(["Terms", invoice.terms_days === 0 ? "Due on receipt" : `Net ${invoice.terms_days}`]);
 
   const flow = new Flow(doc, (p) => drawHeader(p, { brand, kindLabel: "INVOICE", number: invoice.number, accent, meta }, 48));
-  drawParty(flow, "Billed to", [invoice.contact_name ?? "", invoice.contact_email ?? ""]);
-  drawItemsTable(flow, invoice.items, invoice.currency);
+  if (issuerLines(invoice.parties).length) drawParty(flow, "From", [brand, ...issuerLines(invoice.parties)]);
+  drawParty(flow, "Billed to", customerLines(invoice.contact_name, invoice.contact_email, invoice.parties));
+  drawItemsTable(flow, invoice.items, invoice.currency, invoice.parties?.rate_labels);
   flow.gap(6);
   const outstanding = Math.max(invoice.total_minor - invoice.paid_minor, 0);
   const rows: Array<[string, string, boolean?]> = [
     ["Subtotal", fmtMinor(invoice.subtotal_minor, invoice.currency)],
-    ["Tax", fmtMinor(invoice.tax_minor, invoice.currency)],
+    ...taxRows(invoice.tax_minor, invoice.currency, invoice.tax_breakdown),
     ["Total", fmtMinor(invoice.total_minor, invoice.currency), true],
   ];
   if (invoice.paid_minor > 0) {

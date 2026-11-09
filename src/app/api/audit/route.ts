@@ -1,21 +1,29 @@
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { listAudit } from "@/lib/audit";
+import { normaliseCursor, page, parseListParams } from "@/lib/public-api/pagination";
 
 export const runtime = "nodejs";
 
-/** GET /api/audit?entity=&entityId=&limit=&before= — org audit timeline (settings area). */
+/**
+ * GET /api/audit?entity=&entityId=&limit=&cursor= — org audit timeline (settings area).
+ * Keyset-paginated (created_at DESC, id DESC); `before=` is still honoured for older clients.
+ */
 export async function GET(req: Request) {
   try {
     const scope = await requireScope({ area: "settings" });
     const url = new URL(req.url);
-    const limit = Number(url.searchParams.get("limit") ?? "50");
-    const rows = await listAudit(scope.dataId, {
+    const list = parseListParams(url, { limit: 50 });
+    if (list.badCursor) return NextResponse.json({ error: "invalid cursor" }, { status: 400 });
+    const all = await listAudit(scope.dataId, {
       entity: url.searchParams.get("entity"),
       entityId: url.searchParams.get("entityId"),
       before: url.searchParams.get("before"),
-      limit: Number.isFinite(limit) ? limit : 50,
+      cursor: list.cursor,
+      limit: list.limit + 1,
     });
+    const pg = page(all, list.limit, (r) => normaliseCursor({ created_at: r.created_at, id: r.id }));
+    const rows = pg.data;
     const entries = rows.map((r) => {
       let diff: Record<string, [unknown, unknown]> | null = null;
       if (r.diff) {
@@ -24,7 +32,7 @@ export async function GET(req: Request) {
       return { ...r, diff };
     });
     const last = rows[rows.length - 1];
-    return NextResponse.json({ entries, nextBefore: last ? last.created_at : null });
+    return NextResponse.json({ entries, next_cursor: pg.next_cursor, nextBefore: last ? last.created_at : null });
   } catch (err) {
     const res = scopeErrorResponse(err);
     if (res) return res;

@@ -1,6 +1,7 @@
 import { query, queryOne } from "@/lib/dsql";
 import { BOOKING_COLS, BOOKING_TYPE_COLS, type BookingRow, type BookingTypeRow } from "@/lib/calendar/booking";
 import { issueShareToken } from "@/lib/share-tokens";
+import { contactBalances, type StatementBalance } from "@/lib/money/statements";
 
 /**
  * Client portal read model. Only whitelisted fields leave this module so a
@@ -68,6 +69,10 @@ export interface PortalData {
   /** Public booking path for the org's first active booking type. */
   bookPath: string | null;
   timezone: string;
+  /** Outstanding balance in the contact's main currency (positive = owed), plus every currency. */
+  balance_minor: number;
+  balance_currency: string | null;
+  balances: StatementBalance[];
 }
 
 interface Options {
@@ -101,7 +106,7 @@ export async function getPortalData(dataId: string, contactId: string, opts: Opt
     slug: "",
   };
 
-  const [quotes, invoices, bookings, cards, firstType, cal] = await Promise.all([
+  const [quotes, invoices, bookings, cards, firstType, cal, balances] = await Promise.all([
     safe(async () => {
       const rows = await query<{ id: string; number: string; status: string; currency: string; total_minor: string | number; valid_until: string | null; created_at: string }>(
         `SELECT id, number, status, currency, total_minor, valid_until, created_at FROM quotes
@@ -168,7 +173,9 @@ export async function getPortalData(dataId: string, contactId: string, opts: Opt
       null
     ),
     safe(() => queryOne<{ timezone: string }>(`SELECT timezone FROM calendars WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1`, [dataId]), null),
+    safe(() => contactBalances(dataId, contactId), [] as StatementBalance[]),
   ]);
+  const main = [...balances].sort((a, b) => Math.abs(b.closing_minor) - Math.abs(a.closing_minor))[0] ?? null;
 
   return {
     org,
@@ -179,5 +186,8 @@ export async function getPortalData(dataId: string, contactId: string, opts: Opt
     cards,
     bookPath: firstType && org.slug ? `/book/${org.slug}/${firstType.slug}` : null,
     timezone: cal?.timezone ?? "UTC",
+    balance_minor: main?.closing_minor ?? 0,
+    balance_currency: main?.currency ?? null,
+    balances,
   };
 }

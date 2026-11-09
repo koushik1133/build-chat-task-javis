@@ -8,6 +8,7 @@ import { Pill, type Tone } from "@/components/ui/pill";
 import { SearchField } from "@/components/ui/search-field";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
 import { isAbortError, useAbortable, useDebouncedValue } from "@/components/ui/hooks";
+import { LoadMore } from "@/components/ui/load-more";
 import { PageContainer } from "@/components/page-container";
 import { cn } from "@/lib/utils";
 import { fmtDate, fmtMoney } from "@/lib/money/format";
@@ -38,6 +39,8 @@ export default function InventoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [editing, setEditing] = useState<Product | "new" | null>(null);
   const [adjusting, setAdjusting] = useState<Product | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
@@ -49,10 +52,11 @@ export default function InventoryPage() {
     setError(null);
     try {
       const [p, c] = await Promise.all([
-        api<{ products: Product[] }>(`/api/products?inactive=1${query ? `&q=${encodeURIComponent(query)}` : ""}${lowOnly ? "&low=1" : ""}`, { signal }),
+        api<{ products: Product[]; next_cursor: string | null }>(`/api/products?inactive=1&order=created&limit=50${query ? `&q=${encodeURIComponent(query)}` : ""}${lowOnly ? "&low=1" : ""}`, { signal }),
         api<{ checkouts: Checkout[] }>("/api/equipment", { signal }),
       ]);
       setProducts(p.products);
+      setCursor(p.next_cursor ?? null);
       setCheckouts(c.checkouts);
     } catch (e) {
       if (isAbortError(e)) return;
@@ -64,6 +68,25 @@ export default function InventoryPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const p = await api<{ products: Product[]; next_cursor: string | null }>(
+        `/api/products?inactive=1&order=created&limit=50&cursor=${encodeURIComponent(cursor)}${query ? `&q=${encodeURIComponent(query)}` : ""}${lowOnly ? "&low=1" : ""}`
+      );
+      setProducts((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        return [...prev, ...p.products.filter((x) => !seen.has(x.id))];
+      });
+      setCursor(p.next_cursor ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load more products.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [cursor, loadingMore, query, lowOnly]);
 
   const lowCount = useMemo(() => products.filter((p) => p.low_stock).length, [products]);
   const openCheckouts = useMemo(() => checkouts.filter((c) => !c.returned_at), [checkouts]);
@@ -196,7 +219,10 @@ export default function InventoryPage() {
               }
             />
           ) : (
-            <ProductTable products={products} busyId={busyId} onEdit={onEdit} onAdjust={onAdjust} onDelete={onDelete} />
+            <>
+              <ProductTable products={products} busyId={busyId} onEdit={onEdit} onAdjust={onAdjust} onDelete={onDelete} />
+              <LoadMore hasMore={Boolean(cursor)} loading={loadingMore} count={products.length} onMore={loadMore} noun="products" />
+            </>
           )}
         </TabPanel>
       ) : (

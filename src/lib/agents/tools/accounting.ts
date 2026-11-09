@@ -97,3 +97,39 @@ registerTool<z.infer<typeof PushInput>>({
     }
   },
 });
+
+/* ═══ Phase 6: generic push ═══ */
+import { ACCOUNTING_ENTITY_KINDS } from "@/lib/accounting/types";
+
+const PushAnyInput = z.object({
+  kind: z.enum(ACCOUNTING_ENTITY_KINDS),
+  id: z.string().min(1).max(100),
+  connection_id: z.string().max(100).optional(),
+});
+registerTool<z.infer<typeof PushAnyInput>>({
+  name: "accounting.push",
+  module: "billing",
+  description: "Push a contact, product, expense, payment or invoice to the connected accounting system(s). Needs approval.",
+  input: PushAnyInput,
+  parameters: {
+    type: "object",
+    properties: { kind: { type: "string", enum: [...ACCOUNTING_ENTITY_KINDS] }, id: { type: "string" }, connection_id: { type: "string" } },
+    required: ["kind", "id"],
+  },
+  scope: "write",
+  requiresApproval: true,
+  preview: (i) => `Push ${i.kind} ${i.id} to accounting`,
+  async run(ctx, input) {
+    try {
+      const conns = (await listConnectedForUser(ctx.userId)).filter((c) => !input.connection_id || c.id === input.connection_id);
+      if (conns.length === 0) return fail("No accounting system is connected");
+      const results = [];
+      for (const c of conns) results.push({ connection_id: c.id, provider: c.provider, ...(await pushEntity(c.id, input.kind, input.id, { force: true })) });
+      const ok = results.filter((r) => r.status === "ok").length;
+      const errors = results.filter((r) => r.status === "error");
+      return { ok: errors.length < results.length, data: results, summary: `${input.kind} ${input.id}: ${ok} pushed, ${errors.length} failed`, error: errors.length === results.length ? errors[0]?.message : undefined };
+    } catch (err) {
+      return fail(`Push failed: ${errMsg(err)}`);
+    }
+  },
+});

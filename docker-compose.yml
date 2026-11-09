@@ -1,0 +1,104 @@
+# KernelHub — self-hosted stack: app + Postgres 17 + one-shot migrate + cron sidecar.
+#
+#   cp .env.example .env.docker && edit (Supabase keys, CRON_SECRET, LLM key)
+#   docker compose --env-file .env.docker up --build
+#
+# DSQL_ENDPOINT is forced to the `postgres` service below; the app treats any
+# host that is not localhost/127.0.0.1 as Aurora DSQL (IAM auth), so the
+# Compose stack reaches Postgres through DB_* variables via the `localhost`
+# alias trick: the app container runs with network_mode: "service:postgres" is
+# NOT used — instead we set DSQL_ENDPOINT=127.0.0.1 and share the network
+# namespace between app and postgres so plain password auth applies.
+#
+# See docs/DEPLOY.md for the Aurora DSQL variant (drop `postgres`, `migrate`
+# host override, and point DSQL_ENDPOINT at the cluster).
+
+name: kernelhub
+
+x-app-env: &app-env
+  NODE_ENV: production
+  PORT: "3001"
+  DSQL_ENDPOINT: 127.0.0.1
+  DB_USER: ${DB_USER:-kernelhub}
+  DB_PASSWORD: ${DB_PASSWORD:-kernelhub}
+  DB_NAME: ${DB_NAME:-kernelhub}
+  NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+  NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3001}
+  CRON_SECRET: ${CRON_SECRET}
+  CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+  RATE_LIMIT_STORE: ${RATE_LIMIT_STORE:-db}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  RESEND_FROM: ${RESEND_FROM:-}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  PAYMENTS_PROVIDER: ${PAYMENTS_PROVIDER:-simulated}
+  PAYMENTS_SIMULATED_SECRET: ${PAYMENTS_SIMULATED_SECRET:-}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-kernelhub}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-kernelhub}
+      POSTGRES_DB: ${DB_NAME:-kernelhub}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"   # host access for psql / backup-db.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-kernelhub} -d ${DB_NAME:-kernelhub}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # One-shot: applies aws/migrations.sql (idempotent via schema_migrations).
+  migrate:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3001}
+    image: kernelhub:local
+    network_mode: "service:postgres"
+    environment:
+      <<: *app-env
+    command: ["node", "scripts/run-migrations.mjs"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    image: kernelhub:local
+    network_mode: "service:postgres"      # shares localhost with postgres → DSQL_ENDPOINT=127.0.0.1
+    environment:
+      <<: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # The app listens on 3001 inside the shared namespace; publish it from the
+    # postgres service's port list instead when you need it on the host:
+    #   postgres.ports: - "3001:3001"
+
+  # Sidecar: POST /api/cron/agents every 60s with the Bearer CRON_SECRET.
+  cron:
+    image: kernelhub:local
+    network_mode: "service:postgres"
+    environment:
+      CRON_SECRET: ${CRON_SECRET}
+      CRON_TARGET: http://127.0.0.1:3001
+      CRON_INTERVAL_MS: ${CRON_INTERVAL_MS:-60000}
+    command: ["node", "scripts/cron-tick.mjs"]
+    depends_on:
+      app:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:

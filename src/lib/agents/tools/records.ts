@@ -217,3 +217,61 @@ registerTool<UpdateT>({
     }
   },
 });
+
+/* ═══ Phase 6: delete + link ═══ */
+import { getRecord, link as linkRecord, softDeleteRecord } from "@/lib/records/store";
+import { LINK_KINDS } from "@/lib/records/types";
+
+const DeleteInput = z.object({ type: z.string().min(1).max(60), record_id: z.string().min(1).max(100) });
+registerTool<z.infer<typeof DeleteInput>>({
+  name: "records.delete",
+  module: "records",
+  description: "Soft-delete a record (recoverable by an admin). Always needs approval.",
+  input: DeleteInput,
+  parameters: { type: "object", properties: { type: { type: "string", description: "Record type slug" }, record_id: { type: "string" } }, required: ["type", "record_id"] },
+  scope: "write",
+  requiresApproval: true,
+  preview: (i) => `Delete ${i.type} record ${i.record_id}`,
+  async run(ctx, input) {
+    try {
+      const type = await getType(ctx.userId, input.type);
+      if (!type) return fail(`Unknown record type "${input.type}"`);
+      const rec = await getRecord(ctx.userId, input.record_id);
+      if (!rec || rec.type_id !== type.id) return fail("Record not found");
+      const ok = await softDeleteRecord(ctx.userId, type, input.record_id);
+      return ok ? { ok: true, data: { id: input.record_id, deleted: true }, summary: `Deleted "${rec.title}"` } : fail("Record not found");
+    } catch (err) {
+      return fail(`Delete failed: ${errMsg(err)}`);
+    }
+  },
+});
+
+const LinkInput = z.object({
+  record_id: z.string().min(1).max(100),
+  target_kind: z.enum(LINK_KINDS),
+  target_id: z.string().min(1).max(100),
+});
+registerTool<z.infer<typeof LinkInput>>({
+  name: "records.link",
+  module: "records",
+  description: "Link a record to a contact, task, quote, invoice, booking or another record. Idempotent.",
+  input: LinkInput,
+  parameters: {
+    type: "object",
+    properties: { record_id: { type: "string" }, target_kind: { type: "string", enum: [...LINK_KINDS] }, target_id: { type: "string" } },
+    required: ["record_id", "target_kind", "target_id"],
+  },
+  scope: "write",
+  requiresApproval: false,
+  preview: (i) => `Link record ${i.record_id} → ${i.target_kind} ${i.target_id}`,
+  async run(ctx, input) {
+    try {
+      const rec = await getRecord(ctx.userId, input.record_id);
+      if (!rec) return fail("Record not found");
+      const row = await linkRecord(ctx.userId, input.record_id, input.target_kind, input.target_id, ctx.agentId ? `agent:${ctx.agentId}` : null);
+      return { ok: true, data: { id: row.id, record_id: row.record_id, target_kind: row.target_kind, target_id: row.target_id }, summary: `Linked "${rec.title}" to ${input.target_kind} ${input.target_id}` };
+    } catch (err) {
+      return fail(`Link failed: ${errMsg(err)}`);
+    }
+  },
+});

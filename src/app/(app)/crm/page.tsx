@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Globe, Plus, Search, Filter, Users, DollarSign,
-  Mail, Phone, Building2, Tag, X, Loader2, Pencil, Trash2, Check
+  Mail, Phone, Building2, Tag, X, Loader2, Pencil, Trash2, Check, FileText
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadMore } from "@/components/ui/load-more";
 
 type Contact = {
   id: string;
@@ -72,6 +73,8 @@ function parseTagsSafe(tags: unknown): string[] {
 export default function CrmPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState("");
   const [filterDomain, setFilterDomain] = useState("general");
   const [filterLifecycle, setFilterLifecycle] = useState("");
@@ -86,19 +89,41 @@ export default function CrmPage() {
   });
   const [saving, setSaving] = useState(false);
 
+  const buildParams = useCallback(() => {
+    const params = new URLSearchParams({ limit: "50" });
+    if (filterDomain && filterDomain !== "general") params.set("domain", filterDomain);
+    if (filterLifecycle) params.set("lifecycle", filterLifecycle);
+    if (search) params.set("q", search);
+    return params;
+  }, [filterDomain, filterLifecycle, search]);
+
   const fetchContacts = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (filterDomain && filterDomain !== "general") params.set("domain", filterDomain);
-      if (filterLifecycle) params.set("lifecycle", filterLifecycle);
-      if (search) params.set("q", search);
-
-      const res = await fetch(`/api/crm/contacts?${params}`);
+      const res = await fetch(`/api/crm/contacts?${buildParams()}`);
       const data = await res.json().catch(() => ({}));
       setContacts(data.contacts ?? []);
+      setCursor(typeof data.next_cursor === "string" ? data.next_cursor : null);
     } finally { setLoading(false); }
-  }, [filterDomain, filterLifecycle, search]);
+  }, [buildParams]);
+
+  // Keyset "load more": same filters, next page appended (ids de-duplicated).
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const params = buildParams();
+      params.set("cursor", cursor);
+      const res = await fetch(`/api/crm/contacts?${params}`);
+      const data = await res.json().catch(() => ({}));
+      const next: Contact[] = data.contacts ?? [];
+      setContacts((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        return [...prev, ...next.filter((c) => !seen.has(c.id))];
+      });
+      setCursor(typeof data.next_cursor === "string" ? data.next_cursor : null);
+    } finally { setLoadingMore(false); }
+  }, [buildParams, cursor, loadingMore]);
 
   useEffect(() => {
     const timer = setTimeout(() => fetchContacts(), search ? 400 : 0);
@@ -340,6 +365,11 @@ export default function CrmPage() {
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center gap-1 justify-end">
+                            <a href={`/api/crm/contacts/${contact.id}/statement?format=pdf`} target="_blank" rel="noopener"
+                              title="Customer statement (PDF)" aria-label={`Statement for ${contact.full_name}`}
+                              className="h-7 w-7 rounded flex items-center justify-center hover:bg-secondary transition-colors">
+                              <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                            </a>
                             <button onClick={() => openEdit(contact)}
                               className="h-7 w-7 rounded flex items-center justify-center hover:bg-secondary transition-colors">
                               <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
@@ -359,9 +389,7 @@ export default function CrmPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-2.5 border-t border-border/40 text-xs text-muted-foreground">
-              Showing {contacts.length} contact{contacts.length !== 1 ? "s" : ""}
-            </div>
+            <LoadMore hasMore={Boolean(cursor)} loading={loadingMore} count={contacts.length} onMore={loadMore} noun="contacts" className="border-t border-border/40" />
           </div>
         )}
       </div>

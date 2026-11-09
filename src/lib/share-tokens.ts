@@ -30,20 +30,35 @@ export interface ShareTokenRow {
   entity_id: string;
   expires_at: string | null;
   revoked_at: string | null;
+  /** Email the link was sent to; when set, OTP flows must use the same address. */
+  recipient: string | null;
 }
 
 export async function issueShareToken(
   dataId: string,
   kind: ShareKind,
   entityId: string,
-  ttlDays = 30
+  ttlDays = 30,
+  opts: { recipient?: string | null } = {}
 ): Promise<{ token: string; path: string; url: string; expiresAt: string }> {
   const token = randomBytes(24).toString("base64url");
   const expiresAt = new Date(Date.now() + ttlDays * 86_400_000).toISOString();
-  await query(
-    `INSERT INTO share_tokens (id, user_id, kind, entity_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`,
-    [randomUUID(), dataId, kind, entityId, hashToken(token), expiresAt]
-  );
+  const recipient = opts.recipient?.trim().toLowerCase() || null;
+  const id = randomUUID();
+  if (recipient) {
+    // Pre-migration fallback: the column may not exist yet; the token still works unbound.
+    await query(
+      `INSERT INTO share_tokens (id, user_id, kind, entity_id, token_hash, expires_at, recipient) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, dataId, kind, entityId, hashToken(token), expiresAt, recipient]
+    ).catch(() =>
+      query(`INSERT INTO share_tokens (id, user_id, kind, entity_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`, [id, dataId, kind, entityId, hashToken(token), expiresAt])
+    );
+  } else {
+    await query(
+      `INSERT INTO share_tokens (id, user_id, kind, entity_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, dataId, kind, entityId, hashToken(token), expiresAt]
+    );
+  }
   const path = sharePath(kind, token);
   return { token, path, url: `${appOrigin()}${path}`, expiresAt };
 }
@@ -63,8 +78,10 @@ export interface ShareTokenLookup {
 export async function resolveShareTokenDetailed(kind: ShareKind, token: string): Promise<ShareTokenLookup> {
   if (!token || token.length > 128 || !/^[A-Za-z0-9_-]+$/.test(token)) return { row: null, expired: false };
   const row = await queryOne<ShareTokenRow>(
-    `SELECT id, user_id, kind, entity_id, expires_at, revoked_at FROM share_tokens WHERE token_hash = $1 AND kind = $2`,
+    `SELECT id, user_id, kind, entity_id, expires_at, revoked_at, recipient FROM share_tokens WHERE token_hash = $1 AND kind = $2`,
     [hashToken(token), kind]
+  ).catch(() =>
+    queryOne<ShareTokenRow>(`SELECT id, user_id, kind, entity_id, expires_at, revoked_at, NULL::text AS recipient FROM share_tokens WHERE token_hash = $1 AND kind = $2`, [hashToken(token), kind])
   );
   if (!row) return { row: null, expired: false };
   if (row.revoked_at) return { row: null, expired: false };

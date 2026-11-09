@@ -1,444 +1,109 @@
-# KernelHub — End-to-End Operating System for Modern Business
+# KernelHub
 
-A full-stack AI workspace for developers and teams: chat with RAG over your files, review GitHub repos, run automations on a schedule, manage production Kanban, generate landing pages, and more.
+KernelHub is an AI-native operating system for small and mid-sized businesses: CRM, leads, omnichannel messaging, helpdesk, calendar and bookings, quotes/invoices/payments, production boards, knowledge base and RAG chat, agents and automations, social and ads, reports — in one multi-tenant Next.js app with a public REST API and webhooks.
 
-**Live:** https://javis-xtmerz2lha-uc.a.run.app
+**Stack:** Next.js 15 (App Router, React 18, TypeScript strict) · Tailwind 3 · Supabase Auth · Postgres (Aurora DSQL or plain Postgres 17) · optional DynamoDB / Pinecone · Groq or Gemini LLMs · Vitest.
 
-**Stack:** Next.js 15 · TypeScript · Supabase (auth + file storage) · Aurora DSQL (metadata) · DynamoDB (messages + analytics) · Pinecone (RAG) · Groq LLM · Cloud Run
-
----
-
-## Quick start
-
-```bash
-cd build-chat-task-javis
-npm install
-cp .env.example .env.local   # fill in real values
-npm run migrate              # Aurora DSQL (first time)
-npm run dev                  # http://localhost:3001
-```
-
-See `LAUNCH_CHECKLIST.md` for Supabase, AWS, Pinecone, and production setup.
+Docs: [`docs/DEPLOY.md`](docs/DEPLOY.md) · [`docs/OPERATIONS.md`](docs/OPERATIONS.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/SECURITY.md`](docs/SECURITY.md) · [`docs/TESTING.md`](docs/TESTING.md) · [`docs/API.md`](docs/API.md) · [`docs/PRIVACY.md`](docs/PRIVACY.md) · [`docs/ACCOUNTING.md`](docs/ACCOUNTING.md)
 
 ---
 
-## Architecture
+## Feature map
 
-```
-Browser (React)
-    │
-    ▼
-Next.js App Router ── middleware (Supabase session refresh)
-    │
-    ├── Server Components / API Routes
-    │
-    ├── Supabase Auth (sessions, OAuth, magic link)
-    ├── Supabase Storage (uploaded file blobs)
-    │
-    ├── Aurora DSQL (Postgres-compatible)
-    │     chats, tasks, files meta, sites, automations,
-    │     agents, strategies, production board, integrations…
-    │
-    ├── DynamoDB
-    │     chat messages (high write volume)
-    │     site page-view analytics
-    │
-    ├── Pinecone (vector RAG, per-user namespace)
-    ├── Groq (llama-3.3-70b-versatile)
-    ├── GitHub API (repo review, site publish)
-    └── Resend + Slack webhooks (automations)
-```
-
----
-
-## Features — how they work
-
-Each section covers **what the user sees**, **where the code lives**, **what stores data**, and **the request flow**.
-
-### Authentication
-
-| | |
-|---|---|
-| **Pages** | `/login`, `/auth/callback` |
-| **API** | `GET /api/auth/session`, `POST /api/auth/signout` |
-| **Code** | `src/app/login/page.tsx`, `src/app/auth/callback/route.ts`, `src/lib/supabase/*`, `middleware.ts` |
-| **Storage** | Supabase Auth (JWT in HTTP-only cookies) |
-
-**How it works**
-
-1. Middleware (`src/lib/supabase/middleware.ts`) runs on every request. Public paths (`/`, `/login`, `/auth/*`, `/api/*`) pass through; everything else requires a session cookie or redirects to `/login?next=…`.
-2. **Password sign-in** — client calls `supabase.auth.signInWithPassword`; session cookies are set in the browser; `onAuthStateChange` confirms via `/api/auth/session` then navigates to `/chat`.
-3. **Google OAuth** — client calls `signInWithOAuth({ provider: "google", redirectTo: …/auth/callback })`. Google → Supabase → `/auth/callback?code=…`. The callback route (`cookies()` + `redirect()`) exchanges the code for a session and redirects to `/chat`.
-4. **Magic link** — `signInWithOtp` sends an email (via Supabase). Clicking the link hits the same `/auth/callback` flow.
-5. **Sign-out** — client `signOut()` + `POST /api/auth/signout` clears all `sb-*` cookies.
-
-Production runs on Cloud Run; the callback uses `x-forwarded-host` and relative `redirect()` so sessions are never sent to `0.0.0.0:8080`.
-
----
-
-### Onboarding
-
-| | |
-|---|---|
-| **Page** | `/onboarding` |
-| **API** | `POST /api/onboarding` |
-| **Code** | `src/app/onboarding/page.tsx` |
-| **Storage** | Aurora DSQL — `business_profile`, `board_configs` |
-
-**How it works**
-
-1. Three-step wizard collects company name, industry, stage, team size, product/market, and module preferences.
-2. `POST /api/onboarding` upserts `business_profile` (modules as JSON).
-3. A Kanban `board_configs` row is auto-created from industry/stage templates (software, agency, sales, default).
-4. Profile data feeds **Strategy Hub** prompts and **AI Studio** site generation. Users can skip onboarding and go straight to `/chat`.
-
----
-
-### Chat + RAG
-
-| | |
-|---|---|
-| **Pages** | `/chat`, `/chat/[id]` |
-| **API** | `POST /api/chat`, `GET /api/chats`, `GET|DELETE /api/chats/[id]` |
-| **Code** | `src/app/api/chat/route.ts`, `src/lib/{llm,pinecone,prompts,dynamodb,dsql}.ts` |
-| **Storage** | DSQL `chats` · DynamoDB `javis-messages` · Pinecone (user namespace) |
-| **External** | Groq (streaming), Pinecone (`multilingual-e5-large`) |
-
-**How it works**
-
-```
-User message
-    → ensure chat row in DSQL
-    → save user turn in DynamoDB
-    → parallel: last 10 messages (DynamoDB) + top-5 RAG chunks (Pinecone)
-    → build system prompt + stream Groq response to browser
-    → on finish: save assistant turn in DynamoDB, bump chats.updated_at
-    → background: LLM extracts action items → INSERT INTO tasks
-```
-
-Chat history lives in DynamoDB for fast writes; chat metadata (title, timestamps) in DSQL. RAG retrieves chunks uploaded via the Files feature (same Pinecone namespace).
-
----
-
-### Files (RAG ingestion)
-
-| | |
-|---|---|
-| **Page** | `/files` |
-| **API** | `GET|POST|DELETE /api/files` |
-| **Code** | `src/app/api/files/route.ts`, `src/lib/{chunk,pinecone}.ts` |
-| **Storage** | Supabase Storage · DSQL `files` · Pinecone vectors |
-| **External** | Pinecone (hosted embed + upsert) |
-
-**How it works**
-
-1. Upload (max 15 MB) → `extractText` (PDF via `pdf-parse`, else plain text).
-2. `chunkText` splits into ~400-word windows.
-3. Raw blob → Supabase Storage; metadata → DSQL.
-4. Each chunk upserted to Pinecone under `{userId}` namespace with id `{fileId}:{index}`.
-5. Delete removes Pinecone vectors, storage object, and DSQL row.
-
-Chat automatically searches these chunks on every turn.
-
----
-
-### GitHub Review
-
-| | |
-|---|---|
-| **Page** | `/github` |
-| **API** | `POST /api/github/review`, `POST /api/github/readme` |
-| **Code** | `src/lib/github.ts`, `src/lib/prompts.ts` |
-| **Storage** | None (stateless) |
-| **External** | GitHub API (Octokit), Groq |
-
-**How it works**
-
-1. Parse repo URL → fetch metadata + recursive file tree via Octokit.
-2. **Review** — pick up to 3 source files, truncate ~1500 chars each, LLM review per file.
-3. **README** — pull entry points + top source files, LLM generates a full README from tree + content.
-
-Requires `GITHUB_TOKEN` with public repo read access.
-
----
-
-### Tasks
-
-| | |
-|---|---|
-| **Page** | `/tasks` |
-| **API** | `GET|POST|PATCH|DELETE /api/tasks` |
-| **Code** | `src/app/api/tasks/route.ts` (also auto-created from chat) |
-| **Storage** | Aurora DSQL — `tasks` |
-
-**How it works**
-
-- After each chat turn, a background Groq call extracts action items and inserts rows into `tasks`.
-- The `/tasks` page supports manual create, toggle done, rename, and delete.
-- Separate from the **Production** Kanban board (`production_tasks` table).
-
----
-
-### AI Studio (Build / Site Generator)
-
-| | |
-|---|---|
-| **Pages** | `/build`, `/build/[siteId]` |
-| **API** | `/api/build/generate`, `refine`, `save`, `suggest`, `security`, `resume`, `/api/build/sites/*`, public `/api/leads/[siteId]`, `/api/analytics/[siteId]` |
-| **Code** | `src/lib/{build-prompts,build-categories,builder-engine,inline-edit}.ts` |
-| **Storage** | DSQL — `sites`, `site_revisions`, `site_leads` · DynamoDB page views |
-| **External** | Groq (HTML generation), GitHub (publish + Pages) |
-
-**How it works**
-
-1. Wizard picks category, theme, and answers → `POST /api/build/generate` → Groq returns full HTML → saved to DSQL + initial revision.
-2. Analytics beacon injected into HTML; public POST records page views in DynamoDB.
-3. **Live Studio** — AI refine, inline edit, drag-and-drop (`builder-engine`), manual save, version history/revert.
-4. **Publish** — creates a GitHub repo, pushes `index.html`, enables GitHub Pages.
-5. Generated sites POST leads to `/api/leads/[siteId]` (DSQL).
-
-Uses onboarding `business_profile` as business context in generation prompts.
-
----
-
-### Automations + Scheduler
-
-| | |
-|---|---|
-| **Page** | `/automations` |
-| **API** | `/api/automations`, `/api/automations/[id]`, `fire`, `test`, `/api/cron/automations` |
-| **Code** | `src/lib/{automation-runner,automation-executor,automation-scheduler,user-integrations}.ts`, `scripts/run-automation-cron.mjs` |
-| **Storage** | Aurora DSQL — `automations` |
-| **External** | Resend, Slack webhooks, Groq (Run Agent), arbitrary HTTP webhooks |
-
-**How it works**
-
-**Triggers**
-
-- **Scheduled (Daily)** — `schedule_time`, `schedule_timezone`, `schedule_days`. A cron poller hits `/api/cron/automations` every second locally (`npm run dev` auto-starts it) or every minute in production (Cloud Scheduler + `CRON_SECRET`).
-- **Kanban label** — fires when a production card moves to a column whose label matches the automation.
-
-**Actions**
-
-Send Email · Send Slack Message · Send Notification · Trigger Webhook · Create Task · Run Agent
-
-**Execution**
-
-- `SCHEDULE_FIRE_WINDOW_SEC = 10` — fires within the first 10 seconds of the scheduled minute.
-- Claim pattern (`last_scheduled_date`) prevents double-fire.
-- Fast actions (email, Slack) are awaited; slow actions (Run Agent) run in the background.
-- Saved integrations (`user_integrations`) fill in default email/Slack when per-action config is empty.
-
----
-
-### Agents
-
-| | |
-|---|---|
-| **Page** | `/agents` |
-| **API** | `/api/agents`, `/api/agents/[id]`, `templates`, `runs` |
-| **Code** | `src/lib/{agent-runner,agent-templates}.ts` |
-| **Storage** | DSQL — `agents`, `agent_runs` |
-| **External** | Groq |
-
-**How it works**
-
-1. Create an agent from a template or custom system prompt.
-2. Manual run or automation trigger calls Groq → output stored in `agent_runs`.
-3. Delivery via in-app notification, email, or Slack (configured in automation `deliver_via`).
-4. Agent `status` and `tasks_completed` updated after each run.
-
----
-
-### Strategy Hub
-
-| | |
-|---|---|
-| **Page** | `/strategy` |
-| **API** | `/api/strategy`, `/api/strategy/[id]/*`, `export`, `export-all` |
-| **Code** | `src/lib/strategy.ts` |
-| **Storage** | DSQL — `strategies`, `strategy_versions`, reads `business_profile` |
-| **External** | Groq |
-
-**How it works**
-
-1. Six strategy types: competitor analysis, TAM, growth, GTM, roadmap, fundraising — each with a typed prompt in `strategy.ts`.
-2. Loads onboarding profile as business context → Groq generates a Markdown report → saved as draft.
-3. Edit, regenerate, export to Markdown/PDF.
-4. Version history in `strategy_versions`.
-5. `POST /api/strategy/[id]/production` parses recommendations → creates Production board cards.
-
----
-
-### Production Board (Kanban + HITL)
-
-| | |
-|---|---|
-| **Page** | `/production` |
-| **API** | `/api/production`, `/api/production/[id]/*`, `config` |
-| **Code** | `src/lib/{production-board,production-server}.ts` |
-| **Storage** | DSQL — `production_tasks`, `board_configs`, `production_activity` |
-
-**How it works**
-
-1. Columns come from `board_configs` (JSON). Some columns are marked `hitl: true` (human-in-the-loop gates).
-2. Drag/move is blocked out of HITL columns without Approve/Reject.
-3. **Approve** → advance to next column → may fire kanban automations matching the card's `automation` label.
-4. **Reject** → log activity + delete card.
-5. Activity log in `production_activity`. Board template seeded at onboarding.
-
----
-
-### Analytics
-
-| | |
-|---|---|
-| **Page** | `/analytics` |
-| **API** | `GET /api/analytics`, `GET /api/build/sites/[id]/analytics`, public `POST /api/analytics/[siteId]` |
-| **Code** | `src/lib/dynamodb.ts` |
-| **Storage** | DSQL (aggregates) · DynamoDB (page views) |
-
-**How it works**
-
-1. Dashboard aggregates cross-module metrics from DSQL: leads, sites, agents, production cards, strategies, automations, chat tasks — plus 7-day trend arrays.
-2. Per-site views: public POST writes page-view events to DynamoDB; owner reads via authenticated GET.
-3. Computes heuristic "hours automated" and "dollars saved" from automation run counts.
-
----
-
-### Integrations (Email + Slack)
-
-| | |
-|---|---|
-| **Page** | `/settings/integrations` |
-| **API** | `GET|PATCH /api/integrations`, `POST /api/integrations/email`, `POST /api/integrations/test` |
-| **Code** | `src/lib/user-integrations.ts` |
-| **Storage** | DSQL — `user_integrations` |
-| **External** | Slack incoming webhooks, Resend |
-
-**How it works**
-
-1. **Slack** — paste a `hooks.slack.com/services/…` webhook URL + optional channel name.
-2. **Email** — send 6-digit OTP via Resend → verify → stored as `email_default_to`.
-3. Saved credentials are merged into automation actions when per-action `to` / `webhook_url` is not set.
-4. Test endpoint validates connectivity before saving.
-
----
-
-### Notifications
-
-| | |
-|---|---|
-| **UI** | Bell icon in app shell |
-| **API** | `GET|PATCH /api/notifications` |
-| **Code** | `src/components/notification-bell.tsx`, `src/lib/automation-executor.ts` |
-| **Storage** | DSQL — `notifications` |
-
-**How it works**
-
-1. Automations with action "Send Notification" or agent delivery insert rows into `notifications`.
-2. Bell component polls `/api/notifications`; PATCH marks read (by id or all).
-3. Custom event `javis:notifications-refresh` triggers re-fetch after automation runs.
-
----
-
-## Route index
-
-| Feature | Page | Primary API |
+| Module | Pages | Key libs |
 |---|---|---|
-| Auth | `/login` | `/api/auth/*`, `/auth/callback` |
-| Onboarding | `/onboarding` | `/api/onboarding` |
-| Chat + RAG | `/chat`, `/chat/[id]` | `/api/chat`, `/api/chats` |
-| Files | `/files` | `/api/files` |
-| GitHub | `/github` | `/api/github/review`, `/readme` |
-| Tasks | `/tasks` | `/api/tasks` |
-| AI Studio | `/build`, `/build/[siteId]` | `/api/build/*` |
-| Automations | `/automations` | `/api/automations`, `/api/cron/automations` |
-| Agents | `/agents` | `/api/agents` |
-| Strategy | `/strategy` | `/api/strategy` |
-| Production | `/production` | `/api/production` |
-| Analytics | `/analytics` | `/api/analytics` |
-| Integrations | `/settings/integrations` | `/api/integrations` |
-| Notifications | (bell in shell) | `/api/notifications` |
+| Home, onboarding, demo data | `/home`, `/onboarding` | `src/lib/home`, `src/lib/onboarding`, `src/lib/demo` |
+| Chat, files, knowledge (RAG) | `/chat`, `/files`, `/knowledge` | `src/lib/llm`, `src/lib/kb`, `src/lib/pinecone.ts`, `src/lib/chunk.ts` |
+| CRM, leads, records | `/crm`, `/leads`, `/r` | `src/lib/crm`, `src/lib/records`, `src/lib/lead-enrichment.ts` |
+| Messaging (SMS, WhatsApp, web chat, mail inbox) | `/messaging`, `/settings/mail` | `src/lib/channels`, `src/lib/webchat`, `src/lib/mail`, `src/lib/twilio-webhook.ts` |
+| Helpdesk + SLA | `/helpdesk` | `src/lib/helpdesk` |
+| Calendar + bookings | `/calendar`, `/book/*` (public) | `src/lib/calendar` |
+| Billing: quotes, invoices, payments, credits | `/billing`, `/finance`, `/p/*` (public) | `src/lib/finance`, `src/lib/payments`, `src/lib/credits`, `src/lib/pdf`, `src/lib/money` |
+| Inventory, production, tasks, approvals | `/inventory`, `/production`, `/tasks`, `/approvals` | `src/lib/inventory`, `src/lib/production-*.ts`, `src/lib/tasks`, `src/lib/approvals` |
+| Agents, swarms, automations, marketplace, evals | `/agents`, `/automations`, `/marketplace` | `src/lib/agents`, `src/lib/agent-runner.ts`, `src/lib/automation-*.ts`, `src/lib/marketplace`, `src/lib/evals` |
+| Social, ads, sites (AI Studio), voice | `/social`, `/ads`, `/build`, `/voice` | `src/lib/social`, `src/lib/ads`, `src/lib/builder-engine.ts`, `src/lib/voice` |
+| Reports, insights, analytics, strategy | `/reports`, `/insights`, `/analytics`, `/strategy` | `src/lib/export`, `src/lib/strategy.ts`, `src/lib/dynamodb.ts` |
+| Agency mode (client workspaces) | `/agency` | `src/lib/agency` |
+| Settings: team/roles, SSO + SCIM, API keys, webhooks, branding, import, privacy, accounting, system health | `/settings/*` | `src/lib/team.ts`, `src/lib/sso`, `src/lib/scim`, `src/lib/api-keys.ts`, `src/lib/webhooks`, `src/lib/branding.ts`, `src/lib/import`, `src/lib/privacy`, `src/lib/accounting`, `src/lib/system` |
+| Public API v1 + OpenAPI | `/api/v1/*`, `/api/v1/openapi.json` | `src/lib/public-api` |
 
 ---
 
-## Database
+## Quick start (local)
 
-| Store | Used for |
-|---|---|
-| **Aurora DSQL** | All relational metadata — see `aws/schema.sql` |
-| **DynamoDB** | Chat messages, site page-view events |
-| **Supabase Auth** | User sessions |
-| **Supabase Storage** | Uploaded file blobs |
-| **Pinecone** | RAG vector chunks (per-user namespace) |
-
-Apply schema: `npm run migrate` (runs `aws/migrations.sql` against DSQL).
-
----
-
-## Deploy to Google Cloud Run
+Prereqs: Node 22, Postgres 17 (or an Aurora DSQL cluster), a Supabase project (auth only).
 
 ```bash
-# One-time: enable APIs, create secrets, grant Secret Manager access
-# See LAUNCH_CHECKLIST.md and deploy/deploy.sh
-
-./deploy/deploy.sh
-# → builds linux/amd64 Docker image
-# → pushes to gcr.io/javis-prod/javis
-# → deploys to Cloud Run on port 8080
+npm install
+cp .env.example .env.local        # fill in Supabase keys, CRON_SECRET, an LLM key
+# plain Postgres: DSQL_ENDPOINT=127.0.0.1 DB_USER=… DB_PASSWORD=… DB_NAME=postgres
+node scripts/check-env.mjs        # audits .env.local (missing vars, provider matrix, key sanity)
+npm run migrate                   # applies aws/migrations.sql (idempotent, hash-tracked)
+npm run dev                       # http://localhost:3001 (scripts/dev.mjs also ticks cron locally)
+npm run smoke                     # hits /api/health, /login, manifest, OpenAPI, two 401 routes
 ```
 
-Production URL: set `APP_URL` in `deploy/deploy.sh`, then update Supabase **Site URL** and **Redirect URLs** (`https://your-url/**`).
+`/api/health` is public; `/api/health?verbose=1` (owner/admin session or `Authorization: Bearer $CRON_SECRET`) returns the same environment report as `check-env`.
 
-Schedule automations in production:
+## Docker
 
 ```bash
-CRON=$(gcloud secrets versions access latest --secret=cron-secret --project=javis-prod)
-gcloud scheduler jobs create http javis-automations \
-  --schedule="* * * * *" \
-  --uri="https://javis-xtmerz2lha-uc.a.run.app/api/cron/automations" \
-  --http-method=GET \
-  --headers="Authorization=Bearer ${CRON}" \
-  --location=us-central1
+docker build -t kernelhub \
+  --build-arg NEXT_PUBLIC_SUPABASE_URL=… --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=… \
+  --build-arg NEXT_PUBLIC_APP_URL=https://app.example.com .
+docker run --rm -p 3001:3001 --env-file .env.production kernelhub
 ```
 
-Docker is only needed on your Mac to **build and push** the image. Once deployed, Cloud Run runs independently — quitting Docker does not affect the live site.
+`docker-compose.yml` runs app + Postgres 17 + a one-shot `migrate` service + a `cron` sidecar (`scripts/cron-tick.mjs`). `output: "standalone"` in `next.config.ts` is enabled only when `NEXT_OUTPUT=standalone` — the Dockerfile sets it; Vercel and `npm run dev` never should. Details: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+## Vercel
+
+Import the repo; `vercel.json` declares the every-minute cron for `/api/cron/agents` (Pro plan — Hobby crons run once a day) and `maxDuration` for import/PDF/export routes. Set the env vars from `.env.example` in the project settings; Vercel sends `Authorization: Bearer $CRON_SECRET` to cron routes automatically.
+
+## Environment
+
+Every variable is catalogued in `src/lib/env/vars.json` with its group, format and companion rules; `src/lib/env` (zod) and `scripts/check-env.mjs` (dependency-free) enforce the same rules, and a unit test fails when `vars.json` and `.env.example` drift.
+
+Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (JWT role must be `service_role`, or an `sb_secret_…` key), `DSQL_ENDPOINT`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`. Everything else degrades to a simulated provider (email → Settings → Outbox, payments → simulated, SMS → logged).
+
+## Testing
+
+```bash
+npm test                   # hermetic unit tests (vitest)
+npm run test:integration   # real route handlers against local Postgres (DB_INTEGRATION=1)
+scripts/integration-db.sh  # same, starting Homebrew Postgres if needed
+npm run typecheck && npm run lint
+```
+
+See [`docs/TESTING.md`](docs/TESTING.md). CI (`.github/workflows/ci.yml`) runs lint+typecheck, unit, integration (Postgres 17 service), standalone build, env drift check and a non-blocking `npm audit`.
 
 ---
 
-## Swapping Groq → Claude
+## Architecture overview
 
-1. `npm install @anthropic-ai/sdk`
-2. In `src/lib/llm.ts`, branch on `provider === "anthropic"`.
-3. Set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. No callers change — every route imports from `@/lib/llm`.
+```
+Browser ── Next.js App Router (src/app) ── middleware: Supabase session refresh
+             │  Server Components + Route Handlers
+             ├─ src/lib/auth/scope.ts   requireScope() → { userId, dataId, role, can() }
+             ├─ src/lib/dsql.ts         Postgres (Aurora DSQL IAM, or localhost password auth)
+             ├─ src/lib/events/bus.ts   emitEvent() → events table → webhooks + automations
+             ├─ src/lib/notifications   outbox → email / SMS / WhatsApp / push / in-app
+             ├─ src/lib/llm             Groq / Gemini router + credit metering
+             └─ /api/cron/agents        single scheduled tick drives every background job
+```
 
----
+**Tenancy.** Each organization has an `owner_user_id`; all module tables are keyed by `user_id` = that owner id (`scope.dataId`). `requireScope({ area, edit })` resolves the caller's membership and role (owner, admin, manager, member, viewer — `src/lib/auth/roles.ts`) and every data query filters on `scope.dataId`. Agency client workspaces are orgs with a synthetic owner id reachable only through membership. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Troubleshooting
+**Database constraints.** Aurora DSQL compatibility shapes the schema: no foreign keys, triggers or sequences; TEXT ids and JSON-as-TEXT; `CREATE INDEX ASYNC`; one statement per migration block. Plain Postgres runs the same SQL (the migration runner strips `ASYNC`).
 
-| Problem | Fix |
-|---|---|
-| **401 on API calls** | Sign in; check `NEXT_PUBLIC_SUPABASE_URL` and anon key in `.env.local` |
-| **OAuth/magic link 500 on Cloud Run** | Redeploy latest; ensure Supabase Redirect URLs include `https://your-url/**` |
-| **Redirect to `0.0.0.0:8080`** | Set `NEXT_PUBLIC_APP_URL` in Cloud Run env + Supabase Site URL |
-| **Signup email not arriving** | Configure SMTP in Supabase → Authentication → SMTP, or disable "Confirm email" |
-| **Pinecone errors on first upload** | Index auto-created in `src/lib/pinecone.ts`; check `PINECONE_API_KEY` and region |
-| **Automations not firing on time** | Local: `npm run dev` auto-starts cron. Prod: Cloud Scheduler → `/api/cron/automations` |
-| **Deploy fails on anon key** | Keep `NEXT_PUBLIC_SUPABASE_ANON_KEY` as a Secret Manager reference (see `deploy/deploy.sh`) |
-
----
+**Security posture.** Org-scoped authorization on every route, rate limits (memory or shared `rate_limits` table), CSP (report-only by default), signed webhooks, encrypted integration credentials (`CREDENTIAL_ENCRYPTION_KEY`, AES-256-GCM), SSRF-safe webhook URLs. Full write-up: [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Repo layout
 
 ```
-src/app/(app)/          Authed pages (chat, files, build, automations, …)
-src/app/api/            API route handlers
-src/lib/                Core logic (llm, pinecone, dsql, dynamodb, automations, …)
-src/lib/supabase/       Auth clients (browser, server, middleware, callback)
-aws/schema.sql          Full DSQL schema (new DB)
-aws/migrations.sql      Incremental migrations (existing DB)
-deploy/deploy.sh        One-command Cloud Run deploy
-scripts/                Dev server, automation cron, DB migrations
-LAUNCH_CHECKLIST.md     Production setup checklist
+src/app/(app)/        authenticated pages           src/lib/              domain libraries
+src/app/api/          route handlers (incl. /api/v1) src/lib/env/          env catalogue + validation
+src/components/ui/    shared UI kit                  src/__integration__/  DB-backed flow tests
+aws/migrations.sql    schema (hash-tracked)          scripts/              migrate, check-env, smoke, cron-tick, backup
+docs/                 operator + developer docs      Dockerfile, docker-compose.yml, vercel.json
 ```

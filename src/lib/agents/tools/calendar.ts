@@ -188,3 +188,61 @@ registerTool<CancelInputT>({
     }
   },
 });
+
+/* ═══ Phase 6: reschedule ═══ */
+import { emitEvent } from "@/lib/events/bus";
+import { enqueueNotification } from "@/lib/notifications/outbox";
+
+const RescheduleInput = z.object({
+  booking_id: z.string().min(1).max(80),
+  starts_at: z.string().min(10).max(40).describe("New ISO start; duration is preserved"),
+  notify: z.boolean().optional().describe("Email the customer (default true)"),
+});
+type RescheduleInputT = z.infer<typeof RescheduleInput>;
+
+registerTool<RescheduleInputT>({
+  name: "calendar.reschedule",
+  module: "calendar",
+  description: "Move an existing booking to a new start time (same duration). Checks the slot is free and notifies the customer.",
+  input: RescheduleInput,
+  parameters: {
+    type: "object",
+    properties: { booking_id: { type: "string" }, starts_at: { type: "string", description: "New ISO start" }, notify: { type: "boolean" } },
+    required: ["booking_id", "starts_at"],
+  },
+  scope: "write",
+  requiresApproval: (_i, ctx) => ctx.autonomy !== "auto",
+  preview: (i) => `Reschedule booking ${i.booking_id} to ${i.starts_at}`,
+  async run(ctx, input) {
+    try {
+      const existing = await getBooking(ctx.userId, input.booking_id);
+      if (!existing) return fail("Booking not found");
+      if (existing.status === "cancelled") return fail("That booking is cancelled; book a new slot instead.");
+      const start = new Date(input.starts_at);
+      if (Number.isNaN(start.getTime())) return fail("starts_at must be an ISO date");
+      const durationMs = new Date(existing.ends_at).getTime() - new Date(existing.starts_at).getTime();
+      const end = new Date(start.getTime() + Math.max(durationMs, 5 * 60_000));
+      const clash = await query<{ id: string }>(
+        `SELECT id FROM bookings WHERE user_id = $1 AND calendar_id = $2 AND id <> $3 AND status <> 'cancelled' AND starts_at < $5 AND ends_at > $4 LIMIT 1`,
+        [ctx.userId, existing.calendar_id, existing.id, start.toISOString(), end.toISOString()]
+      );
+      if (clash.length) return fail("That time overlaps another booking; call calendar.propose_slots for open times.");
+      await query(`UPDATE bookings SET starts_at = $3, ends_at = $4, updated_at = NOW() WHERE user_id = $1 AND id = $2`, [ctx.userId, existing.id, start.toISOString(), end.toISOString()]);
+      const cal = await query<{ timezone: string }>(`SELECT timezone FROM calendars WHERE id = $1`, [existing.calendar_id]);
+      const tz = cal[0]?.timezone ?? "UTC";
+      if (input.notify !== false && existing.email) {
+        await enqueueNotification(ctx.userId, {
+          channel: "email",
+          recipient: existing.email,
+          subject: `Rescheduled: your appointment is now ${describeInstant(start.toISOString(), tz)}`,
+          body: `Hi ${existing.name},\n\nYour appointment has been moved to ${describeInstant(start.toISOString(), tz)}.\n`,
+          data: { bookingId: existing.id, kind: "booking.rescheduled" },
+        }).catch((err) => console.error("[calendar.reschedule] notify failed", err));
+      }
+      await emitEvent(ctx.userId, { type: "booking.rescheduled", entity: "booking", entityId: existing.id, data: { name: existing.name, from: existing.starts_at, to: start.toISOString() } });
+      return { ok: true, data: { id: existing.id, startsAt: start.toISOString(), endsAt: end.toISOString(), local: describeInstant(start.toISOString(), tz) }, summary: `Moved ${existing.name}'s booking to ${describeInstant(start.toISOString(), tz)}` };
+    } catch (err) {
+      return fail(errMsg(err));
+    }
+  },
+});

@@ -11,6 +11,7 @@ import { Field } from "@/components/ui/field";
 import { SearchField } from "@/components/ui/search-field";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
 import { isAbortError, useAbortable, useDebouncedValue } from "@/components/ui/hooks";
+import { LoadMore } from "@/components/ui/load-more";
 import { PageContainer } from "@/components/page-container";
 import { cn } from "@/lib/utils";
 import { fmtDate } from "@/lib/money/format";
@@ -66,18 +67,28 @@ export default function RecordTypePage() {
   const [creating, setCreating] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const nextSignal = useAbortable();
 
+  // Board: every record (grouped client-side). Table: keyset pages of 50, newest first.
   const load = useCallback(async () => {
     if (!typeParam) return;
     const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const qs = search ? `?q=${encodeURIComponent(search)}` : "";
-      const r = await api<{ type: RecordType; records: RecordItem[]; counts: Record<string, number> }>(`/api/records/${encodeURIComponent(typeParam)}${qs}`, { signal });
+      const params = new URLSearchParams();
+      if (search) params.set("q", search);
+      if (view === "table") {
+        params.set("order", "created");
+        params.set("limit", "50");
+      }
+      const qs = params.size ? `?${params}` : "";
+      const r = await api<{ type: RecordType; records: RecordItem[]; counts: Record<string, number>; next_cursor: string | null }>(`/api/records/${encodeURIComponent(typeParam)}${qs}`, { signal });
       setType(r.type);
       setRecords(r.records);
+      setCursor(r.next_cursor ?? null);
       setCounts(r.counts);
       setMobileStage((s) => s || r.type.stages[0]?.key || "");
     } catch (e) {
@@ -88,10 +99,29 @@ export default function RecordTypePage() {
     } finally {
       if (!signal.aborted) setLoading(false);
     }
-  }, [typeParam, search, nextSignal]);
+  }, [typeParam, search, view, nextSignal]);
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore || !typeParam) return;
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams({ order: "created", limit: "50", cursor });
+      if (search) params.set("q", search);
+      const r = await api<{ records: RecordItem[]; next_cursor: string | null }>(`/api/records/${encodeURIComponent(typeParam)}?${params}`);
+      setRecords((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        return [...prev, ...r.records.filter((x) => !seen.has(x.id))];
+      });
+      setCursor(r.next_cursor ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load more records.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [cursor, loadingMore, typeParam, search]);
 
   // Remember the preferred view per type.
   useEffect(() => {
@@ -176,9 +206,13 @@ export default function RecordTypePage() {
       wide
       className="pb-24"
       eyebrow={
-        <Link href="/r" className={BACK_LINK}>
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> All records
-        </Link>
+        <>
+          <Link href="/r" className={BACK_LINK}>
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> All records
+          </Link>
+          {/* Grounds the copilot drawer in this record type (see src/lib/copilot/modules.ts). */}
+          {type ? <span hidden data-copilot-type={type.slug} /> : null}
+        </>
       }
       icon={<TypeIcon name={type?.icon} className="h-5 w-5" />}
       title={type?.name ?? (loading ? "Loading…" : "Records")}
@@ -291,7 +325,10 @@ export default function RecordTypePage() {
           </div>
         </>
       ) : (
-        <RecordTable type={type} records={records} busyId={busyId} onOpen={open} onMove={move} />
+        <>
+          <RecordTable type={type} records={records} busyId={busyId} onOpen={open} onMove={move} />
+          <LoadMore hasMore={Boolean(cursor)} loading={loadingMore} count={records.length} onMore={loadMore} noun="records" />
+        </>
       )}
 
       {creating && type && (

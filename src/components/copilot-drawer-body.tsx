@@ -31,7 +31,7 @@ interface Message {
   error?: boolean;
 }
 
-export const OPEN_COPILOT_EVENT = "javis:open-copilot";
+import { OPEN_COPILOT_EVENT } from "@/components/copilot-events";
 
 function moduleFromPath(pathname: string | null): CopilotModule {
   const p = pathname ?? "";
@@ -72,7 +72,7 @@ function nextId() {
   return `m${Date.now()}-${idCounter}`;
 }
 
-export function CopilotDrawer() {
+export default function CopilotDrawerBody() {
   const pathname = usePathname();
   const pageModule = useMemo(() => moduleFromPath(pathname), [pathname]);
   const recordId = useMemo(() => recordIdFromPath(pathname), [pathname]);

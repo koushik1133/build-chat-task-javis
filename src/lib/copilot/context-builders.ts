@@ -11,8 +11,8 @@ import type { BusinessContext } from "@/lib/strategy";
  * deployment degrades to "no data" rather than a failed request.
  */
 
-export const COPILOT_MODULES = ["crm", "leads", "production", "social", "strategy", "tasks", "ads", "agents", "general"] as const;
-export type CopilotModule = (typeof COPILOT_MODULES)[number];
+import { COPILOT_MODULES, type CopilotModule } from "./modules";
+export { COPILOT_MODULES, type CopilotModule };
 
 const MAX_CHARS = 2500;
 
@@ -232,6 +232,147 @@ async function generalContext(userId: string): Promise<string> {
   ].join("\n");
 }
 
+
+async function helpdeskContext(userId: string, ticketId?: string): Promise<string> {
+  const byStatus = await rows<{ status: string; n: string }>(`SELECT status, COUNT(*)::int AS n FROM tickets WHERE user_id = $1 GROUP BY status`, [userId]);
+  const breached = await count(`SELECT COUNT(*)::int AS n FROM tickets WHERE user_id = $1 AND status IN ('open','pending') AND (breached_first_response OR breached_resolution)`, [userId]);
+  const lines = [`## Helpdesk snapshot`, `- Tickets: ${byStatus.map((r) => `${r.status} ${r.n}`).join(", ") || "none"}; ${breached} active ticket(s) past an SLA target`];
+  const urgent = await rows(
+    `SELECT id, number, subject, status, priority, first_response_due_at, requester_email FROM tickets WHERE user_id = $1 AND status IN ('open','pending')
+     ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at ASC LIMIT 8`,
+    [userId]
+  );
+  for (const t of urgent) lines.push(`  - #${t.number} ${s(t.subject, 60)} — ${t.status}, ${t.priority}${t.first_response_due_at ? `, first response due ${String(t.first_response_due_at).slice(0, 16)}` : ""} [id ${t.id}]`);
+  if (ticketId) {
+    const t = await queryOne<Row>(`SELECT id, number, subject, status, priority, requester_name, requester_email, assigned_to, first_response_due_at, resolution_due_at, breached_first_response, breached_resolution, tags FROM tickets WHERE id = $1 AND user_id = $2`, [ticketId, userId]).catch(() => null);
+    if (t) {
+      lines.push(`- Focused ticket #${t.number} "${s(t.subject, 80)}": ${t.status}, ${t.priority}, requester ${s(t.requester_name, 40) || "-"} <${s(t.requester_email, 60)}>${t.assigned_to ? `, assigned to ${t.assigned_to}` : ", unassigned"}${t.breached_first_response || t.breached_resolution ? " — SLA BREACHED" : ""}`);
+      const msgs = await rows(`SELECT author_kind, is_internal, LEFT(body, 240) AS body, created_at FROM ticket_messages WHERE ticket_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 5`, [ticketId, userId]);
+      for (const m of msgs.reverse()) lines.push(`  - ${day(m.created_at)} ${m.author_kind}${m.is_internal ? " (internal)" : ""}: ${s(m.body, 240)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+async function knowledgeContext(userId: string): Promise<string> {
+  const byStatus = await rows<{ status: string; n: string }>(`SELECT status, COUNT(*)::int AS n FROM kb_articles WHERE user_id = $1 GROUP BY status`, [userId]);
+  const lines = [`## Knowledge base snapshot`, `- Articles: ${byStatus.map((r) => `${r.status} ${r.n}`).join(", ") || "none"}`];
+  const recent = await rows(`SELECT id, slug, title, status, category, views, updated_at FROM kb_articles WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 8`, [userId]);
+  for (const a of recent) lines.push(`  - ${s(a.title, 60)} (${a.status}${a.category ? `, ${a.category}` : ""}, ${a.views} views) [id ${a.id}]`);
+  return lines.join("\n");
+}
+
+async function inventoryContext(userId: string, productId?: string): Promise<string> {
+  const total = await count(`SELECT COUNT(*)::int AS n FROM products WHERE user_id = $1 AND deleted_at IS NULL`, [userId]);
+  const low = await rows(`SELECT id, name, sku, stock_on_hand, stock_reserved, reorder_point FROM products WHERE user_id = $1 AND deleted_at IS NULL AND track_stock AND (stock_on_hand - stock_reserved) <= reorder_point ORDER BY (stock_on_hand - stock_reserved) ASC LIMIT 8`, [userId]);
+  const out = await count(`SELECT COUNT(*)::int AS n FROM equipment_checkouts WHERE user_id = $1 AND returned_at IS NULL`, [userId]);
+  const overdue = await count(`SELECT COUNT(*)::int AS n FROM equipment_checkouts WHERE user_id = $1 AND returned_at IS NULL AND due_back_at < NOW()`, [userId]);
+  const lines = [`## Inventory snapshot`, `- ${total} products; ${low.length} at/below reorder point; ${out} equipment checkout(s) open, ${overdue} overdue`];
+  for (const p of low) lines.push(`  - LOW ${s(p.name, 50)}${p.sku ? ` (${p.sku})` : ""}: ${Number(p.stock_on_hand) - Number(p.stock_reserved)} available, reorder at ${p.reorder_point} [id ${p.id}]`);
+  if (productId) {
+    const p = await queryOne<Row>(`SELECT id, name, sku, kind, unit_price_minor AS price_minor, cost_minor, currency, stock_on_hand, stock_reserved, reorder_point, track_stock FROM products WHERE id = $1 AND user_id = $2`, [productId, userId]).catch(() => null);
+    if (p) lines.push(`- Focused product ${s(p.name, 60)} (${p.kind}): price ${p.price_minor} ${p.currency}, cost ${p.cost_minor ?? "-"}, ${p.track_stock ? `${p.stock_on_hand} on hand / ${p.stock_reserved} reserved` : "stock not tracked"} [id ${p.id}]`);
+  }
+  return lines.join("\n");
+}
+
+async function financeContext(userId: string): Promise<string> {
+  const exp = await queryOne<{ n: string; total: string }>(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount_minor + tax_minor),0)::bigint AS total FROM expenses WHERE user_id = $1 AND spent_at >= date_trunc('month', NOW())`, [userId]).catch(() => null);
+  const unbilled = await count(`SELECT COUNT(*)::int AS n FROM expenses WHERE user_id = $1 AND billable AND invoice_id IS NULL`, [userId]);
+  const running = await rows(`SELECT id, description, started_at, ref_kind, ref_id FROM time_entries WHERE user_id = $1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 5`, [userId]);
+  const cos = await rows<{ status: string; n: string }>(`SELECT status, COUNT(*)::int AS n FROM change_orders WHERE user_id = $1 GROUP BY status`, [userId]);
+  const lines = [
+    `## Finance snapshot`,
+    `- This month: ${exp?.n ?? 0} expense(s) totalling ${exp?.total ?? 0} minor units; ${unbilled} billable expense(s) not yet invoiced`,
+    `- Running timers: ${running.length}${running.length ? ` — ${running.map((r) => `${s(r.description, 40) || "(untitled)"} since ${String(r.started_at).slice(0, 16)} [id ${r.id}]`).join("; ")}` : ""}`,
+    `- Change orders: ${cos.map((r) => `${r.status} ${r.n}`).join(", ") || "none"}`,
+  ];
+  return lines.join("\n");
+}
+
+async function billingContext(userId: string): Promise<string> {
+  const q = await rows<{ status: string; n: string; total: string }>(`SELECT status, COUNT(*)::int AS n, COALESCE(SUM(total_minor),0)::bigint AS total FROM quotes WHERE user_id = $1 GROUP BY status`, [userId]);
+  const inv = await rows<{ status: string; n: string; total: string }>(`SELECT status, COUNT(*)::int AS n, COALESCE(SUM(total_minor),0)::bigint AS total FROM invoices WHERE user_id = $1 GROUP BY status`, [userId]);
+  const lines = [
+    `## Billing snapshot`,
+    `- Quotes: ${q.map((r) => `${r.status} ${r.n} (${r.total})`).join(", ") || "none"}`,
+    `- Invoices: ${inv.map((r) => `${r.status} ${r.n} (${r.total})`).join(", ") || "none"}`,
+  ];
+  const overdue = await rows(`SELECT id, number, total_minor, currency, due_at FROM invoices WHERE user_id = $1 AND status IN ('sent','overdue','partially_paid') AND due_at < NOW() ORDER BY due_at ASC LIMIT 6`, [userId]);
+  for (const r of overdue) lines.push(`  - OVERDUE ${r.number}: ${r.total_minor} ${r.currency}, due ${day(r.due_at)} [id ${r.id}]`);
+  return lines.join("\n");
+}
+
+async function calendarContext(userId: string): Promise<string> {
+  const upcoming = await rows(`SELECT id, name, starts_at, ends_at, status FROM bookings WHERE user_id = $1 AND status <> 'cancelled' AND starts_at >= NOW() ORDER BY starts_at ASC LIMIT 8`, [userId]);
+  const types = await rows(`SELECT id, slug, name, duration_minutes FROM booking_types WHERE user_id = $1 AND active = TRUE LIMIT 10`, [userId]);
+  const lines = [`## Calendar snapshot`, `- Booking types: ${types.map((t) => `${t.name} (${t.slug}, ${t.duration_minutes}m)`).join(", ") || "none"}`, `- Upcoming: ${upcoming.length}`];
+  for (const b of upcoming) lines.push(`  - ${String(b.starts_at).slice(0, 16)} ${s(b.name, 40)} (${b.status}) [id ${b.id}]`);
+  return lines.join("\n");
+}
+
+async function recordsContext(userId: string, typeSlug?: string | null, recordId?: string): Promise<string> {
+  const types = await rows(`SELECT id, slug, name FROM record_types WHERE user_id = $1 ORDER BY name LIMIT 20`, [userId]);
+  const lines = [`## Records snapshot`, `- Types: ${types.map((t) => `${t.name} (${t.slug})`).join(", ") || "none"}`];
+  const focus = typeSlug ? types.find((t) => t.slug === typeSlug || t.id === typeSlug) : undefined;
+  if (focus) {
+    const stages = await rows<{ stage: string; n: string }>(`SELECT stage, COUNT(*)::int AS n FROM records WHERE user_id = $1 AND type_id = $2 AND deleted_at IS NULL GROUP BY stage`, [userId, focus.id]);
+    lines.push(`- ${focus.name}: ${stages.map((r) => `${r.stage} ${r.n}`).join(", ") || "no records"}`);
+    const recent = await rows(`SELECT id, title, stage, updated_at FROM records WHERE user_id = $1 AND type_id = $2 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 8`, [userId, focus.id]);
+    for (const r of recent) lines.push(`  - ${s(r.title, 60)} — ${r.stage} [id ${r.id}]`);
+  }
+  if (recordId) {
+    const r = await queryOne<Row>(`SELECT id, title, stage, summary, data, due_at, amount_minor, currency FROM records WHERE id = $1 AND user_id = $2`, [recordId, userId]).catch(() => null);
+    if (r) lines.push(`- Focused record "${s(r.title, 80)}" (${r.stage})${r.amount_minor ? `, ${r.amount_minor} ${r.currency ?? ""}` : ""}${r.due_at ? `, due ${day(r.due_at)}` : ""}: ${s(r.summary ?? r.data, 400)}`);
+  }
+  return lines.join("\n");
+}
+
+async function reportsContext(userId: string): Promise<string> {
+  const paid = await queryOne<{ n: string; total: string }>(`SELECT COUNT(*)::int AS n, COALESCE(SUM(total_minor),0)::bigint AS total FROM invoices WHERE user_id = $1 AND status = 'paid' AND updated_at >= NOW() - INTERVAL '30 days'`, [userId]).catch(() => null);
+  const quotes = await count(`SELECT COUNT(*)::int AS n FROM quotes WHERE user_id = $1 AND status IN ('sent','draft')`, [userId]);
+  const tickets = await count(`SELECT COUNT(*)::int AS n FROM tickets WHERE user_id = $1 AND status IN ('open','pending')`, [userId]);
+  return [`## Reports snapshot (last 30 days)`, `- ${paid?.n ?? 0} paid invoice(s) totalling ${paid?.total ?? 0} minor units; ${quotes} open quote(s); ${tickets} open ticket(s)`, `- Use optimize.* and reports.job_costing for computed figures.`].join("\n");
+}
+
+async function marketplaceContext(userId: string): Promise<string> {
+  const installs = await rows(`SELECT listing_id, MAX(version) AS version, MAX(created_at) AS at FROM marketplace_installs WHERE user_id = $1 GROUP BY listing_id ORDER BY at DESC LIMIT 10`, [userId]);
+  const mine = await count(`SELECT COUNT(*)::int AS n FROM marketplace_listings WHERE user_id = $1`, [userId]);
+  return [`## Marketplace snapshot`, `- ${installs.length} installed listing(s)${installs.length ? `: ${installs.map((i) => `${i.listing_id} v${i.version}`).join(", ")}` : ""}; ${mine} published by this workspace`].join("\n");
+}
+
+async function voiceContext(userId: string, campaignId?: string): Promise<string> {
+  const camps = await rows(`SELECT id, name, status, timezone, window_start, window_end FROM voice_campaigns WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 8`, [userId]);
+  const dnc = await count(`SELECT COUNT(*)::int AS n FROM contact_optouts WHERE user_id = $1`, [userId]);
+  const lines = [`## Voice snapshot`, `- ${camps.length} campaign(s); ${dnc} number(s) on do-not-call`];
+  for (const c of camps) lines.push(`  - ${s(c.name, 50)} — ${c.status}, ${c.window_start}–${c.window_end} ${c.timezone} [id ${c.id}]`);
+  if (campaignId) {
+    const t = await rows<{ status: string; n: string }>(`SELECT status, COUNT(*)::int AS n FROM voice_campaign_targets WHERE campaign_id = $1 AND user_id = $2 GROUP BY status`, [campaignId, userId]);
+    lines.push(`- Focused campaign targets: ${t.map((r) => `${r.status} ${r.n}`).join(", ") || "none"}`);
+  }
+  return lines.join("\n");
+}
+
+async function settingsContext(userId: string): Promise<string> {
+  const [members, keys, webhooks, credits] = await Promise.all([
+    count(`SELECT COUNT(*)::int AS n FROM memberships m JOIN organizations o ON o.id = m.org_id WHERE o.owner_user_id = $1 AND m.status = 'active'`, [userId]),
+    count(`SELECT COUNT(*)::int AS n FROM api_keys WHERE user_id = $1 AND revoked_at IS NULL`, [userId]),
+    count(`SELECT COUNT(*)::int AS n FROM webhook_subscriptions WHERE user_id = $1 AND active`, [userId]),
+    queryOne<{ balance: string }>(`SELECT balance FROM ai_credit_accounts WHERE user_id = $1`, [userId]).catch(() => null),
+  ]);
+  return [`## Settings snapshot`, `- ${members} active member(s), ${keys} API key(s), ${webhooks} active webhook(s), credit balance ${credits?.balance ?? "n/a"}`].join("\n");
+}
+
+async function homeContext(userId: string): Promise<string> {
+  const base = await generalContext(userId);
+  const [overdueInv, breached, dueToday] = await Promise.all([
+    count(`SELECT COUNT(*)::int AS n FROM invoices WHERE user_id = $1 AND status IN ('sent','overdue','partially_paid') AND due_at < NOW()`, [userId]),
+    count(`SELECT COUNT(*)::int AS n FROM tickets WHERE user_id = $1 AND status IN ('open','pending') AND (breached_first_response OR breached_resolution)`, [userId]),
+    count(`SELECT COUNT(*)::int AS n FROM bookings WHERE user_id = $1 AND status <> 'cancelled' AND starts_at::date = CURRENT_DATE`, [userId]),
+  ]);
+  return `${base}\n- Needs you: ${overdueInv} overdue invoice(s), ${breached} SLA breach(es), ${dueToday} booking(s) today. Call home.summary for the full picture.`;
+}
+
 /** Business DNA block (empty string when onboarding is incomplete). */
 export async function buildDnaContext(userId: string): Promise<string> {
   const profile = await queryOne<Partial<BusinessContext>>(
@@ -245,16 +386,63 @@ export async function buildDnaContext(userId: string): Promise<string> {
  * System-prompt block for one module. Always includes the Business DNA
  * block when available; module data is capped at MAX_CHARS.
  */
-export async function buildModuleContext(userId: string, module: CopilotModule, recordId?: string): Promise<string> {
+export interface ModuleContextOptions {
+  /** Entity ids from the page, keyed by param name (ticket, product, campaign, record…). */
+  params?: Record<string, string>;
+  /** Record type slug when on /r/<type>. */
+  recordType?: string | null;
+}
+
+export async function buildModuleContext(userId: string, module: CopilotModule, recordId?: string, opts: ModuleContextOptions = {}): Promise<string> {
   const id = recordId?.trim() || undefined;
+  const p = opts.params ?? {};
   let body: string;
   try {
     switch (module) {
+      case "helpdesk":
+        body = await helpdeskContext(userId, p.ticket ?? id);
+        break;
+      case "knowledge":
+        body = await knowledgeContext(userId);
+        break;
+      case "inventory":
+        body = await inventoryContext(userId, p.product ?? id);
+        break;
+      case "finance":
+        body = await financeContext(userId);
+        break;
+      case "billing":
+        body = await billingContext(userId);
+        break;
+      case "calendar":
+        body = await calendarContext(userId);
+        break;
+      case "records":
+        body = await recordsContext(userId, opts.recordType, p.record ?? id);
+        break;
+      case "reports":
+        body = await reportsContext(userId);
+        break;
+      case "insights":
+        body = await reportsContext(userId);
+        break;
+      case "marketplace":
+        body = await marketplaceContext(userId);
+        break;
+      case "voice":
+        body = await voiceContext(userId, p.campaign ?? id);
+        break;
+      case "settings":
+        body = await settingsContext(userId);
+        break;
+      case "home":
+        body = await homeContext(userId);
+        break;
       case "crm":
-        body = await crmContext(userId, id);
+        body = await crmContext(userId, p.contact ?? p.id ?? id);
         break;
       case "leads":
-        body = await leadsContext(userId, id);
+        body = await leadsContext(userId, p.lead ?? p.id ?? id);
         break;
       case "production":
         body = await productionContext(userId, id);
@@ -272,7 +460,7 @@ export async function buildModuleContext(userId: string, module: CopilotModule, 
         body = await adsContext(userId);
         break;
       case "agents":
-        body = await agentsContext(userId, id);
+        body = await agentsContext(userId, p.agent ?? p.id ?? id);
         break;
       default:
         body = await generalContext(userId);

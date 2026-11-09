@@ -3,6 +3,7 @@ import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { CurrencySchema } from "@/lib/money/items";
 import { emitEvent } from "@/lib/events/bus";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /** Expenses: cash out, optionally tied to a job (ref_kind/ref_id) and billable to a client. */
 
@@ -101,6 +102,9 @@ export interface ListExpensesOpts {
   refId?: string | null;
   unbilledOnly?: boolean;
   limit?: number;
+  /** "spent" (default) or "created" (newest first, cursor-friendly). */
+  order?: "spent" | "created";
+  cursor?: Cursor | null;
 }
 
 export function parseRef(ref: string | null | undefined): { refKind: string; refId: string } | null {
@@ -127,8 +131,9 @@ export async function listExpenses(dataId: string, opts: ListExpensesOpts = {}):
     sql += ` AND ref_kind = $${params.length - 1} AND ref_id = $${params.length}`;
   }
   if (opts.unbilledOnly) sql += ` AND billable = TRUE AND invoice_id IS NULL`;
+  if (opts.order === "created") sql += keysetClause(opts.cursor, params);
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
-  sql += ` ORDER BY spent_at DESC, created_at DESC LIMIT $${params.length}`;
+  sql += opts.order === "created" ? ` ORDER BY ${keysetOrder()} LIMIT $${params.length}` : ` ORDER BY spent_at DESC, created_at DESC LIMIT $${params.length}`;
   return (await query<ExpenseRow>(sql, params)).map(toExpenseDTO);
 }
 

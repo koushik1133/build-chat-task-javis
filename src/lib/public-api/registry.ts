@@ -32,6 +32,8 @@ export interface RouteDef<Q extends ZodTypeAny = ZodTypeAny, P extends ZodTypeAn
   status?: 200 | 201;
   /** Emitted event types (documented on the operation). */
   emits?: readonly string[];
+  /** Agent/MCP tool names that perform the same operation (`x-kernelhub-tools`). */
+  tools?: readonly string[];
 }
 
 function def<Q extends ZodTypeAny, P extends ZodTypeAny, B extends ZodTypeAny>(d: RouteDef<Q, P, B>): RouteDef<Q, P, B> {
@@ -69,6 +71,14 @@ export const ROUTES = {
   getInvoice: def({ id: "getInvoice", method: "GET", path: "/invoices/{id}", summary: "Get an invoice", tag: "Invoices", scope: "read:billing", params: S.IdParams, response: S.Invoice }),
   sendInvoice: def({ id: "sendInvoice", method: "POST", path: "/invoices/{id}/send", summary: "Send an invoice by email", tag: "Invoices", scope: "write:billing", params: S.IdParams, body: S.SendBody, response: S.Invoice.extend({ share: S.SendResult }) }),
   recordPayment: def({ id: "recordInvoicePayment", method: "POST", path: "/invoices/{id}/payments", summary: "Record a payment", description: "Records an external/manual payment and recomputes the invoice status. Emits `invoice.paid` when settled.", tag: "Invoices", scope: "write:billing", params: S.IdParams, body: S.PaymentCreate, response: S.PaymentResult, status: 201, emits: ["invoice.paid"] }),
+
+  /* billing depth */
+  listTaxRates: def({ id: "listTaxRates", method: "GET", path: "/tax-rates", summary: "List tax rates", tag: "Invoices", scope: "read:billing", query: S.TaxRateListQuery, response: S.TaxRate, list: true }),
+  getTaxRate: def({ id: "getTaxRate", method: "GET", path: "/tax-rates/{id}", summary: "Get a tax rate", tag: "Invoices", scope: "read:billing", params: S.IdParams, response: S.TaxRate }),
+  listInvoiceSchedules: def({ id: "listInvoiceSchedules", method: "GET", path: "/invoice-schedules", summary: "List recurring invoice schedules", tag: "Invoices", scope: "read:billing", query: S.InvoiceScheduleListQuery, response: S.InvoiceSchedule, list: true, emits: ["invoice.scheduled_created"] }),
+  getInvoiceSchedule: def({ id: "getInvoiceSchedule", method: "GET", path: "/invoice-schedules/{id}", summary: "Get a recurring invoice schedule", tag: "Invoices", scope: "read:billing", params: S.IdParams, response: S.InvoiceSchedule }),
+  listCreditNotes: def({ id: "listCreditNotes", method: "GET", path: "/credit-notes", summary: "List credit notes", tag: "Invoices", scope: "read:billing", query: S.CreditNoteListQuery, response: S.CreditNote, list: true }),
+  getCreditNote: def({ id: "getCreditNote", method: "GET", path: "/credit-notes/{id}", summary: "Get a credit note", tag: "Invoices", scope: "read:billing", params: S.IdParams, response: S.CreditNote }),
 
   /* calendar */
   listBookings: def({ id: "listBookings", method: "GET", path: "/bookings", summary: "List bookings", tag: "Calendar", scope: "read:calendar", query: S.BookingListQuery, response: S.Booking, list: true }),
@@ -109,6 +119,103 @@ export const ROUTES = {
   deleteWebhook: def({ id: "deleteWebhook", method: "DELETE", path: "/webhooks/{id}", summary: "Unsubscribe", tag: "Webhooks", scope: "write:settings", params: S.IdParams, response: S.Deleted }),
   listWebhookEventTypes: def({ id: "listWebhookEventTypes", method: "GET", path: "/webhooks/event-types", summary: "Event type catalogue", description: "Every event type a subscription can receive, with a sample payload. No authentication required.", tag: "Webhooks", scope: null, response: S.WebhookEventTypeList }),
   sampleWebhook: def({ id: "getWebhookSample", method: "GET", path: "/webhooks/sample/{event}", summary: "Sample payload for an event type", description: "Use for Zapier 'perform list' so users can map fields before any real event fires.", tag: "Webhooks", scope: "read:settings", params: S.WebhookEventParams, response: S.WebhookSample }),
+
+  /* ── Phase 6 breadth ─────────────────────────────────────────────────── */
+
+  /* events (single) */
+  getEvent: def({ id: "getEvent", method: "GET", path: "/events/{id}", summary: "Get one event", tag: "Events", scope: "read:settings", params: S.IdParams, response: S.Event }),
+
+  /* expenses */
+  listExpenses: def({ id: "listExpenses", method: "GET", path: "/expenses", summary: "List expenses", tag: "Expenses", scope: "read:billing", query: S.ExpenseListQuery, response: S.Expense, list: true }),
+  createExpense: def({ id: "createExpense", method: "POST", path: "/expenses", summary: "Log an expense", tag: "Expenses", scope: "write:billing", body: S.ExpenseCreate, response: S.Expense, status: 201, emits: ["expense.created"], tools: ["expenses.log"] }),
+  getExpense: def({ id: "getExpense", method: "GET", path: "/expenses/{id}", summary: "Get an expense", tag: "Expenses", scope: "read:billing", params: S.IdParams, response: S.Expense }),
+  updateExpense: def({ id: "updateExpense", method: "PATCH", path: "/expenses/{id}", summary: "Update an expense", tag: "Expenses", scope: "write:billing", params: S.IdParams, body: S.ExpensePatch, response: S.Expense }),
+  deleteExpense: def({ id: "deleteExpense", method: "DELETE", path: "/expenses/{id}", summary: "Delete an expense", tag: "Expenses", scope: "write:billing", params: S.IdParams, response: S.Deleted }),
+
+  /* time entries */
+  listTimeEntries: def({ id: "listTimeEntries", method: "GET", path: "/time-entries", summary: "List time entries", tag: "Time", scope: "read:billing", query: S.TimeEntryListQuery, response: S.TimeEntry, list: true }),
+  createTimeEntry: def({ id: "createTimeEntry", method: "POST", path: "/time-entries", summary: "Log time", description: "Omit `ended_at`/`minutes` to start a running timer.", tag: "Time", scope: "write:billing", body: S.TimeEntryCreate, response: S.TimeEntry, status: 201, tools: ["time.log"] }),
+  getTimeEntry: def({ id: "getTimeEntry", method: "GET", path: "/time-entries/{id}", summary: "Get a time entry", tag: "Time", scope: "read:billing", params: S.IdParams, response: S.TimeEntry }),
+  startTimer: def({ id: "startTimer", method: "POST", path: "/time-entries/start", summary: "Start a timer", tag: "Time", scope: "write:billing", body: S.TimerStart, response: S.TimeEntry, status: 201, tools: ["time.log"] }),
+  stopTimer: def({ id: "stopTimer", method: "POST", path: "/time-entries/{id}/stop", summary: "Stop a running timer", tag: "Time", scope: "write:billing", params: S.IdParams, body: S.TimerStop, response: S.TimeEntry }),
+
+  /* equipment */
+  listEquipment: def({ id: "listEquipmentCheckouts", method: "GET", path: "/equipment", summary: "List equipment checkouts", tag: "Equipment", scope: "read:billing", query: S.EquipmentListQuery, response: S.EquipmentCheckout, list: true }),
+  checkoutEquipment: def({ id: "checkoutEquipment", method: "POST", path: "/equipment/checkout", summary: "Check equipment out", description: "Reserves stock for tracked products so it cannot be double-booked.", tag: "Equipment", scope: "write:billing", body: S.EquipmentCheckoutCreate, response: S.EquipmentCheckout, status: 201, tools: ["inventory.checkout"] }),
+  checkinEquipment: def({ id: "checkinEquipment", method: "POST", path: "/equipment/{id}/checkin", summary: "Check equipment back in", tag: "Equipment", scope: "write:billing", params: S.IdParams, response: S.EquipmentCheckout, tools: ["inventory.checkin"] }),
+
+  /* change orders */
+  listChangeOrders: def({ id: "listChangeOrders", method: "GET", path: "/change-orders", summary: "List change orders", tag: "Change orders", scope: "read:billing", query: S.ChangeOrderListQuery, response: S.ChangeOrder, list: true }),
+  createChangeOrder: def({ id: "createChangeOrder", method: "POST", path: "/change-orders", summary: "Create a change order", tag: "Change orders", scope: "write:billing", body: S.ChangeOrderCreate, response: S.ChangeOrder, status: 201, tools: ["finance.create_change_order"] }),
+  getChangeOrder: def({ id: "getChangeOrder", method: "GET", path: "/change-orders/{id}", summary: "Get a change order", tag: "Change orders", scope: "read:billing", params: S.IdParams, response: S.ChangeOrder }),
+  setChangeOrderStatus: def({ id: "setChangeOrderStatus", method: "POST", path: "/change-orders/{id}/status", summary: "Move a change order (sent, accepted, rejected)", description: "Accepting bills the items onto the linked draft invoice or creates one.", tag: "Change orders", scope: "write:billing", params: S.IdParams, body: S.ChangeOrderStatus, response: S.ChangeOrderStatusResult }),
+
+  /* sla policies */
+  listSlaPolicies: def({ id: "listSlaPolicies", method: "GET", path: "/sla-policies", summary: "List SLA policies", tag: "Tickets", scope: "read:helpdesk", response: S.SlaPolicy, list: true }),
+  createSlaPolicy: def({ id: "createSlaPolicy", method: "POST", path: "/sla-policies", summary: "Create an SLA policy", tag: "Tickets", scope: "write:helpdesk", body: S.SlaPolicyCreate, response: S.SlaPolicy, status: 201 }),
+  getSlaPolicy: def({ id: "getSlaPolicy", method: "GET", path: "/sla-policies/{id}", summary: "Get an SLA policy", tag: "Tickets", scope: "read:helpdesk", params: S.IdParams, response: S.SlaPolicy }),
+  updateSlaPolicy: def({ id: "updateSlaPolicy", method: "PATCH", path: "/sla-policies/{id}", summary: "Update an SLA policy", tag: "Tickets", scope: "write:helpdesk", params: S.IdParams, body: S.SlaPolicyPatch, response: S.SlaPolicy }),
+
+  /* knowledge base */
+  listKbArticles: def({ id: "listKbArticles", method: "GET", path: "/kb/articles", summary: "List knowledge-base articles", tag: "Knowledge", scope: "read:knowledge", query: S.KbArticleListQuery, response: S.KbArticle, list: true }),
+  createKbArticle: def({ id: "createKbArticle", method: "POST", path: "/kb/articles", summary: "Create an article", tag: "Knowledge", scope: "write:knowledge", body: S.KbArticleCreate, response: S.KbArticle, status: 201, tools: ["kb.create_article"] }),
+  getKbArticle: def({ id: "getKbArticle", method: "GET", path: "/kb/articles/{id}", summary: "Get an article", tag: "Knowledge", scope: "read:knowledge", params: S.IdParams, response: S.KbArticle }),
+  updateKbArticle: def({ id: "updateKbArticle", method: "PATCH", path: "/kb/articles/{id}", summary: "Update an article", tag: "Knowledge", scope: "write:knowledge", params: S.IdParams, body: S.KbArticlePatch, response: S.KbArticle }),
+  publishKbArticle: def({ id: "publishKbArticle", method: "POST", path: "/kb/articles/{id}/publish", summary: "Publish an article", description: "Sets status=published and indexes it for search.", tag: "Knowledge", scope: "write:knowledge", params: S.IdParams, response: S.KbArticle, tools: ["kb.publish_article"] }),
+  searchKb: def({ id: "searchKb", method: "GET", path: "/kb/search", summary: "Search articles", description: "Semantic when a vector index is configured; keyword otherwise.", tag: "Knowledge", scope: "read:knowledge", query: S.KbSearchQuery, response: S.KbHit, list: true, tools: ["kb.search"] }),
+
+  /* record types (write) */
+  createRecordType: def({ id: "createRecordType", method: "POST", path: "/record-types", summary: "Create a record type", tag: "Records", scope: "write:crm", body: S.RecordTypeCreate, response: S.RecordType, status: 201 }),
+  updateRecordType: def({ id: "updateRecordType", method: "PATCH", path: "/record-types/{type}", summary: "Update a record type", tag: "Records", scope: "write:crm", params: S.RecordTypeParams, body: S.RecordTypePatch, response: S.RecordType }),
+
+  /* marketplace */
+  listListings: def({ id: "listMarketplaceListings", method: "GET", path: "/marketplace", summary: "Browse the marketplace", tag: "Marketplace", scope: "read:agents", query: S.ListingListQuery, response: S.Listing, list: true, tools: ["marketplace.search"] }),
+  getListing: def({ id: "getMarketplaceListing", method: "GET", path: "/marketplace/{id}", summary: "Get a listing with its definition", tag: "Marketplace", scope: "read:agents", params: S.ListingParams, response: S.ListingDetail }),
+  installListing: def({ id: "installMarketplaceListing", method: "POST", path: "/marketplace/{id}/install", summary: "Install a listing", description: "Idempotent per listing version.", tag: "Marketplace", scope: "write:agents", params: S.ListingParams, response: S.InstallResult, status: 201, tools: ["marketplace.install"] }),
+
+  /* credits */
+  creditBalance: def({ id: "getCreditBalance", method: "GET", path: "/credits/balance", summary: "Credit balance", tag: "Credits", scope: "read:billing", response: S.CreditBalance, tools: ["credits.balance"] }),
+  creditLedger: def({ id: "listCreditLedger", method: "GET", path: "/credits/ledger", summary: "Credit ledger", tag: "Credits", scope: "read:billing", query: S.ListQuery, response: S.LedgerEntry, list: true }),
+
+  /* privacy */
+  listConsents: def({ id: "getConsents", method: "GET", path: "/privacy/consents", summary: "Consent state for a subject", tag: "Privacy", scope: "read:crm", query: S.ConsentListQuery, response: S.ConsentState, tools: ["privacy.consent_status"] }),
+  recordConsent: def({ id: "recordConsent", method: "POST", path: "/privacy/consents", summary: "Record a consent grant", tag: "Privacy", scope: "write:crm", body: S.ConsentWrite, response: S.ConsentRecord, status: 201 }),
+  withdrawConsent: def({ id: "withdrawConsent", method: "POST", path: "/privacy/consents/withdraw", summary: "Withdraw consent", tag: "Privacy", scope: "write:crm", body: S.ConsentWrite, response: S.ConsentRecord, status: 201 }),
+  listDsr: def({ id: "listDataSubjectRequests", method: "GET", path: "/privacy/dsr", summary: "List data-subject requests", tag: "Privacy", scope: "read:settings", query: S.DsrListQuery, response: S.DsrRequest, list: true }),
+  openDsr: def({ id: "openDataSubjectRequest", method: "POST", path: "/privacy/dsr", summary: "Open a data-subject request", description: "Opens in `received`; verification is emailed to the subject.", tag: "Privacy", scope: "write:settings", body: S.DsrOpen, response: S.DsrRequest, status: 201, tools: ["privacy.open_request"] }),
+
+  /* voice */
+  listVoiceCampaigns: def({ id: "listVoiceCampaigns", method: "GET", path: "/voice/campaigns", summary: "List voice campaigns", tag: "Voice", scope: "read:messaging", response: S.VoiceCampaignWithStats, list: true, tools: ["voice.list_campaigns"] }),
+  createVoiceCampaign: def({ id: "createVoiceCampaign", method: "POST", path: "/voice/campaigns", summary: "Create a voice campaign (draft)", tag: "Voice", scope: "write:messaging", body: S.VoiceCampaignCreate, response: S.VoiceCampaign, status: 201 }),
+  getVoiceCampaign: def({ id: "getVoiceCampaign", method: "GET", path: "/voice/campaigns/{id}", summary: "Get a voice campaign", tag: "Voice", scope: "read:messaging", params: S.IdParams, response: S.VoiceCampaignWithStats, tools: ["voice.campaign_status"] }),
+  startVoiceCampaign: def({ id: "startVoiceCampaign", method: "POST", path: "/voice/campaigns/{id}/start", summary: "Start (or resume) dialling", tag: "Voice", scope: "write:messaging", params: S.IdParams, response: S.VoiceCampaign, tools: ["voice.start_campaign"] }),
+  pauseVoiceCampaign: def({ id: "pauseVoiceCampaign", method: "POST", path: "/voice/campaigns/{id}/pause", summary: "Pause dialling", tag: "Voice", scope: "write:messaging", params: S.IdParams, response: S.VoiceCampaign, tools: ["voice.pause_campaign"] }),
+  listVoiceTargets: def({ id: "listVoiceTargets", method: "GET", path: "/voice/campaigns/{id}/targets", summary: "List campaign targets", tag: "Voice", scope: "read:messaging", params: S.IdParams, response: S.VoiceTarget, list: true }),
+  addVoiceTargets: def({ id: "addVoiceTargets", method: "POST", path: "/voice/campaigns/{id}/targets", summary: "Add targets from the CRM or ad-hoc numbers", description: "Do-not-call entries and (by default) contacts without voice consent are skipped.", tag: "Voice", scope: "write:messaging", params: S.IdParams, body: S.VoiceTargetsAdd, response: S.VoiceTargetsAddResult, status: 201 }),
+
+  /* mail */
+  listMailAccounts: def({ id: "listMailAccounts", method: "GET", path: "/mail/accounts", summary: "List connected mailboxes", tag: "Mail", scope: "read:messaging", response: S.MailAccount, list: true }),
+
+  /* accounting */
+  listAccountingConnections: def({ id: "listAccountingConnections", method: "GET", path: "/accounting/connections", summary: "List accounting connections", tag: "Accounting", scope: "read:billing", response: S.AccountingConnection, list: true, tools: ["accounting.sync_status"] }),
+  pushAccounting: def({ id: "pushToAccounting", method: "POST", path: "/accounting/push", summary: "Push an entity to accounting", tag: "Accounting", scope: "write:billing", body: S.AccountingPush, response: S.AccountingPushOutcome, list: true, tools: ["accounting.push_invoice", "accounting.push"] }),
+  listAccountingLinks: def({ id: "listAccountingLinks", method: "GET", path: "/accounting/links", summary: "Entity ↔ remote id links", tag: "Accounting", scope: "read:billing", query: S.AccountingLinkQuery, response: S.AccountingLink, list: true }),
+
+  /* optimize */
+  optimizeCashflow: def({ id: "optimizeCashflow", method: "GET", path: "/optimize/cashflow", summary: "Cashflow forecast", tag: "Optimize", scope: "read:reports", query: S.CashflowQuery, response: S.OptimizeResult, tools: ["optimize.cashflow"] }),
+  optimizeCapacity: def({ id: "optimizeCapacity", method: "GET", path: "/optimize/capacity", summary: "Capacity plan", tag: "Optimize", scope: "read:reports", query: S.CapacityQuery, response: S.OptimizeResult, tools: ["optimize.capacity"] }),
+  optimizePricing: def({ id: "optimizePricing", method: "POST", path: "/optimize/pricing", summary: "Pricing suggestion for a set of line items", tag: "Optimize", scope: "write:reports", body: S.PricingBody, response: S.OptimizeResult, tools: ["optimize.pricing"] }),
+
+  /* agents */
+  listAgents: def({ id: "listAgents", method: "GET", path: "/agents", summary: "List agents", tag: "Agents", scope: "read:agents", response: S.Agent, list: true, tools: ["agents.list"] }),
+  getAgent: def({ id: "getAgent", method: "GET", path: "/agents/{id}", summary: "Get an agent", tag: "Agents", scope: "read:agents", params: S.IdParams, response: S.Agent }),
+  triggerAgentRun: def({ id: "triggerAgentRun", method: "POST", path: "/agents/{id}/runs", summary: "Queue a run", tag: "Agents", scope: "write:agents", params: S.IdParams, body: S.AgentRunCreate, response: S.AgentRunQueued, status: 201, tools: ["agents.run_agent"] }),
+  listAgentRuns: def({ id: "listAgentRuns", method: "GET", path: "/agents/runs", summary: "List runs", tag: "Agents", scope: "read:agents", query: S.AgentRunListQuery, response: S.AgentRun, list: true }),
+  getAgentRun: def({ id: "getAgentRun", method: "GET", path: "/agents/runs/{id}", summary: "Get a run", tag: "Agents", scope: "read:agents", params: S.IdParams, response: S.AgentRun }),
+
+  /* approvals */
+  listApprovals: def({ id: "listApprovals", method: "GET", path: "/approvals", summary: "List approvals", tag: "Agents", scope: "read:agents", query: S.ApprovalListQuery, response: S.Approval, list: true }),
+  decideApproval: def({ id: "decideApproval", method: "POST", path: "/approvals/{id}/decide", summary: "Approve or reject", description: "Resumes the agent run, or executes a copilot/MCP action inline.", tag: "Agents", scope: "write:agents", params: S.IdParams, body: S.ApprovalDecide, response: S.ApprovalDecided }),
 } as const;
 
 export type RouteId = keyof typeof ROUTES;
@@ -120,11 +227,24 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Contacts", description: "CRM contacts." },
   { name: "Tasks", description: "Simple to-dos." },
   { name: "Quotes", description: "Quotes with versioned line items." },
-  { name: "Invoices", description: "Invoices and payments." },
+  { name: "Invoices", description: "Invoices, payments, tax rates, recurring schedules and credit notes." },
   { name: "Calendar", description: "Bookings, booking types and availability." },
   { name: "Tickets", description: "Helpdesk tickets and replies." },
   { name: "Records", description: "Configurable record types (pipelines, cases, jobs…)." },
   { name: "Products", description: "Pricebook and inventory." },
   { name: "Events", description: "Event log for polling integrations." },
   { name: "Webhooks", description: "Outbound webhook subscriptions (REST hooks)." },
+  { name: "Expenses", description: "Cash out, optionally tied to a job." },
+  { name: "Time", description: "Time entries and running timers." },
+  { name: "Equipment", description: "Equipment checkouts against the pricebook." },
+  { name: "Change orders", description: "Priced scope changes against quotes and invoices." },
+  { name: "Knowledge", description: "Knowledge-base articles and search." },
+  { name: "Marketplace", description: "Installable agents, playbooks, automations and record packs." },
+  { name: "Credits", description: "AI credit balance and ledger." },
+  { name: "Privacy", description: "Consent ledger and data-subject requests." },
+  { name: "Voice", description: "Outbound voice campaigns." },
+  { name: "Mail", description: "Connected mailboxes." },
+  { name: "Accounting", description: "Accounting connections and sync." },
+  { name: "Optimize", description: "Cashflow, capacity and pricing models." },
+  { name: "Agents", description: "Agents, runs and approvals." },
 ];

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { countUnreadInApp, listOutbox, markInAppRead, parseOutboxData, type OutboxStatus } from "@/lib/notifications/outbox";
 import { channelStatus, isNotificationChannel } from "@/lib/notifications/status";
+import { normaliseCursor, page, parseListParams } from "@/lib/public-api/pagination";
 
 export const runtime = "nodejs";
 
@@ -10,7 +11,7 @@ const STATUSES: readonly OutboxStatus[] = ["queued", "sent", "simulated", "faile
 /**
  * GET /api/notifications/outbox
  *   ?unread=1                → unread in-app rows for the bell (any member)
- *   ?channel=&status=&limit= → full outbox for the dev view (settings area)
+ *   ?channel=&status=&limit=&cursor= → full outbox for the dev view (settings area), keyset-paginated newest first
  * PATCH { ids: string[] } | { all: true } → mark in-app rows read (any member)
  */
 export async function GET(req: Request) {
@@ -36,14 +37,18 @@ export async function GET(req: Request) {
 
     const channelParam = url.searchParams.get("channel");
     const statusParam = url.searchParams.get("status");
-    const limit = Number(url.searchParams.get("limit") ?? "100");
-    const rows = await listOutbox(scope.dataId, {
+    const list = parseListParams(url, { limit: 100 });
+    if (list.badCursor) return NextResponse.json({ error: "invalid cursor" }, { status: 400 });
+    const all = await listOutbox(scope.dataId, {
       channel: isNotificationChannel(channelParam) ? channelParam : null,
       status: STATUSES.includes(statusParam as OutboxStatus) ? (statusParam as OutboxStatus) : null,
-      limit: Number.isFinite(limit) ? limit : 100,
+      cursor: list.cursor,
+      limit: list.limit + 1,
     });
+    const pg = page(all, list.limit, (r) => normaliseCursor({ created_at: r.created_at, id: r.id }));
     return NextResponse.json({
-      rows: rows.map((r) => ({ ...r, data: parseOutboxData(r) })),
+      rows: pg.data.map((r) => ({ ...r, data: parseOutboxData(r) })),
+      next_cursor: pg.next_cursor,
       channels: channelStatus(),
     });
   } catch (err) {

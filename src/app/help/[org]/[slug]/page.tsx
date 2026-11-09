@@ -3,10 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Markdown } from "@/components/markdown";
+import { ArticleViewBeacon } from "@/components/help/view-beacon";
 import { getHelpCenterOrg, getPublicArticle } from "@/lib/kb/articles";
 
-// Rendering mode: dynamic (per-org data; view counter).
-export const dynamic = "force-dynamic";
+// Rendering mode: ISR — public articles change rarely, so the HTML is cached
+// for 60 s per (org, slug) and regenerated in the background. View counting
+// moved to a client beacon (POST /api/help/view) so a cached page still counts.
+export const revalidate = 60;
 
 type Props = { params: Promise<{ org: string; slug: string }> };
 
@@ -27,7 +30,7 @@ export default async function HelpArticlePage({ params }: Props) {
   const { org: orgSlug, slug } = await params;
   const org = await getHelpCenterOrg(orgSlug);
   if (!org) notFound();
-  const article = await getPublicArticle(org.dataId, slug);
+  const article = await getPublicArticle(org.dataId, slug, { countView: false });
   if (!article) notFound();
 
   const updated = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(article.published_at ?? article.updated_at));
@@ -51,6 +54,7 @@ export default async function HelpArticlePage({ params }: Props) {
         )}
       </article>
       <footer className="mt-10 text-center text-[11px] text-muted-foreground">{org.name} help center</footer>
+      <ArticleViewBeacon org={org.slug} slug={slug} />
     </div>
   );
 }

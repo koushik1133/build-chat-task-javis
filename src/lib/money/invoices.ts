@@ -6,13 +6,17 @@ import { enqueueNotification } from "@/lib/notifications/outbox";
 import { emitEvent } from "@/lib/events/bus";
 import { getProvider } from "@/lib/payments";
 import type { PaymentEvent } from "@/lib/payments/types";
-import { computeTotals, formatMoney, parseItems, type LineItem } from "./items";
+import { formatMoney, parseItems, type LineItem } from "./items";
+import { resolveDocumentTotals } from "./tax-rates";
+import { getBillingSettings } from "./settings";
+import { parseBreakdown, type TaxBreakdownRow } from "./tax";
 import { businessName, getQuote } from "./quotes";
 import { consumeForInvoice } from "@/lib/inventory/stock";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 export { computeTotals } from "./items";
 export type { LineItem } from "./items";
+export type { TaxBreakdownRow } from "./tax";
 
 export type InvoiceStatus = "draft" | "sent" | "partially_paid" | "paid" | "void" | "overdue";
 
@@ -35,6 +39,11 @@ export interface InvoiceRow {
   updated_at: string;
   sent_at: string | null;
   paid_at: string | null;
+  tax_breakdown?: string | null;
+  terms_days?: number | string | null;
+  reminder_count?: number | string | null;
+  last_reminder_at?: string | null;
+  schedule_id?: string | null;
 }
 
 export interface InvoiceDTO {
@@ -51,7 +60,12 @@ export interface InvoiceDTO {
   total_minor: number;
   paid_minor: number;
   due_at: string | null;
+  terms_days: number | null;
+  reminder_count: number;
+  last_reminder_at: string | null;
+  schedule_id: string | null;
   items: LineItem[];
+  tax_breakdown: TaxBreakdownRow[];
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -68,6 +82,9 @@ export interface PaymentRow {
   currency: string;
   status: string;
   created_at: string;
+  refunded_minor?: string | number | null;
+  refunded_at?: string | null;
+  refund_ref?: string | null;
 }
 
 type JoinedRow = InvoiceRow & { contact_name: string | null; contact_email: string | null };
@@ -91,7 +108,12 @@ function toDTO(r: JoinedRow): InvoiceDTO {
     total_minor: Number(r.total_minor),
     paid_minor: Number(r.paid_minor),
     due_at: r.due_at,
+    terms_days: r.terms_days === null || r.terms_days === undefined ? null : Number(r.terms_days),
+    reminder_count: Number(r.reminder_count ?? 0),
+    last_reminder_at: r.last_reminder_at ?? null,
+    schedule_id: r.schedule_id ?? null,
     items: parseItems(r.items),
+    tax_breakdown: parseBreakdown(r.tax_breakdown),
     notes: r.notes,
     created_at: r.created_at,
     updated_at: r.updated_at,
@@ -125,7 +147,7 @@ export async function getInvoiceById(id: string): Promise<InvoiceDTO | null> {
 
 export async function listPayments(invoiceId: string): Promise<PaymentRow[]> {
   return query<PaymentRow>(
-    `SELECT id, invoice_id, provider, provider_ref, amount_minor, currency, status, created_at
+    `SELECT id, invoice_id, provider, provider_ref, amount_minor, currency, status, created_at, refunded_minor, refunded_at, refund_ref
        FROM invoice_payments WHERE invoice_id = $1 ORDER BY created_at ASC`,
     [invoiceId]
   );
@@ -137,7 +159,11 @@ export interface CreateInvoiceInput {
   currency?: string;
   items: LineItem[];
   due_at?: string | null;
+  /** Payment terms in days; `due_at` is derived from the send date when not given explicitly. */
+  terms_days?: number | null;
   notes?: string | null;
+  /** Recurring schedule that produced this invoice. */
+  schedule_id?: string | null;
 }
 
 export async function createInvoice(dataId: string, input: CreateInvoiceInput): Promise<InvoiceDTO> {
@@ -146,16 +172,18 @@ export async function createInvoice(dataId: string, input: CreateInvoiceInput): 
     if (!c) throw new Error("Contact not found");
   }
   const id = randomUUID();
-  const number = await nextDocNumber(dataId, "invoice");
-  const totals = computeTotals(input.items);
+  const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, input.items)]);
+  const number = await nextDocNumber(dataId, "invoice", settings.invoice_prefix);
+  const terms = input.terms_days ?? (input.due_at ? null : settings.default_terms_days);
   await query(
     `INSERT INTO invoices (id, user_id, contact_id, quote_id, number, status, currency, subtotal_minor, tax_minor, total_minor,
-       paid_minor, due_at, items, notes)
-     VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, 0, $10, $11, $12)`,
+       paid_minor, due_at, items, notes, tax_breakdown, terms_days, reminder_count, schedule_id)
+     VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, 0, $10, $11, $12, $13, $14, 0, $15)`,
     [
       id, dataId, input.contact_id ?? null, input.quote_id ?? null, number, (input.currency ?? "USD").toUpperCase(),
       totals.subtotal_minor, totals.tax_minor, totals.total_minor,
       input.due_at ?? null, JSON.stringify(input.items), input.notes ?? null,
+      JSON.stringify(totals.breakdown), terms, input.schedule_id ?? null,
     ]
   );
   const inv = await getInvoice(dataId, id);
@@ -190,6 +218,7 @@ export interface UpdateInvoiceInput {
   currency?: string;
   items?: LineItem[];
   due_at?: string | null;
+  terms_days?: number | null;
   notes?: string | null;
 }
 
@@ -208,13 +237,15 @@ export async function updateInvoice(dataId: string, id: string, input: UpdateInv
   if (input.contact_id !== undefined) push("contact_id", input.contact_id);
   if (input.currency !== undefined) push("currency", input.currency.toUpperCase());
   if (input.due_at !== undefined) push("due_at", input.due_at);
+  if (input.terms_days !== undefined) push("terms_days", input.terms_days);
   if (input.notes !== undefined) push("notes", input.notes);
   if (input.items) {
-    const t = computeTotals(input.items);
+    const t = await resolveDocumentTotals(dataId, input.items);
     push("items", JSON.stringify(input.items));
     push("subtotal_minor", t.subtotal_minor);
     push("tax_minor", t.tax_minor);
     push("total_minor", t.total_minor);
+    push("tax_breakdown", JSON.stringify(t.breakdown));
   }
   await query(`UPDATE invoices SET ${sets.join(", ")} WHERE id = $1 AND user_id = $2`, params);
   await recomputeInvoiceStatus(id);
@@ -240,7 +271,7 @@ export async function recomputeInvoiceStatus(id: string): Promise<InvoiceStatus 
     );
     if (!row) return null;
     const sum = await queryOne<{ paid: string | null }>(
-      `SELECT SUM(amount_minor) AS paid FROM invoice_payments WHERE invoice_id = $1 AND status = 'succeeded'`,
+      `SELECT SUM(amount_minor - COALESCE(refunded_minor, 0)) AS paid FROM invoice_payments WHERE invoice_id = $1 AND status = 'succeeded'`,
       [id]
     );
     const paid = Number(sum?.paid ?? 0);
@@ -280,10 +311,13 @@ export async function sendInvoice(
   const to = (opts.to ?? inv.contact_email ?? "").trim();
   if (!to) throw new Error("No recipient email: set one on the contact or pass `to`");
 
-  const link = await issueShareToken(dataId, "invoice", id, 90);
+  const link = await issueShareToken(dataId, "invoice", id, 90, { recipient: to });
   const from = await businessName(dataId);
+  // due_at = sent_at + terms_days when the invoice carries terms and no explicit due date yet.
   await query(
-    `UPDATE invoices SET status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END, sent_at = COALESCE(sent_at, NOW()), updated_at = NOW()
+    `UPDATE invoices SET status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END, sent_at = COALESCE(sent_at, NOW()),
+            due_at = COALESCE(due_at, CASE WHEN terms_days IS NOT NULL THEN COALESCE(sent_at, NOW()) + make_interval(days => terms_days) END),
+            updated_at = NOW()
       WHERE id = $1 AND user_id = $2`,
     [id, dataId]
   );

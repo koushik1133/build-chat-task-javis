@@ -2,7 +2,13 @@ import { query, queryOne } from "@/lib/dsql";
 import { getBranding } from "@/lib/branding";
 import { businessName, type QuoteDTO } from "@/lib/money/quotes";
 import type { InvoiceDTO } from "@/lib/money/invoices";
-import { documentHash, renderInvoicePdf, renderQuotePdf, type SignatureStamp } from "./quote-document";
+import { documentHash, renderInvoicePdf, renderQuotePdf, type DocParties, type SignatureStamp } from "./quote-document";
+import { renderCreditNotePdf, renderStatementPdf } from "./billing-documents";
+import { getBillingSettings } from "@/lib/money/settings";
+import { listTaxRates } from "@/lib/money/tax-rates";
+import { rateLabel } from "@/lib/money/tax";
+import type { CreditNoteDTO } from "@/lib/money/credit-notes";
+import type { Statement } from "@/lib/money/statements";
 
 /**
  * Server-side glue between the money tables and the pure PDF renderers:
@@ -65,6 +71,26 @@ async function docContext(dataId: string) {
   return { branding, timezone, business };
 }
 
+/** Issuer tax id, the contact's tax number / billing address and labels for catalogue tax rates. */
+export async function docParties(dataId: string, contactId: string | null | undefined): Promise<DocParties> {
+  const [settings, rates, contact] = await Promise.all([
+    getBillingSettings(dataId).catch(() => null),
+    listTaxRates(dataId, { includeInactive: true }).catch(() => []),
+    contactId
+      ? queryOne<{ tax_number: string | null; billing_address: string | null }>(`SELECT tax_number, billing_address FROM crm_contacts WHERE id = $1 AND user_id = $2`, [contactId, dataId]).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const rate_labels: Record<string, string> = {};
+  for (const r of rates) rate_labels[r.id] = rateLabel(r);
+  return {
+    issuer_tax_label: settings?.tax_id_label ?? null,
+    issuer_tax_number: settings?.tax_number ?? null,
+    contact_tax_number: contact?.tax_number ?? null,
+    contact_billing_address: contact?.billing_address ?? null,
+    rate_labels,
+  };
+}
+
 function toStamp(a: AcceptanceRow, unsignedHash: string): SignatureStamp {
   return {
     name: a.accepted_name ?? "",
@@ -88,23 +114,37 @@ export interface BuiltPdf {
 
 /** Quote PDF for its owner org; stamped when an acceptance exists. */
 export async function buildQuotePdf(dataId: string, quote: QuoteDTO, opts: { redactEvidence?: boolean } = {}): Promise<BuiltPdf> {
-  const [{ branding, timezone, business }, acceptance] = await Promise.all([docContext(dataId), getQuoteAcceptance(quote.id)]);
-  const unsigned = renderQuotePdf(quote, null, branding, { business, timezone });
+  const [{ branding, timezone, business }, acceptance, parties] = await Promise.all([docContext(dataId), getQuoteAcceptance(quote.id), docParties(dataId, quote.contact_id)]);
+  const input = { ...quote, parties };
+  const unsigned = renderQuotePdf(input, null, branding, { business, timezone });
   if (!acceptance) return { bytes: unsigned, filename: `Quote-${quote.number}.pdf`, hash: documentHash(unsigned), signed: false };
   // The fingerprint is always of the unsigned document, so redaction never changes what was signed.
-  const stamped = renderQuotePdf(quote, toStamp(acceptance, documentHash(unsigned)), branding, { business, timezone, redactEvidence: opts.redactEvidence });
+  const stamped = renderQuotePdf(input, toStamp(acceptance, documentHash(unsigned)), branding, { business, timezone, redactEvidence: opts.redactEvidence });
   return { bytes: stamped, filename: `Quote-${quote.number}-signed.pdf`, hash: documentHash(stamped), signed: true };
 }
 
 export async function buildInvoicePdf(dataId: string, invoice: InvoiceDTO): Promise<BuiltPdf> {
-  const { branding, timezone, business } = await docContext(dataId);
+  const [{ branding, timezone, business }, parties] = await Promise.all([docContext(dataId), docParties(dataId, invoice.contact_id)]);
   let quote_number: string | null = null;
   if (invoice.quote_id) {
     const q = await queryOne<{ number: string }>(`SELECT number FROM quotes WHERE id = $1`, [invoice.quote_id]).catch(() => null);
     quote_number = q?.number ?? null;
   }
-  const bytes = renderInvoicePdf({ ...invoice, quote_number }, branding, { business, timezone });
+  const bytes = renderInvoicePdf({ ...invoice, quote_number, parties }, branding, { business, timezone });
   return { bytes, filename: `Invoice-${invoice.number}.pdf`, hash: documentHash(bytes), signed: false };
+}
+
+export async function buildCreditNotePdf(dataId: string, note: CreditNoteDTO): Promise<BuiltPdf> {
+  const [{ branding, timezone, business }, parties] = await Promise.all([docContext(dataId), docParties(dataId, note.contact_id)]);
+  const bytes = renderCreditNotePdf({ ...note, parties }, branding, { business, timezone });
+  return { bytes, filename: `CreditNote-${note.number}.pdf`, hash: documentHash(bytes), signed: false };
+}
+
+export async function buildStatementPdf(dataId: string, statement: Statement): Promise<BuiltPdf> {
+  const [{ branding, timezone, business }, parties] = await Promise.all([docContext(dataId), docParties(dataId, null)]);
+  const bytes = renderStatementPdf({ ...statement, parties }, branding, { business, timezone });
+  const safe = statement.contact.name.replace(/[^A-Za-z0-9]+/g, "-").slice(0, 40);
+  return { bytes, filename: `Statement-${safe}-${statement.to.slice(0, 10)}.pdf`, hash: documentHash(bytes), signed: false };
 }
 
 /**
@@ -113,7 +153,8 @@ export async function buildInvoicePdf(dataId: string, invoice: InvoiceDTO): Prom
  * both hashes (plus the typed signature) on the acceptance row.
  */
 export async function fingerprintAcceptance(dataId: string, quote: QuoteDTO, acceptanceId: string, signatureText: string | null): Promise<{ document_hash: string; signed_document_hash: string } | null> {
-  const { branding, timezone, business } = await docContext(dataId);
+  const [{ branding, timezone, business }, parties] = await Promise.all([docContext(dataId), docParties(dataId, quote.contact_id)]);
+  const quoteInput = { ...quote, parties };
   const row = await queryOne<AcceptanceRow>(
     `SELECT id, accepted_at, accepted_name, accepted_email, NULL::text AS signature_text, ip, user_agent,
             consent_terms_version, consent_terms_text, NULL::text AS document_hash, NULL::text AS signed_document_hash
@@ -121,10 +162,10 @@ export async function fingerprintAcceptance(dataId: string, quote: QuoteDTO, acc
     [acceptanceId]
   );
   if (!row || !row.accepted_at) return null;
-  const unsigned = renderQuotePdf(quote, null, branding, { business, timezone });
+  const unsigned = renderQuotePdf(quoteInput, null, branding, { business, timezone });
   const document_hash = documentHash(unsigned);
   const stamp = toStamp({ ...row, signature_text: signatureText, document_hash }, document_hash);
-  const signed = renderQuotePdf({ ...quote, status: "accepted" }, stamp, branding, { business, timezone });
+  const signed = renderQuotePdf({ ...quoteInput, status: "accepted" }, stamp, branding, { business, timezone });
   const signed_document_hash = documentHash(signed);
   await query(
     `UPDATE quote_acceptances SET signature_text = $2, document_hash = $3, signed_document_hash = $4 WHERE id = $1`,

@@ -67,7 +67,7 @@ beforeEach(() => {
 describe("GET /api/tasks", () => {
   it("returns 401 when unauthenticated", async () => {
     unauthed();
-    const res = await tasksGET();
+    const res = await tasksGET(new Request("http://localhost/api/tasks"));
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: "unauthorized" });
     expect(mocks.query).not.toHaveBeenCalled();
@@ -75,9 +75,9 @@ describe("GET /api/tasks", () => {
 
   it("returns 200 with a tasks array when authenticated", async () => {
     authedWithOrg();
-    const res = await tasksGET();
+    const res = await tasksGET(new Request("http://localhost/api/tasks"));
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ tasks: [] });
+    await expect(res.json()).resolves.toEqual({ tasks: [], next_cursor: null });
     const call = dataQueryCall("FROM tasks");
     expect(call).toBeDefined();
     // Scoped to the org's data owner (== the user for a personal org).
@@ -91,10 +91,10 @@ describe("GET /api/tasks", () => {
       return [];
     });
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const res = await tasksGET();
+    const res = await tasksGET(new Request("http://localhost/api/tasks"));
     spy.mockRestore();
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ tasks: [] });
+    await expect(res.json()).resolves.toEqual({ tasks: [], next_cursor: null });
   });
 });
 
@@ -144,7 +144,7 @@ describe("GET /api/notifications", () => {
 
 describe("GET /api/health", () => {
   it("returns 200 without auth when the DB responds", async () => {
-    const res = await healthGET();
+    const res = await healthGET(new Request("http://localhost/api/health"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -156,7 +156,7 @@ describe("GET /api/health", () => {
 
   it("returns 503 when the DB is unreachable", async () => {
     mocks.query.mockRejectedValue(new Error("connect ECONNREFUSED"));
-    const res = await healthGET();
+    const res = await healthGET(new Request("http://localhost/api/health"));
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body.ok).toBe(false);

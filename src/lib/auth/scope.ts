@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/dsql";
+import { requestMemo } from "@/lib/request-cache";
 import { requireUser } from "@/lib/supabase/server";
 import { AREAS, DEFAULT_MATRIX, isRole, type Area, type AreaPermission, type Role } from "@/lib/auth/roles";
 
@@ -112,8 +113,8 @@ async function effectivePermissions(orgId: string, role: Role): Promise<Record<A
   return base;
 }
 
-/** Orgs the user belongs to (active memberships). */
-export async function listUserOrgs(userId: string): Promise<Array<OrgRow & { role: Role }>> {
+/** Uncached loader for `listUserOrgs` (exported for tests). */
+export async function loadUserOrgs(userId: string): Promise<Array<OrgRow & { role: Role }>> {
   const rows = await query<OrgRow & { role: string }>(
     `SELECT o.id, o.name, o.slug, o.owner_user_id, o.settings, m.role
        FROM memberships m JOIN organizations o ON o.id = m.org_id
@@ -123,6 +124,26 @@ export async function listUserOrgs(userId: string): Promise<Array<OrgRow & { rol
   );
   return rows.map((r) => ({ ...r, role: isRole(r.role) ? r.role : "viewer" }));
 }
+
+/** Orgs the user belongs to (active memberships). Per-request memoised. */
+export const listUserOrgs: (userId: string) => Promise<Array<OrgRow & { role: Role }>> = requestMemo(loadUserOrgs);
+
+/**
+ * Per-request memoised membership + permission lookups used by `requireScope()`.
+ * Several route handlers and server components call `requireScope()` for the
+ * same request (layout, page, nested data loaders); each previously re-ran the
+ * personal-org SELECT, the membership JOIN and the overrides SELECT.
+ */
+const memoPersonalOrg = requestMemo((userId: string, email: string | null) => ensurePersonalOrg(userId, email));
+const memoMembership = requestMemo((userId: string, orgId: string) =>
+  queryOne<OrgRow & { role: string }>(
+    `SELECT o.id, o.name, o.slug, o.owner_user_id, o.settings, m.role
+       FROM memberships m JOIN organizations o ON o.id = m.org_id
+      WHERE m.user_id = $1 AND m.org_id = $2 AND m.status = 'active'`,
+    [userId, orgId]
+  )
+);
+const memoPermissions = requestMemo((orgId: string, role: Role) => effectivePermissions(orgId, role));
 
 /**
  * Resolve the caller's scope. Throws ScopeError("UNAUTHORIZED") when not
@@ -138,7 +159,7 @@ export async function requireScope(opts: RequireScopeOptions = {}): Promise<Scop
   const email = user.email ?? null;
 
   // Personal org always exists so single-user flows keep working unchanged.
-  const personal = await ensurePersonalOrg(user.id, email);
+  const personal = await memoPersonalOrg(user.id, email);
 
   let wantedOrg = opts.orgId ?? null;
   if (!wantedOrg) {
@@ -152,12 +173,7 @@ export async function requireScope(opts: RequireScopeOptions = {}): Promise<Scop
   let org: OrgRow = personal;
   let role: Role = "owner";
   if (wantedOrg && wantedOrg !== personal.id) {
-    const m = await queryOne<OrgRow & { role: string }>(
-      `SELECT o.id, o.name, o.slug, o.owner_user_id, o.settings, m.role
-         FROM memberships m JOIN organizations o ON o.id = m.org_id
-        WHERE m.user_id = $1 AND m.org_id = $2 AND m.status = 'active'`,
-      [user.id, wantedOrg]
-    );
+    const m = await memoMembership(user.id, wantedOrg);
     if (m) {
       org = m;
       role = isRole(m.role) ? m.role : "viewer";
@@ -165,7 +181,7 @@ export async function requireScope(opts: RequireScopeOptions = {}): Promise<Scop
     // Unknown/foreign org id silently falls back to the personal org.
   }
 
-  const permissions = await effectivePermissions(org.id, role);
+  const permissions = await memoPermissions(org.id, role);
   const can = (area: Area, edit = false) => {
     const p = permissions[area];
     return Boolean(p && p.view && (!edit || p.edit));

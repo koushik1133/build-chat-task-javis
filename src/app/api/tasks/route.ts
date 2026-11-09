@@ -3,8 +3,17 @@ import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
+import { keysetClause, keysetOrder, normaliseCursor, page, parseListParams } from "@/lib/public-api/pagination";
 
-export async function GET() {
+/**
+ * `tasks.created_at` is TIMESTAMP (no zone). Both the SELECT and the keyset
+ * predicate read it through `AT TIME ZONE 'UTC'` so the cursor (ISO/UTC) and
+ * the column compare in the same frame regardless of the session time zone.
+ */
+const TASK_TS = "(created_at AT TIME ZONE 'UTC')";
+
+/** GET /api/tasks?cursor=&limit= — keyset-paginated, newest first (default 50 + next_cursor). */
+export async function GET(req: Request) {
   let scope;
   try {
     scope = await requireScope({ area: "tasks", edit: false });
@@ -12,19 +21,25 @@ export async function GET() {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const tasks = await query(
-    `SELECT id, title, done, created_at, chat_id
+  const list = parseListParams(new URL(req.url), { limit: 50 });
+  if (list.badCursor) return NextResponse.json({ error: "invalid cursor" }, { status: 400 });
+  const params: unknown[] = [scope.dataId];
+  const keyset = keysetClause(list.cursor, params, { col: TASK_TS });
+
+  const rows = await query<{ id: string; created_at: string | Date }>(
+    `SELECT id, title, done, ${TASK_TS} AS created_at, chat_id
      FROM tasks
-     WHERE user_id = $1
-     ORDER BY created_at DESC
-     LIMIT 100`,
-    [scope.dataId]
+     WHERE user_id = $1${keyset}
+     ORDER BY ${keysetOrder("", TASK_TS)}
+     LIMIT ${list.limit + 1}`,
+    params
   ).catch((err) => {
     console.error("[tasks] list failed:", err);
     return [];
   });
 
-  return NextResponse.json({ tasks });
+  const pg = page(rows, list.limit, (r) => normaliseCursor(r));
+  return NextResponse.json({ tasks: pg.data, next_cursor: pg.next_cursor });
 }
 
 const Patch = z.object({

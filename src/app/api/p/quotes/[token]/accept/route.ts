@@ -31,6 +31,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       ip: clientIp(req),
       userAgent: req.headers.get("user-agent"),
       signatureText: body.data.signature_text ?? body.data.name,
+      recipient: share.recipient ?? null,
     });
     return NextResponse.json({ quote: await toPublicQuote(out.quote, share.user_id, false), invoiceCreated: Boolean(out.invoiceId) });
   } catch (err) {

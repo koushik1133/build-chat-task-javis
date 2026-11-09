@@ -8,46 +8,153 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  ci:
-    name: Typecheck, lint, test, build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      # Placeholder values so `next build` does not require real services.
-      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
-      DSQL_ENDPOINT: 127.0.0.1
-      CRON_SECRET: ci
-      NEXT_TELEMETRY_DISABLED: "1"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  # Placeholder values so builds/tests never need real services.
+  NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
+  SUPABASE_SERVICE_ROLE_KEY: sb_secret_ci_placeholder
+  NEXT_PUBLIC_APP_URL: http://localhost:3001
+  CRON_SECRET: ci-cron-secret-0123456789abcdef
 
-      - name: Setup Node 22
-        uses: actions/setup-node@v4
+jobs:
+  lint-typecheck:
+    name: Lint + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
 
-      - name: Install dependencies
-        run: npm ci
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
 
-      - name: Typecheck
-        run: npm run typecheck
+  env-check:
+    name: Env catalogue drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # vars.json <-> .env.example must match exactly and every example value
+      # must satisfy its format rule. Dependency-free script, no npm ci needed.
+      - run: node scripts/check-env.mjs --file .env.example --drift --strict
 
-      - name: Lint
-        run: npm run lint
+  integration:
+    name: Integration tests (Postgres 17)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      # src/__integration__/setup.ts forces DSQL_ENDPOINT to 127.0.0.1; the
+      # service container is published on the runner's loopback, so that works.
+      DSQL_ENDPOINT: 127.0.0.1
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: postgres
+      DB_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply migrations
+        run: node scripts/run-migrations.mjs
+      - name: Apply Phase 6 lane DDL (plain Postgres has no ASYNC indexes)
+        run: |
+          shopt -s nullglob
+          for f in aws/phase6/*.sql; do
+            echo "applying $f"
+            sed 's/ ASYNC//g' "$f" | PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -q
+          done
+      - name: Integration suite
+        run: npm run test:integration
 
-      - name: Test
-        run: npm test
+  build:
+    name: Build (standalone)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint-typecheck]
+    env:
+      DSQL_ENDPOINT: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.ts', 'src/**/*.tsx') }}
+          restore-keys: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+      - run: node scripts/run-migrations.mjs --dry-run
+      - run: npm run build:standalone
+      - name: Standalone server artefact exists
+        run: test -f .next/standalone/server.js
 
-      - name: Dependency audit (non-blocking)
-        run: npm audit --audit-level=high
+  audit:
+    name: Dependency audit (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
         continue-on-error: true
 
-      - name: Migrations dry-run
-        run: node scripts/run-migrations.mjs --dry-run
-
-      - name: Build
-        run: npm run build
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [lint-typecheck]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: kernelhub:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

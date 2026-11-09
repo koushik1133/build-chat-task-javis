@@ -3,7 +3,7 @@ import { simulatedProvider } from "./simulated";
 import { stripeProvider } from "./stripe";
 import { razorpayProvider } from "./razorpay";
 
-export type { PaymentProvider, PaymentProviderId, PaymentEvent, CreateCheckoutInput } from "./types";
+export type { PaymentProvider, PaymentProviderId, PaymentEvent, CreateCheckoutInput, RefundInput, RefundResult } from "./types";
 
 const PROVIDERS: Record<PaymentProviderId, PaymentProvider> = {
   simulated: simulatedProvider,

@@ -4,6 +4,7 @@ import { parseBody } from "@/lib/money/http";
 import { dateParam, financeErrorResponse, idParam } from "@/lib/finance/http";
 import { parseRef } from "@/lib/finance/expenses";
 import { createTimeEntry, listTimeEntries, stopTimer, TimeEntryInputSchema } from "@/lib/finance/time";
+import { normaliseCursor, page, parseListParams } from "@/lib/public-api/pagination";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,10 @@ export async function GET(req: NextRequest) {
     const scope = await requireScope({ area: "billing" });
     const sp = req.nextUrl.searchParams;
     const ref = parseRef(sp.get("ref"));
-    const entries = await listTimeEntries(scope.dataId, {
+    const paged = sp.get("order") === "created" || sp.has("cursor");
+    const list = parseListParams(req.nextUrl, { limit: 50 });
+    if (paged && list.badCursor) return NextResponse.json({ error: "invalid cursor" }, { status: 400 });
+    const rows = await listTimeEntries(scope.dataId, {
       from: dateParam(req, "from"),
       to: dateParam(req, "to"),
       refKind: ref?.refKind,
@@ -21,8 +25,11 @@ export async function GET(req: NextRequest) {
       memberId: sp.get("mine") === "1" ? scope.userId : null,
       runningOnly: sp.get("running") === "1",
       unbilledOnly: sp.get("unbilled") === "1",
+      ...(paged ? { order: "created" as const, cursor: list.cursor, limit: list.limit + 1 } : {}),
     });
-    return NextResponse.json({ entries, member_id: scope.userId });
+    if (!paged) return NextResponse.json({ entries: rows, member_id: scope.userId, next_cursor: null });
+    const pg = page(rows, list.limit, (r) => normaliseCursor({ created_at: r.created_at, id: r.id }));
+    return NextResponse.json({ entries: pg.data, member_id: scope.userId, next_cursor: pg.next_cursor });
   } catch (err) {
     return financeErrorResponse(err, "time.GET");
   }

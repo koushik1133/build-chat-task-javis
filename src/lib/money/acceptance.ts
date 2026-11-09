@@ -30,7 +30,20 @@ function assertAcceptable(q: QuoteDTO): void {
   if (quoteIsExpired(q) || q.status === "expired") throw new Error("This quote has expired");
 }
 
-export async function requestAcceptanceOtp(quoteId: string, email: string, purpose: OtpPurpose = "accept"): Promise<{ ok: true; expiresAt: string }> {
+/**
+ * Recipient binding: when the share link was issued to a specific email, the
+ * OTP flow must use that address. `null`/undefined keeps the legacy behaviour
+ * (any email may request a code for the link).
+ */
+export function assertRecipientMatches(email: string, recipient: string | null | undefined): void {
+  if (!recipient) return;
+  if (email.trim().toLowerCase() !== recipient.trim().toLowerCase()) {
+    throw new Error("This link was sent to a different email address. Use the address the quote was emailed to.");
+  }
+}
+
+export async function requestAcceptanceOtp(quoteId: string, email: string, purpose: OtpPurpose = "accept", recipient: string | null = null): Promise<{ ok: true; expiresAt: string }> {
+  assertRecipientMatches(email, recipient);
   const q = await getQuoteById(quoteId);
   if (!q) throw new Error("Quote not found");
   assertAcceptable(q);
@@ -69,7 +82,8 @@ async function ownerOf(quoteId: string): Promise<string | null> {
  * message on any failure and increments the attempt counter on a wrong code.
  * Returns the challenge row id (callers finalise or clear it).
  */
-export async function verifyOtp(quoteId: string, email: string, otp: string, purpose: OtpPurpose, currentVersion: number): Promise<{ id: string }> {
+export async function verifyOtp(quoteId: string, email: string, otp: string, purpose: OtpPurpose, currentVersion: number, recipient: string | null = null): Promise<{ id: string }> {
+  assertRecipientMatches(email, recipient);
   const row = await queryOne<{ id: string; otp_hash: string | null; otp_expires_at: string | null; otp_attempts: number; version: number }>(
     `SELECT id, otp_hash, otp_expires_at, otp_attempts, version FROM quote_acceptances
       WHERE quote_id = $1 AND accepted_at IS NULL AND lower(accepted_email) = lower($2) AND COALESCE(purpose, 'accept') = $3
@@ -89,14 +103,14 @@ export async function verifyOtp(quoteId: string, email: string, otp: string, pur
   return { id: row.id };
 }
 
-export interface DeclineInput { otp: string; email: string; reason: string | null }
+export interface DeclineInput { otp: string; email: string; reason: string | null; recipient?: string | null }
 
 /** Public decline: same OTP gate as accept (purpose = decline), then the regular decline path. */
 export async function declineQuoteVerified(quoteId: string, input: DeclineInput): Promise<{ quote: QuoteDTO }> {
   const q = await getQuoteById(quoteId);
   if (!q) throw new Error("Quote not found");
   assertAcceptable(q);
-  const row = await verifyOtp(quoteId, input.email, input.otp, "decline", q.current_version);
+  const row = await verifyOtp(quoteId, input.email, input.otp, "decline", q.current_version, input.recipient ?? null);
   // Consume the challenge so the code cannot be replayed.
   await query(`DELETE FROM quote_acceptances WHERE id = $1`, [row.id]);
   const out = await declineQuote(null, quoteId, input.reason, { by: "client" });
@@ -111,6 +125,8 @@ export interface AcceptInput {
   userAgent: string | null;
   /** Typed e-signature (defaults to `name`); stored alongside the document fingerprints. */
   signatureText?: string | null;
+  /** Email the share link was bound to (share_tokens.recipient); null = unbound legacy link. */
+  recipient?: string | null;
 }
 
 export async function acceptQuote(quoteId: string, input: AcceptInput): Promise<{ quote: QuoteDTO; invoiceId: string | null }> {
@@ -118,7 +134,7 @@ export async function acceptQuote(quoteId: string, input: AcceptInput): Promise<
   if (!q) throw new Error("Quote not found");
   assertAcceptable(q);
 
-  const row = await verifyOtp(quoteId, input.email, input.otp, "accept", q.current_version);
+  const row = await verifyOtp(quoteId, input.email, input.otp, "accept", q.current_version, input.recipient ?? null);
 
   await query(
     `UPDATE quote_acceptances

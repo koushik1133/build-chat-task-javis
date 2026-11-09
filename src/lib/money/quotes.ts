@@ -5,11 +5,15 @@ import { issueShareToken } from "@/lib/share-tokens";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { releaseForQuote } from "@/lib/inventory/stock";
 import { emitEvent } from "@/lib/events/bus";
-import { computeTotals, formatMoney, parseItems, type LineItem } from "./items";
+import { formatMoney, parseItems, type LineItem } from "./items";
+import { resolveDocumentTotals } from "./tax-rates";
+import { getBillingSettings } from "./settings";
+import { parseBreakdown, type TaxBreakdownRow } from "./tax";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 export { computeTotals } from "./items";
 export type { LineItem } from "./items";
+export type { TaxBreakdownRow } from "./tax";
 
 export type QuoteStatus = "draft" | "sent" | "viewed" | "accepted" | "declined" | "expired";
 
@@ -38,6 +42,7 @@ export interface QuoteRow {
   updated_at: string;
   sent_at: string | null;
   accepted_at: string | null;
+  tax_breakdown?: string | null;
 }
 
 export interface QuoteDTO {
@@ -57,6 +62,7 @@ export interface QuoteDTO {
   notes: string | null;
   current_version: number;
   items: LineItem[];
+  tax_breakdown: TaxBreakdownRow[];
   created_at: string;
   updated_at: string;
   sent_at: string | null;
@@ -64,7 +70,7 @@ export interface QuoteDTO {
 }
 
 const QUOTE_COLS =
-  "q.id, q.user_id, q.contact_id, q.number, q.status, q.currency, q.subtotal_minor, q.tax_minor, q.total_minor, q.valid_until, q.terms_version, q.terms_text, q.notes, q.current_version, q.created_at, q.updated_at, q.sent_at, q.accepted_at";
+  "q.id, q.user_id, q.contact_id, q.number, q.status, q.currency, q.subtotal_minor, q.tax_minor, q.total_minor, q.valid_until, q.terms_version, q.terms_text, q.notes, q.current_version, q.created_at, q.updated_at, q.sent_at, q.accepted_at, q.tax_breakdown";
 
 type JoinedRow = QuoteRow & { contact_name: string | null; contact_email: string | null; items: string | null };
 
@@ -86,6 +92,7 @@ function toDTO(r: JoinedRow): QuoteDTO {
     notes: r.notes,
     current_version: Number(r.current_version),
     items: parseItems(r.items),
+    tax_breakdown: parseBreakdown(r.tax_breakdown),
     created_at: r.created_at,
     updated_at: r.updated_at,
     sent_at: r.sent_at,
@@ -140,13 +147,13 @@ export async function createQuote(dataId: string, input: CreateQuoteInput): Prom
     if (!c) throw new Error("Contact not found");
   }
   const id = randomUUID();
-  const number = await nextDocNumber(dataId, "quote");
-  const totals = computeTotals(input.items);
+  const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, input.items)]);
+  const number = await nextDocNumber(dataId, "quote", settings.quote_prefix);
   const currency = (input.currency ?? "USD").toUpperCase();
   await query(
     `INSERT INTO quotes (id, user_id, contact_id, number, status, currency, subtotal_minor, tax_minor, total_minor,
-       valid_until, terms_version, terms_text, notes, current_version)
-     VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, 1)`,
+       valid_until, terms_version, terms_text, notes, current_version, tax_breakdown)
+     VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, 1, $13)`,
     [
       id, dataId, input.contact_id ?? null, number, currency,
       totals.subtotal_minor, totals.tax_minor, totals.total_minor,
@@ -154,6 +161,7 @@ export async function createQuote(dataId: string, input: CreateQuoteInput): Prom
       input.terms_version ?? DEFAULT_TERMS_VERSION,
       input.terms_text ?? DEFAULT_TERMS_TEXT,
       input.notes ?? null,
+      JSON.stringify(totals.breakdown),
     ]
   );
   await query(
@@ -204,7 +212,7 @@ export async function updateQuote(dataId: string, id: string, input: UpdateQuote
 
 /** Append a new version with the given items and bump current_version (race-safe). */
 export async function updateQuoteItems(dataId: string, id: string, items: LineItem[]): Promise<number> {
-  const totals = computeTotals(items);
+  const totals = await resolveDocumentTotals(dataId, items);
   return withRetry(async () => {
     const cur = await queryOne<{ current_version: number }>(
       `SELECT current_version FROM quotes WHERE id = $1 AND user_id = $2`,
@@ -213,9 +221,9 @@ export async function updateQuoteItems(dataId: string, id: string, items: LineIt
     if (!cur) throw new Error("Quote not found");
     const next = Number(cur.current_version) + 1;
     const bumped = await query(
-      `UPDATE quotes SET current_version = $3, subtotal_minor = $4, tax_minor = $5, total_minor = $6, updated_at = NOW()
+      `UPDATE quotes SET current_version = $3, subtotal_minor = $4, tax_minor = $5, total_minor = $6, tax_breakdown = $8, updated_at = NOW()
         WHERE id = $1 AND user_id = $2 AND current_version = $7 RETURNING id`,
-      [id, dataId, next, totals.subtotal_minor, totals.tax_minor, totals.total_minor, Number(cur.current_version)]
+      [id, dataId, next, totals.subtotal_minor, totals.tax_minor, totals.total_minor, Number(cur.current_version), JSON.stringify(totals.breakdown)]
     );
     if (bumped.length === 0) {
       const e = new Error("version race (OC000)");
@@ -257,7 +265,8 @@ export async function sendQuote(
   const to = (opts.to ?? q.contact_email ?? "").trim();
   if (!to) throw new Error("No recipient email: set one on the contact or pass `to`");
 
-  const link = await issueShareToken(dataId, "quote", id, 60);
+  // Bind the link to the recipient: only this address can request/verify an acceptance OTP.
+  const link = await issueShareToken(dataId, "quote", id, 60, { recipient: to });
   const from = await businessName(dataId);
   await query(
     `UPDATE quotes SET status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END, sent_at = COALESCE(sent_at, NOW()), updated_at = NOW()

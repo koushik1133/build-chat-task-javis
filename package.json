@@ -14,7 +14,14 @@
     "migrate:dry": "node scripts/run-migrations.mjs --dry-run",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "DB_INTEGRATION=1 vitest run src/__integration__"
+    "test:integration": "DB_INTEGRATION=1 vitest run src/__integration__",
+    "build:standalone": "NEXT_OUTPUT=standalone next build",
+    "check-env": "node scripts/check-env.mjs",
+    "check-env:example": "node scripts/check-env.mjs --file .env.example --drift",
+    "smoke": "node scripts/smoke.mjs",
+    "cron:tick": "node scripts/cron-tick.mjs",
+    "backup:db": "bash scripts/backup-db.sh",
+    "audit": "npm audit --audit-level=high"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1069.0",

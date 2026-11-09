@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { query, queryOne, withRetry } from "@/lib/dsql";
 import { FREE_GRANT_CREDITS } from "./packs";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import { costMicrosToCredits, creditMarkup } from "./pricing";
 
 export { InsufficientCreditsError, isInsufficientCreditsError } from "./errors";
@@ -178,11 +179,14 @@ export async function postLedger(userId: string, input: PostLedgerInput): Promis
   return postEntry(userId, input);
 }
 
-export async function listLedger(userId: string, limit = 50): Promise<LedgerEntry[]> {
+export async function listLedger(userId: string, limit = 50, cursor: Cursor | null = null): Promise<LedgerEntry[]> {
+  const params: unknown[] = [userId];
+  const keyset = keysetClause(cursor, params);
+  params.push(Math.min(Math.max(limit, 1), 201));
   const rows = await query<LedgerRow>(
     `SELECT id, user_id, kind, credits, balance_after, ref_kind, ref_id, note, created_at
-       FROM ai_credit_ledger WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
-    [userId, Math.min(Math.max(limit, 1), 200)]
+       FROM ai_credit_ledger WHERE user_id = $1${keyset} ORDER BY ${keysetOrder()} LIMIT $${params.length}`,
+    params
   );
   return rows.map(toEntry);
 }

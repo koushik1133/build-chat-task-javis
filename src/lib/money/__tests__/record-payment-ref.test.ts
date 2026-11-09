@@ -31,7 +31,7 @@ function setup(existing: { id: string; status: string } | null) {
   queryOne.mockImplementation(async (sql: string) => {
     if (sql.includes("FROM invoices")) return invoice;
     if (sql.includes("FROM invoice_payments WHERE invoice_id = $1 AND provider = $2 AND provider_ref = $3")) return existing;
-    if (sql.includes("SUM(amount_minor)")) return { paid: "1000" };
+    if (sql.includes("SUM(amount_minor")) return { paid: "1000" };
     return null;
   });
 }

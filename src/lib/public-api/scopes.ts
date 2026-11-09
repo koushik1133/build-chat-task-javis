@@ -80,4 +80,4 @@ export const AREA_LABELS: Record<Area, string> = {
 };
 
 /** Areas that the v1 API currently exposes (others exist for future routes). */
-export const API_AREAS: readonly Area[] = ["crm", "tasks", "billing", "calendar", "helpdesk", "settings"];
+export const API_AREAS: readonly Area[] = ["crm", "tasks", "billing", "calendar", "helpdesk", "knowledge", "agents", "messaging", "reports", "settings"];

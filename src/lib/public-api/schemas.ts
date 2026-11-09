@@ -94,6 +94,7 @@ export const Quote = z.object({
   notes: z.string().nullable(),
   current_version: z.number().int(),
   items: z.array(LineItem),
+  tax_breakdown: z.array(z.object({ rate_id: Id.nullable(), name: z.string(), rate_bp: z.number().int(), compound: z.boolean(), taxable_minor: Money, tax_minor: Money })).optional(),
   created_at: Iso,
   updated_at: Iso,
   sent_at: IsoOrNull,
@@ -132,7 +133,10 @@ export const Invoice = z.object({
   total_minor: Money,
   paid_minor: Money,
   due_at: IsoOrNull,
+  terms_days: z.number().int().nullable().optional(),
+  reminder_count: z.number().int().optional(),
   items: z.array(LineItem),
+  tax_breakdown: z.array(z.object({ rate_id: Id.nullable(), name: z.string(), rate_bp: z.number().int(), compound: z.boolean(), taxable_minor: Money, tax_minor: Money })).optional(),
   notes: z.string().nullable(),
   created_at: Iso,
   updated_at: Iso,
@@ -146,6 +150,7 @@ export const InvoiceCreate = z
     currency: z.string().trim().length(3).optional(),
     items: z.array(LineItem).min(1).max(200),
     due_at: MaybeIso.nullable().optional(),
+    terms_days: z.number().int().min(0).max(365).nullable().optional().describe("Payment terms; due date = send date + terms"),
     notes: z.string().max(10_000).nullable().optional(),
   })
   .strict();
@@ -159,6 +164,80 @@ export const PaymentCreate = z
   .strict();
 export const PaymentResult = z.object({ invoice: Invoice, duplicate: z.boolean() });
 export const InvoiceListQuery = ListQuery.extend({ status: z.string().max(20).optional() });
+
+/* ─── Billing depth: tax rates, schedules, credit notes ────────────────── */
+
+export const TaxBreakdownRow = z.object({
+  rate_id: Id.nullable(),
+  name: z.string(),
+  rate_bp: z.number().int(),
+  compound: z.boolean(),
+  taxable_minor: Money,
+  tax_minor: Money,
+});
+export const TaxRate = z.object({
+  id: Id,
+  name: z.string(),
+  rate_bp: z.number().int().describe("Basis points (1000 = 10%)"),
+  kind: z.enum(["vat", "gst", "sales", "other"]),
+  jurisdiction: z.string().nullable(),
+  compound: z.boolean(),
+  is_default: z.boolean(),
+  active: z.boolean(),
+  created_at: Iso,
+});
+export const TaxRateListQuery = ListQuery.extend({ all: z.enum(["true", "false"]).optional().describe("Include inactive rates") });
+
+export const InvoiceSchedule = z.object({
+  id: Id,
+  name: z.string(),
+  contact_id: Id.nullable(),
+  contact_name: z.string().nullable(),
+  contact_email: z.string().nullable(),
+  items: z.array(LineItem),
+  currency: Currency,
+  interval: z.enum(["weekly", "monthly", "quarterly", "yearly"]),
+  interval_count: z.number().int(),
+  day_of_month: z.number().int().nullable(),
+  next_run_at: Iso,
+  end_at: IsoOrNull,
+  auto_send: z.boolean(),
+  terms_days: z.number().int().nullable(),
+  notes: z.string().nullable(),
+  status: z.enum(["active", "paused", "ended"]),
+  last_invoice_id: Id.nullable(),
+  last_run_at: IsoOrNull,
+  run_count: z.number().int(),
+  created_at: Iso,
+  updated_at: Iso,
+});
+export const InvoiceScheduleListQuery = ListQuery.extend({ status: z.enum(["active", "paused", "ended"]).optional() });
+
+export const CreditNote = z.object({
+  id: Id,
+  number: z.string(),
+  status: z.enum(["draft", "issued", "applied", "refunded"]),
+  invoice_id: Id.nullable(),
+  invoice_number: z.string().nullable(),
+  contact_id: Id.nullable(),
+  contact_name: z.string().nullable(),
+  contact_email: z.string().nullable(),
+  items: z.array(LineItem),
+  subtotal_minor: Money,
+  tax_minor: Money,
+  total_minor: Money,
+  tax_breakdown: z.array(TaxBreakdownRow),
+  currency: Currency,
+  reason: z.string().nullable(),
+  issued_at: IsoOrNull,
+  created_at: Iso,
+  updated_at: Iso,
+});
+export const CreditNoteListQuery = ListQuery.extend({
+  status: z.enum(["draft", "issued", "applied", "refunded"]).optional(),
+  invoice_id: Id.optional(),
+  contact_id: Id.optional(),
+});
 
 /* ─── Calendar ─────────────────────────────────────────────────────────── */
 
@@ -420,3 +499,530 @@ export const Me = z.object({
 
 export const Deleted = z.object({ id: Id, deleted: z.literal(true) });
 export const OpenApiDoc = z.record(z.unknown()).describe("OpenAPI 3.1 document");
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Phase 6 — API breadth. Response schemas mirror the lib DTOs; request
+ * schemas reuse the lib zod schemas wherever one exists.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+import { ExpenseInputSchema, ExpensePatchSchema, EXPENSE_CATEGORIES } from "@/lib/finance/expenses";
+import { TimeEntryInputSchema } from "@/lib/finance/time";
+import { ChangeOrderInputSchema, CO_STATUSES } from "@/lib/finance/change-orders";
+import { ArticleBodySchema, ArticlePatchSchema } from "@/lib/kb/http";
+import { RecordTypeInputSchema, RecordTypePatchSchema } from "@/lib/records/schema";
+import { LISTING_KINDS, CATEGORIES as MARKETPLACE_CATEGORIES, SORTS as MARKETPLACE_SORTS, VISIBILITIES } from "@/lib/marketplace/types";
+import { CONSENT_PURPOSES, CONSENT_SOURCES, CONSENT_SUBJECT_KINDS, DSR_KINDS, DSR_STATUSES, DSR_SUBJECT_KINDS } from "@/lib/privacy/constants";
+import { CAMPAIGN_STATUSES } from "@/lib/voice/window";
+import { VOICES } from "@/lib/voice/twiml";
+import { ACCOUNTING_ENTITY_KINDS } from "@/lib/accounting/types";
+
+const Minor = z.number().int().describe("Integer minor units (cents)");
+const RefKind = z.string().trim().min(1).max(40).regex(/^[a-z_]+$/).describe("Linked entity kind, e.g. `quote`, `invoice`, `record`");
+
+/* ─── Expenses ─────────────────────────────────────────────────────────── */
+export const Expense = z.object({
+  id: Id,
+  category: z.string(),
+  vendor: z.string().nullable(),
+  description: z.string().nullable(),
+  amount_minor: Minor,
+  currency: z.string(),
+  tax_minor: Minor,
+  total_minor: Minor,
+  spent_at: MaybeIso,
+  receipt_url: z.string().nullable(),
+  ref_kind: z.string().nullable(),
+  ref_id: z.string().nullable(),
+  billable: z.boolean(),
+  invoice_id: z.string().nullable(),
+  created_by: z.string().nullable(),
+  created_at: MaybeIso,
+});
+export const ExpenseCreate = ExpenseInputSchema;
+export const ExpensePatch = ExpensePatchSchema;
+export const ExpenseListQuery = ListQuery.extend({
+  from: z.string().max(40).optional().describe("ISO lower bound on spent_at"),
+  to: z.string().max(40).optional().describe("ISO upper bound on spent_at"),
+  ref: z.string().max(140).optional().describe("`kind:id` filter, e.g. `quote:abc`"),
+  unbilled: z.enum(["true", "false"]).optional().describe("Only billable expenses not yet invoiced"),
+  category: z.enum(EXPENSE_CATEGORIES).optional(),
+});
+
+/* ─── Time entries ─────────────────────────────────────────────────────── */
+export const TimeEntry = z.object({
+  id: Id,
+  member_id: z.string().nullable(),
+  ref_kind: z.string().nullable(),
+  ref_id: z.string().nullable(),
+  description: z.string().nullable(),
+  started_at: MaybeIso,
+  ended_at: MaybeIso.nullable(),
+  minutes: z.number().int().nullable(),
+  running: z.boolean(),
+  rate_minor: Minor.describe("Hourly rate, minor units"),
+  currency: z.string(),
+  value_minor: Minor,
+  billable: z.boolean(),
+  invoice_id: z.string().nullable(),
+  created_at: MaybeIso,
+});
+export const TimeEntryCreate = TimeEntryInputSchema;
+export const TimerStart = z
+  .object({
+    ref_kind: RefKind.nullable().optional(),
+    ref_id: z.string().trim().max(100).nullable().optional(),
+    description: z.string().trim().max(2000).nullable().optional(),
+    member_id: z.string().trim().max(100).nullable().optional(),
+    rate_minor: z.number().int().min(0).max(1_000_000_000).optional(),
+    currency: z.string().length(3).optional(),
+    billable: z.boolean().optional(),
+  })
+  .strict();
+export const TimerStop = z.object({ ended_at: z.string().datetime({ offset: true }).optional().describe("Defaults to now") }).strict();
+export const TimeEntryListQuery = ListQuery.extend({
+  from: z.string().max(40).optional(),
+  to: z.string().max(40).optional(),
+  ref_kind: z.string().max(40).optional(),
+  ref_id: z.string().max(100).optional(),
+  member_id: z.string().max(100).optional(),
+  running: z.enum(["true", "false"]).optional().describe("Only running timers"),
+  unbilled: z.enum(["true", "false"]).optional(),
+});
+
+/* ─── Equipment checkouts ──────────────────────────────────────────────── */
+export const EquipmentCheckout = z.object({
+  id: Id,
+  product_id: Id,
+  product_name: z.string(),
+  product_sku: z.string().nullable(),
+  qty: z.number().int(),
+  checked_out_to: z.string().nullable(),
+  ref_kind: z.string().nullable(),
+  ref_id: z.string().nullable(),
+  due_back_at: MaybeIso.nullable(),
+  returned_at: MaybeIso.nullable(),
+  overdue: z.boolean(),
+  created_at: MaybeIso,
+});
+export const EquipmentCheckoutCreate = z
+  .object({
+    product_id: Id,
+    qty: z.number().int().min(1).max(100_000).default(1),
+    checked_out_to: z.string().trim().max(200).nullable().optional(),
+    ref_kind: RefKind.nullable().optional(),
+    ref_id: z.string().trim().max(100).nullable().optional(),
+    due_back_at: z.string().datetime({ offset: true }).nullable().optional(),
+  })
+  .strict();
+export const EquipmentListQuery = ListQuery.extend({ open: z.enum(["true", "false"]).optional().describe("Only items still out") });
+
+/* ─── Change orders ────────────────────────────────────────────────────── */
+export const ChangeOrder = z.object({
+  id: Id,
+  quote_id: z.string().nullable(),
+  invoice_id: z.string().nullable(),
+  number: z.number().int(),
+  label: z.string().describe("Display number, e.g. CO-0004"),
+  title: z.string(),
+  description: z.string().nullable(),
+  items: z.array(LineItem),
+  delta_minor: Minor,
+  currency: z.string(),
+  status: z.enum(CO_STATUSES),
+  accepted_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const ChangeOrderCreate = ChangeOrderInputSchema;
+export const ChangeOrderStatus = z.object({ status: z.enum(CO_STATUSES) }).strict();
+export const ChangeOrderStatusResult = z.object({ change_order: ChangeOrder, invoice: Invoice.nullable().describe("Draft invoice created/updated when accepted") });
+export const ChangeOrderListQuery = ListQuery.extend({
+  quote_id: z.string().max(100).optional(),
+  invoice_id: z.string().max(100).optional(),
+  status: z.enum(CO_STATUSES).optional(),
+});
+
+/* ─── SLA policies ─────────────────────────────────────────────────────── */
+export const SlaPolicy = z.object({
+  id: Id,
+  name: z.string(),
+  first_response_minutes: z.number().int(),
+  resolution_minutes: z.number().int(),
+  business_hours_only: z.boolean(),
+  priority_overrides: z.record(z.unknown()).nullable(),
+  is_default: z.boolean(),
+  created_at: MaybeIso,
+});
+export const SlaPolicyCreate = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    first_response_minutes: z.number().int().min(1).max(60 * 24 * 30).optional(),
+    resolution_minutes: z.number().int().min(1).max(60 * 24 * 90).optional(),
+    business_hours_only: z.boolean().optional(),
+    priority_overrides: z.record(z.unknown()).nullable().optional(),
+    is_default: z.boolean().optional(),
+  })
+  .strict();
+export const SlaPolicyPatch = SlaPolicyCreate.partial().strict();
+
+/* ─── Knowledge base ───────────────────────────────────────────────────── */
+export const KbArticle = z.object({
+  id: Id,
+  slug: z.string(),
+  title: z.string(),
+  body_md: z.string(),
+  excerpt: z.string().nullable(),
+  category: z.string().nullable(),
+  tags: z.array(z.string()),
+  status: z.enum(["draft", "published"]),
+  is_public: z.boolean(),
+  views: z.number().int(),
+  source_ticket_ids: z.array(z.string()),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+  published_at: MaybeIso.nullable(),
+});
+export const KbArticleCreate = ArticleBodySchema;
+export const KbArticlePatch = ArticlePatchSchema.strict();
+export const KbArticleListQuery = SearchListQuery.extend({
+  status: z.enum(["draft", "published"]).optional(),
+  category: z.string().max(100).optional(),
+  public: z.enum(["true", "false"]).optional(),
+});
+export const KbSearchQuery = z.object({
+  q: z.string().min(1).max(200),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  drafts: z.enum(["true", "false"]).optional().describe("Include draft articles"),
+});
+export const KbHit = z.object({
+  id: Id,
+  slug: z.string(),
+  title: z.string(),
+  excerpt: z.string().nullable(),
+  category: z.string().nullable(),
+  status: z.enum(["draft", "published"]),
+  is_public: z.boolean(),
+  score: z.number(),
+  snippet: z.string().nullable(),
+});
+
+/* ─── Record types (write) ─────────────────────────────────────────────── */
+export const RecordTypeCreate = RecordTypeInputSchema.strict();
+export const RecordTypePatch = RecordTypePatchSchema.strict();
+
+/* ─── Marketplace ──────────────────────────────────────────────────────── */
+export const Listing = z.object({
+  id: z.string(),
+  kind: z.enum(LISTING_KINDS),
+  slug: z.string(),
+  title: z.string(),
+  summary: z.string().nullable(),
+  description_md: z.string().nullable(),
+  category: z.string().nullable(),
+  tags: z.array(z.string()),
+  version: z.number().int(),
+  visibility: z.enum(VISIBILITIES),
+  install_count: z.number().int(),
+  rating_avg: z.number().nullable(),
+  rating_count: z.number().int(),
+  builtin: z.boolean(),
+  publisher: z.string(),
+  owner: z.boolean(),
+  installed: z.boolean(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+  published_at: MaybeIso.nullable(),
+});
+export const ListingDetail = Listing.extend({ definition: z.unknown().describe("Portable definition (agent, playbook, automation or record pack)") });
+export const ListingListQuery = SearchListQuery.extend({
+  kind: z.enum(LISTING_KINDS).optional(),
+  category: z.enum(MARKETPLACE_CATEGORIES).optional(),
+  sort: z.enum(MARKETPLACE_SORTS).optional(),
+});
+export const ListingParams = z.object({ id: z.string().min(1).max(160).describe("Listing id (`builtin:…` ids allowed)") });
+export const InstallResult = z.object({
+  listing: Listing,
+  entity_kind: z.enum(LISTING_KINDS),
+  entity_id: z.string(),
+  created: z.boolean(),
+  note: z.string().nullable(),
+});
+
+/* ─── Credits ──────────────────────────────────────────────────────────── */
+export const CreditBalance = z.object({ balance: z.number().int().describe("Credits available") });
+export const LedgerEntry = z.object({
+  id: Id,
+  kind: z.enum(["purchase", "grant", "usage", "outcome", "refund", "adjustment"]),
+  credits: z.number().int().describe("Signed delta"),
+  balance_after: z.number().int(),
+  ref_kind: z.string().nullable(),
+  ref_id: z.string().nullable(),
+  note: z.string().nullable(),
+  created_at: MaybeIso,
+});
+
+/* ─── Privacy ──────────────────────────────────────────────────────────── */
+export const ConsentRecord = z.object({
+  id: Id,
+  subject_kind: z.enum(CONSENT_SUBJECT_KINDS),
+  subject_id: z.string(),
+  purpose: z.enum(CONSENT_PURPOSES),
+  status: z.enum(["granted", "withdrawn"]),
+  source: z.enum(CONSENT_SOURCES),
+  occurred_at: MaybeIso,
+  created_at: MaybeIso,
+});
+export const ConsentListQuery = z.object({
+  subject_kind: z.enum(["contact", "lead", "member"]).default("contact"),
+  subject_id: z.string().min(1).max(100),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+export const ConsentState = z.object({
+  subject_kind: z.enum(["contact", "lead", "member"]),
+  subject_id: z.string(),
+  current: z.record(z.object({ status: z.enum(["granted", "withdrawn"]), at: MaybeIso, source: z.string() })).describe("Latest state per purpose"),
+  history: z.array(ConsentRecord),
+});
+export const ConsentWrite = z
+  .object({
+    subject_kind: z.enum(["contact", "lead", "member"]).default("contact"),
+    subject_id: z.string().min(1).max(100),
+    purpose: z.enum(CONSENT_PURPOSES),
+    text_version: z.string().max(80).nullable().optional(),
+    text: z.string().max(2000).nullable().optional().describe("The consent wording shown to the subject"),
+  })
+  .strict();
+export const DsrRequest = z.object({
+  id: Id,
+  subject_kind: z.enum(DSR_SUBJECT_KINDS),
+  subject_id: z.string(),
+  subject_email: z.string().nullable(),
+  kind: z.enum(DSR_KINDS),
+  status: z.enum(DSR_STATUSES),
+  source: z.string(),
+  requested_at: MaybeIso,
+  due_at: MaybeIso,
+  verified_at: MaybeIso.nullable(),
+  completed_at: MaybeIso.nullable(),
+  handled_by: z.string().nullable(),
+  notes: z.string().nullable(),
+  result: z.string().nullable(),
+  created_at: MaybeIso,
+});
+export const DsrListQuery = ListQuery.extend({ status: z.enum([...DSR_STATUSES, "open"]).optional() });
+export const DsrOpen = z
+  .object({
+    subject_kind: z.enum(DSR_SUBJECT_KINDS).default("contact"),
+    subject_id: z.string().min(1).max(100),
+    kind: z.enum(DSR_KINDS),
+    email: z.string().email().max(320).nullable().optional(),
+    notes: z.string().max(4000).nullable().optional(),
+  })
+  .strict();
+
+/* ─── Voice campaigns ──────────────────────────────────────────────────── */
+export const CampaignStats = z.object({
+  total: z.number().int(),
+  queued: z.number().int(),
+  calling: z.number().int(),
+  answered: z.number().int(),
+  voicemail: z.number().int(),
+  no_answer: z.number().int(),
+  failed: z.number().int(),
+  opted_out: z.number().int(),
+  done: z.number().int(),
+  interested: z.number().int(),
+});
+export const VoiceCampaign = z.object({
+  id: Id,
+  name: z.string(),
+  script: z.string(),
+  voice: z.string(),
+  status: z.enum(CAMPAIGN_STATUSES),
+  schedule_at: MaybeIso.nullable(),
+  window_start: z.string(),
+  window_end: z.string(),
+  timezone: z.string(),
+  max_attempts: z.number().int(),
+  require_consent: z.boolean().nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const VoiceCampaignWithStats = VoiceCampaign.extend({ stats: CampaignStats });
+const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM");
+export const VoiceCampaignCreate = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    script: z.string().trim().min(1).max(4000).describe("Supports {{first_name}}, {{full_name}}, {{company}}"),
+    voice: z.enum(VOICES).optional(),
+    schedule_at: z.string().datetime({ offset: true }).nullable().optional(),
+    window_start: HHMM.optional(),
+    window_end: HHMM.optional(),
+    timezone: z.string().max(64).optional(),
+    max_attempts: z.number().int().min(1).max(5).optional(),
+    require_consent: z.boolean().optional(),
+  })
+  .strict();
+export const VoiceTarget = z.object({
+  id: Id,
+  contact_id: z.string().nullable(),
+  phone: z.string(),
+  first_name: z.string().nullable(),
+  status: z.string(),
+  attempts: z.number().int(),
+  last_attempt_at: MaybeIso.nullable(),
+  outcome: z.string().nullable(),
+  created_at: MaybeIso,
+});
+export const VoiceTargetsAdd = z
+  .object({
+    contact_ids: z.array(z.string().max(100)).max(1000).optional(),
+    lifecycle: z.string().max(40).optional(),
+    tag: z.string().max(60).optional(),
+    q: z.string().max(200).optional(),
+    phones: z.array(z.object({ phone: z.string().min(5).max(32), first_name: z.string().max(80).nullable().optional() })).max(1000).optional(),
+  })
+  .strict();
+export const VoiceTargetsAddResult = z.object({
+  added: z.number().int(),
+  skipped_dnc: z.number().int(),
+  skipped_no_consent: z.number().int(),
+  skipped_duplicate: z.number().int(),
+  skipped_invalid: z.number().int(),
+});
+
+/* ─── Mail ─────────────────────────────────────────────────────────────── */
+export const MailAccount = z.object({
+  id: Id,
+  provider: z.string(),
+  email: z.string(),
+  display_name: z.string().nullable(),
+  status: z.enum(["connected", "error", "disabled"]),
+  last_sync_at: MaybeIso.nullable(),
+  last_error: z.string().nullable(),
+  message_count: z.number().int(),
+  created_at: MaybeIso,
+});
+
+/* ─── Accounting ───────────────────────────────────────────────────────── */
+export const AccountingConnection = z.object({
+  id: Id,
+  provider: z.string(),
+  realm_id: z.string().nullable(),
+  tenant_id: z.string().nullable(),
+  company_name: z.string().nullable(),
+  status: z.enum(["connected", "error", "disabled"]),
+  last_sync_at: MaybeIso.nullable(),
+  last_error: z.string().nullable(),
+  settings: z.record(z.unknown()),
+  created_at: MaybeIso,
+});
+export const AccountingPush = z
+  .object({
+    kind: z.enum(ACCOUNTING_ENTITY_KINDS),
+    id: Id,
+    connection_id: z.string().max(100).optional().describe("Default: every connected system"),
+    force: z.boolean().optional().describe("Push drafts / unchanged entities too"),
+  })
+  .strict();
+export const AccountingPushOutcome = z.object({
+  connection_id: z.string(),
+  provider: z.string(),
+  kind: z.enum(ACCOUNTING_ENTITY_KINDS),
+  id: z.string(),
+  status: z.enum(["ok", "skipped", "error"]),
+  remote_id: z.string().nullable(),
+  message: z.string().nullable(),
+});
+export const AccountingLink = z.object({
+  entity_id: z.string(),
+  connection_id: z.string(),
+  provider: z.string(),
+  remote_id: z.string().nullable(),
+  last_pushed_at: MaybeIso.nullable(),
+  error: z.string().nullable(),
+  state: z.enum(["synced", "pending", "error"]),
+});
+export const AccountingLinkQuery = ListQuery.extend({
+  kind: z.enum(ACCOUNTING_ENTITY_KINDS).default("invoice"),
+  connection_id: z.string().max(100).optional(),
+});
+
+/* ─── Optimize ─────────────────────────────────────────────────────────── */
+export const CashflowQuery = z.object({ weeks: z.coerce.number().int().min(1).max(26).optional().describe("Horizon in weeks (default 8)") });
+export const CapacityQuery = z.object({
+  weeks: z.coerce.number().int().min(1).max(26).optional(),
+  lookback_weeks: z.coerce.number().int().min(1).max(26).optional(),
+  target: z.coerce.number().min(0.1).max(1).optional().describe("Utilisation threshold (default 0.85)"),
+});
+export const PricingBody = z
+  .object({
+    items: z
+      .array(
+        z.object({
+          description: z.string().trim().min(1).max(200),
+          qty: z.number().min(0).max(1_000_000).default(1),
+          unit_minor: z.number().int().min(0).describe("Proposed unit price"),
+        })
+      )
+      .min(1)
+      .max(100),
+  })
+  .strict();
+export const OptimizeResult = z.record(z.unknown()).describe("Model output; see the Optimize page for field semantics");
+
+/* ─── Agents & approvals ───────────────────────────────────────────────── */
+export const Agent = z.object({
+  id: z.string(),
+  name: z.string(),
+  role: z.string(),
+  status: z.string(),
+  autonomy_level: z.string().nullable(),
+  tools: z.array(z.string()).nullable().describe("Allowlist; null = every tool"),
+  model: z.string().nullable(),
+  tasks_completed: z.number().int().nullable(),
+  created_at: MaybeIso,
+});
+export const AgentRun = z.object({
+  id: Id,
+  agent_id: z.string(),
+  agent_name: z.string().nullable(),
+  status: z.enum(["queued", "running", "awaiting_approval", "done", "failed", "cancelled"]),
+  trigger_kind: z.string().nullable(),
+  prompt: z.string().nullable(),
+  output: z.string().nullable(),
+  error: z.string().nullable(),
+  tokens_in: z.number().int().nullable(),
+  tokens_out: z.number().int().nullable(),
+  started_at: MaybeIso.nullable(),
+  finished_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+});
+export const AgentRunListQuery = ListQuery.extend({
+  agent_id: z.string().max(100).optional(),
+  status: z.enum(["queued", "running", "awaiting_approval", "done", "failed", "cancelled"]).optional(),
+});
+export const AgentRunCreate = z.object({ prompt: z.string().trim().min(1).max(8000).optional() }).strict();
+export const AgentRunQueued = z.object({ run_id: Id, agent_id: z.string(), status: z.literal("queued") });
+export const Approval = z.object({
+  id: Id,
+  run_id: z.string().nullable(),
+  agent_id: z.string().nullable(),
+  agent_name: z.string().nullable(),
+  tool_name: z.string(),
+  input: z.record(z.unknown()),
+  preview: z.string().nullable(),
+  status: z.enum(["pending", "approved", "rejected", "expired"]),
+  decided_by: z.string().nullable(),
+  decided_at: MaybeIso.nullable(),
+  expires_at: MaybeIso.nullable(),
+  created_at: MaybeIso,
+});
+export const ApprovalListQuery = ListQuery.extend({ status: z.enum(["pending", "approved", "rejected", "expired"]).optional() });
+export const ApprovalDecide = z
+  .object({
+    decision: z.enum(["approved", "rejected"]),
+    edited_input: z.record(z.unknown()).optional().describe("Replace the proposed payload before approving (validated against the tool schema)"),
+  })
+  .strict();
+export const ApprovalDecided = Approval.extend({ outcome: z.string().nullable().describe("Result of executing a copilot/MCP approval inline") });

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, Inbox, Loader2, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadMore } from "@/components/ui/load-more";
 import { PageContainer } from "@/components/page-container";
 import { cn, timeAgo } from "@/lib/utils";
 
@@ -40,27 +41,38 @@ export default function OutboxSettingsPage() {
   const [rows, setRows] = useState<OutboxRow[]>([]);
   const [channels, setChannels] = useState<Record<Channel, "live" | "simulated"> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [channel, setChannel] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (after?: string | null) => {
+    if (after) setLoadingMore(true);
+    else setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ limit: "100" });
+      const params = new URLSearchParams({ limit: "50" });
       if (channel) params.set("channel", channel);
       if (status) params.set("status", status);
+      if (after) params.set("cursor", after);
       const res = await fetch(`/api/notifications/outbox?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.detail ?? data?.error ?? "Could not load the outbox.");
-      setRows(data.rows ?? []);
+      const next: OutboxRow[] = data.rows ?? [];
+      setRows((prev) => {
+        if (!after) return next;
+        const seen = new Set(prev.map((r) => r.id));
+        return [...prev, ...next.filter((r) => !seen.has(r.id))];
+      });
+      setCursor(typeof data.next_cursor === "string" ? data.next_cursor : null);
       setChannels(data.channels ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the outbox.");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [channel, status]);
 
@@ -200,6 +212,7 @@ export default function OutboxSettingsPage() {
           })}
         </ul>
       )}
+      {rows.length > 0 && <LoadMore hasMore={Boolean(cursor)} loading={loadingMore} count={rows.length} onMore={() => load(cursor)} noun="messages" />}
     </PageContainer>
   );
 }

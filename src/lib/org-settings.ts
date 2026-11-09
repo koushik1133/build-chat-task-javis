@@ -1,4 +1,5 @@
 import { query, queryOne } from "@/lib/dsql";
+import { requestMemo } from "@/lib/request-cache";
 import { DEFAULT_LOCALE, isLocale, type Locale } from "@/lib/i18n";
 import { DEFAULT_CURRENCY, isCurrencyCode, isValidTimeZone } from "@/lib/i18n/format";
 
@@ -38,13 +39,20 @@ export function toOrgSettings(raw: Record<string, unknown>): OrgSettings {
   };
 }
 
-export async function getOrgSettings(dataId: string): Promise<OrgSettings> {
+/** Uncached loader (exported for tests); callers use `getOrgSettings`. */
+export async function loadOrgSettings(dataId: string): Promise<OrgSettings> {
   const row = await queryOne<{ settings: string | null }>(
     `SELECT settings FROM organizations WHERE owner_user_id = $1`,
     [dataId]
   ).catch(() => null);
   return toOrgSettings(parseOrgSettings(row?.settings));
 }
+
+/**
+ * Per-request memoised: the (app) layout, `getRequestLocale()` and the home
+ * summary all read org settings in the same render, so the SELECT runs once.
+ */
+export const getOrgSettings: (dataId: string) => Promise<OrgSettings> = requestMemo(loadOrgSettings);
 
 /** Merge `patch` into the stored JSON (other keys untouched) and return the new typed view. */
 export async function updateOrgSettings(dataId: string, patch: Partial<OrgSettings>): Promise<OrgSettings> {

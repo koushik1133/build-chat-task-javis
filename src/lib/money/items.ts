@@ -13,6 +13,10 @@ export const LineItemSchema = z.object({
   qty: z.number().finite().min(0).max(1_000_000),
   unit_minor: z.number().int().min(0).max(1_000_000_000_000),
   tax_rate_bp: z.number().int().min(0).max(10_000).default(0),
+  /** Catalogue tax rate (tax_rates.id). When it resolves, it wins over `tax_rate_bp`. */
+  tax_rate_id: z.string().max(100).nullable().optional(),
+  /** Several catalogue rates on one line (e.g. GST + compound PST). Supersedes `tax_rate_id`. */
+  tax_rate_ids: z.array(z.string().max(100)).max(5).optional(),
   /** Optional pricebook link; lets inventory reserve/consume stock for this line. */
   product_id: z.string().max(100).optional(),
 });

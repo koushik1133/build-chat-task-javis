@@ -7,6 +7,7 @@ import { CREDIT_PACKS } from "@/lib/credits/packs";
 import { creditMarkup } from "@/lib/credits/pricing";
 import { getBudget, setBudget } from "@/lib/llm/budgets";
 import { activeProviderId } from "@/lib/payments";
+import { normaliseCursor, page, parseListParams } from "@/lib/public-api/pagination";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,17 +21,20 @@ export async function GET(req: Request) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const url = new URL(req.url);
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50) || 50, 1), 200);
+  const list = parseListParams(url, { limit: 50 });
+  if (list.badCursor) return NextResponse.json({ error: "invalid cursor" }, { status: 400 });
   try {
-    const [balance, ledger, purchases, budget] = await Promise.all([
+    const [balance, ledgerRows, purchases, budget] = await Promise.all([
       getBalance(scope.dataId),
-      listLedger(scope.dataId, limit),
+      listLedger(scope.dataId, list.limit + 1, list.cursor),
       listPurchases(scope.dataId, 10),
       getBudget(scope.dataId),
     ]);
+    const pg = page(ledgerRows, list.limit, (r) => normaliseCursor({ created_at: r.created_at, id: r.id }));
     return NextResponse.json({
       balance,
-      ledger,
+      ledger: pg.data,
+      ledger_next_cursor: pg.next_cursor,
       purchases,
       packs: CREDIT_PACKS,
       creditsEnforced: budget.creditsEnforced,

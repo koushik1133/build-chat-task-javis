@@ -225,3 +225,205 @@ registerTool<DraftInputT>({
     }
   },
 });
+
+/* ═══ Phase 6: ticket creation, assignment, SLA ═══ */
+import { createTicket, getTicketRow, listPolicies, updateTicket } from "@/lib/helpdesk/tickets";
+import { createArticle, getArticle, updateArticle } from "@/lib/kb/articles";
+
+/* ---------- helpdesk.create_ticket ---------- */
+const CreateTicketInput = z.object({
+  subject: z.string().trim().min(1).max(200),
+  body: z.string().max(20_000).optional(),
+  priority: z.enum(TICKET_PRIORITIES).optional(),
+  contact_id: z.string().max(100).optional(),
+  requester_email: z.string().email().max(320).optional(),
+  requester_name: z.string().max(200).optional(),
+  tags: z.array(z.string().max(40)).max(20).optional(),
+});
+type CreateTicketT = z.infer<typeof CreateTicketInput>;
+
+registerTool<CreateTicketT>({
+  name: "helpdesk.create_ticket",
+  module: "helpdesk",
+  description: "Open a new support ticket (subject, optional first message, priority, requester). SLA due times are computed from the default policy.",
+  input: CreateTicketInput,
+  parameters: {
+    type: "object",
+    properties: {
+      subject: { type: "string" },
+      body: { type: "string", description: "First message on the ticket" },
+      priority: { type: "string", enum: [...TICKET_PRIORITIES] },
+      contact_id: { type: "string", description: "CRM contact id of the requester (optional)" },
+      requester_email: { type: "string" },
+      requester_name: { type: "string" },
+      tags: { type: "array", items: { type: "string" } },
+    },
+    required: ["subject"],
+  },
+  scope: "write",
+  requiresApproval: false,
+  preview: (i) => `Create ticket "${i.subject}"${i.priority ? ` (${i.priority})` : ""}`,
+  async run(ctx, input) {
+    try {
+      const t = await createTicket(ctx.userId, {
+        subject: input.subject,
+        body: input.body ?? null,
+        priority: input.priority,
+        source: "agent",
+        contact_id: input.contact_id ?? null,
+        requester_email: input.requester_email ?? null,
+        requester_name: input.requester_name ?? null,
+        tags: input.tags,
+        author_kind: "ai",
+        author_id: ctx.agentId ? `agent:${ctx.agentId}` : ctx.runId,
+      });
+      return { ok: true, data: summarise(t), summary: `Opened ticket ${formatTicketNumber(t.number)}: ${t.subject}` };
+    } catch (err) {
+      return fail(`Could not create ticket: ${errMsg(err)}`);
+    }
+  },
+});
+
+/* ---------- helpdesk.assign ---------- */
+const AssignInput = z.object({
+  ticket_id: z.string().min(1).max(100),
+  assigned_to: z.string().max(100).nullable().describe("Member user id, or null to unassign"),
+});
+type AssignT = z.infer<typeof AssignInput>;
+
+registerTool<AssignT>({
+  name: "helpdesk.assign",
+  module: "helpdesk",
+  description: "Assign a ticket to a team member (or unassign with null).",
+  input: AssignInput,
+  parameters: {
+    type: "object",
+    properties: { ticket_id: { type: "string" }, assigned_to: { type: ["string", "null"], description: "Member user id or null" } },
+    required: ["ticket_id", "assigned_to"],
+  },
+  scope: "write",
+  requiresApproval: false,
+  preview: (i) => (i.assigned_to ? `Assign ticket ${i.ticket_id} to ${i.assigned_to}` : `Unassign ticket ${i.ticket_id}`),
+  async run(ctx, input) {
+    try {
+      if (!(await getTicketRow(ctx.userId, input.ticket_id))) return fail("Ticket not found");
+      const t = await updateTicket(ctx.userId, input.ticket_id, { assigned_to: input.assigned_to }, { actorId: ctx.agentId ? `agent:${ctx.agentId}` : null });
+      return { ok: true, data: summarise(t), summary: `${formatTicketNumber(t.number)} ${input.assigned_to ? `assigned to ${input.assigned_to}` : "unassigned"}` };
+    } catch (err) {
+      return fail(`Assign failed: ${errMsg(err)}`);
+    }
+  },
+});
+
+/* ---------- helpdesk.set_sla ---------- */
+const SetSlaInput = z.object({
+  ticket_id: z.string().min(1).max(100),
+  sla_policy_id: z.string().max(100).optional().describe("Policy id; omit to only change priority"),
+  priority: z.enum(TICKET_PRIORITIES).optional(),
+});
+type SetSlaT = z.infer<typeof SetSlaInput>;
+
+registerTool<SetSlaT>({
+  name: "helpdesk.set_sla",
+  module: "helpdesk",
+  description: "Change a ticket's SLA policy and/or priority; due times are recomputed. Call with no ticket changes to list the available policies.",
+  input: SetSlaInput,
+  parameters: {
+    type: "object",
+    properties: {
+      ticket_id: { type: "string" },
+      sla_policy_id: { type: "string" },
+      priority: { type: "string", enum: [...TICKET_PRIORITIES] },
+    },
+    required: ["ticket_id"],
+  },
+  scope: "write",
+  requiresApproval: false,
+  preview: (i) => `Set SLA on ticket ${i.ticket_id}${i.sla_policy_id ? ` → policy ${i.sla_policy_id}` : ""}${i.priority ? `, priority ${i.priority}` : ""}`,
+  async run(ctx, input) {
+    try {
+      if (!(await getTicketRow(ctx.userId, input.ticket_id))) return fail("Ticket not found");
+      const policies = await listPolicies(ctx.userId);
+      if (!input.sla_policy_id && !input.priority) {
+        return { ok: true, data: { policies: policies.map((p) => ({ id: p.id, name: p.name, first_response_minutes: p.first_response_minutes, resolution_minutes: p.resolution_minutes, is_default: p.is_default })) }, summary: `${policies.length} SLA polic${policies.length === 1 ? "y" : "ies"} available` };
+      }
+      if (input.sla_policy_id && !policies.some((p) => p.id === input.sla_policy_id)) return fail("SLA policy not found");
+      const t = await updateTicket(ctx.userId, input.ticket_id, { sla_policy_id: input.sla_policy_id, priority: input.priority }, { actorId: ctx.agentId ? `agent:${ctx.agentId}` : null });
+      return { ok: true, data: summarise(t), summary: `${formatTicketNumber(t.number)}: SLA updated (first response due ${t.first_response_due_at ?? "n/a"})` };
+    } catch (err) {
+      return fail(`SLA update failed: ${errMsg(err)}`);
+    }
+  },
+});
+
+/* ---------- kb.create_article ---------- */
+const CreateArticleInput = z.object({
+  title: z.string().trim().min(1).max(200),
+  body_md: z.string().max(200_000),
+  category: z.string().max(100).optional(),
+  tags: z.array(z.string().max(40)).max(30).optional(),
+  publish: z.boolean().optional().describe("Publish immediately (default: save as draft)"),
+  is_public: z.boolean().optional().describe("Show in the public help center"),
+});
+type CreateArticleT = z.infer<typeof CreateArticleInput>;
+
+registerTool<CreateArticleT>({
+  name: "kb.create_article",
+  module: "knowledge",
+  description: "Create a knowledge-base article from markdown. Saved as a draft unless publish=true.",
+  input: CreateArticleInput,
+  parameters: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      body_md: { type: "string", description: "Markdown body" },
+      category: { type: "string" },
+      tags: { type: "array", items: { type: "string" } },
+      publish: { type: "boolean" },
+      is_public: { type: "boolean" },
+    },
+    required: ["title", "body_md"],
+  },
+  scope: "write",
+  requiresApproval: (i) => Boolean(i.publish || i.is_public),
+  preview: (i) => `${i.publish ? "Publish" : "Draft"} article "${i.title}"`,
+  async run(ctx, input) {
+    try {
+      const a = await createArticle(ctx.userId, {
+        title: input.title,
+        body_md: input.body_md,
+        category: input.category ?? null,
+        tags: input.tags,
+        status: input.publish ? "published" : "draft",
+        is_public: input.is_public ?? false,
+      });
+      return { ok: true, data: { id: a.id, slug: a.slug, title: a.title, status: a.status, is_public: a.is_public }, summary: `${a.status === "published" ? "Published" : "Drafted"} article "${a.title}" (${a.slug})` };
+    } catch (err) {
+      return fail(`Could not create article: ${errMsg(err)}`);
+    }
+  },
+});
+
+/* ---------- kb.publish_article ---------- */
+const PublishArticleInput = z.object({ article_id: z.string().min(1).max(100), is_public: z.boolean().optional() });
+type PublishArticleT = z.infer<typeof PublishArticleInput>;
+
+registerTool<PublishArticleT>({
+  name: "kb.publish_article",
+  module: "knowledge",
+  description: "Publish a draft article (optionally making it public in the help center). Needs approval.",
+  input: PublishArticleInput,
+  parameters: { type: "object", properties: { article_id: { type: "string" }, is_public: { type: "boolean" } }, required: ["article_id"] },
+  scope: "write",
+  requiresApproval: true,
+  preview: (i) => `Publish article ${i.article_id}${i.is_public ? " (public)" : ""}`,
+  async run(ctx, input) {
+    try {
+      if (!(await getArticle(ctx.userId, input.article_id))) return fail("Article not found");
+      const a = await updateArticle(ctx.userId, input.article_id, { status: "published", ...(input.is_public === undefined ? {} : { is_public: input.is_public }) });
+      return { ok: true, data: { id: a.id, slug: a.slug, status: a.status, is_public: a.is_public, published_at: a.published_at }, summary: `Published "${a.title}"` };
+    } catch (err) {
+      return fail(`Publish failed: ${errMsg(err)}`);
+    }
+  },
+});

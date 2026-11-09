@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { query } from "@/lib/dsql";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /**
  * Audit log: who changed what, when.
@@ -134,12 +135,14 @@ export interface ListAuditOptions {
   entity?: string | null;
   entityId?: string | null;
   limit?: number;
-  /** ISO timestamp cursor: rows strictly older than this. */
+  /** ISO timestamp cursor: rows strictly older than this (legacy; prefer `cursor`). */
   before?: string | null;
+  /** Keyset cursor (created_at, id) — stable under same-millisecond writes. */
+  cursor?: Cursor | null;
 }
 
 export async function listAudit(dataId: string, opts: ListAuditOptions = {}): Promise<AuditRow[]> {
-  const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
+  const limit = Math.min(201, Math.max(1, opts.limit ?? 50));
   const where: string[] = ["user_id = $1"];
   const values: unknown[] = [dataId];
   if (opts.entity) {
@@ -154,11 +157,12 @@ export async function listAudit(dataId: string, opts: ListAuditOptions = {}): Pr
     values.push(opts.before);
     where.push(`created_at < $${values.length}`);
   }
+  const keyset = keysetClause(opts.cursor, values);
   values.push(limit);
   return query<AuditRow>(
     `SELECT id, user_id, actor_id, actor_email, action, entity, entity_id, diff, ip, user_agent, created_at
-       FROM audit_log WHERE ${where.join(" AND ")}
-      ORDER BY created_at DESC LIMIT $${values.length}`,
+       FROM audit_log WHERE ${where.join(" AND ")}${keyset}
+      ORDER BY ${keysetOrder()} LIMIT $${values.length}`,
     values
   );
 }

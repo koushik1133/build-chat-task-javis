@@ -16,6 +16,9 @@ import { captureError } from "@/lib/errors/capture";
 import { processAccountingEvents, pullDue, pushDue } from "@/lib/accounting/sync";
 import { remindDueSoon } from "@/lib/privacy/dsr";
 import { applyRetention } from "@/lib/privacy/retention";
+import { markOverdue, sendReminders } from "@/lib/money/dunning";
+import { runDueSchedules } from "@/lib/money/recurring";
+import { pruneVitals } from "@/lib/vitals";
 import type { JobRow } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -109,7 +112,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, hourly_ran: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, hourly_ran: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -175,7 +178,11 @@ async function handleTick(req: Request) {
     counts.hourly_ran = 1;
     try { counts.privacy_reminders = (await remindDueSoon(200)).reminded; } catch (err) { console.error("[cron/agents] privacy reminders failed:", err); }
     try { const r = await applyRetention(500); counts.retention = Object.values(r.affected).reduce((a, b) => a + b, 0); } catch (err) { console.error("[cron/agents] retention failed:", err); }
+    await pruneVitals(30).catch(() => 0);
   }
+  try { counts.invoices_overdue = (await markOverdue(200)).marked; } catch (err) { console.error("[cron/agents] overdue sweep failed:", err); }
+  try { counts.invoice_reminders = (await sendReminders(100)).sent; } catch (err) { console.error("[cron/agents] reminder sweep failed:", err); }
+  try { counts.recurring_invoices = (await runDueSchedules(50)).created; } catch (err) { console.error("[cron/agents] recurring sweep failed:", err); }
   await pruneRateLimits().catch(() => 0);
 
   counts.ms = Date.now() - tickStart;

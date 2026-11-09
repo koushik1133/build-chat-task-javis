@@ -17,7 +17,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     if (!share) return NextResponse.json({ error: "not_found" }, { status: 404 });
     const body = await parseBody(req, Body, 4_096);
     if (!body.ok) return body.res;
-    const out = await requestAcceptanceOtp(share.entity_id, body.data.email, body.data.purpose === "decline" ? "decline" : "accept");
+    const out = await requestAcceptanceOtp(share.entity_id, body.data.email, body.data.purpose === "decline" ? "decline" : "accept", share.recipient ?? null);
     return NextResponse.json(out);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "error";

@@ -183,6 +183,7 @@ function operation(def: RouteDef): JsonSchema {
     tags: [def.tag],
     security: def.scope === null ? [] : [{ bearerAuth: [] }],
     "x-scope": def.scope,
+    ...(def.tools?.length ? { "x-kernelhub-tools": [...def.tools] } : {}),
     responses: {
       [okStatus]: {
         description: def.list ? "A page of results" : "Success",
@@ -248,6 +249,10 @@ export function buildOpenApiDocument(opts: BuildOptions, routes: readonly RouteD
     },
     servers: [{ url: opts.serverUrl }],
     tags: [...TAGS],
+    "x-kernelhub-tools": {
+      description: "Operations carry `x-kernelhub-tools`: the agent/MCP tool names (see /api/mcp and docs/MCP.md) that perform the same action.",
+      mcp_endpoint: opts.serverUrl.replace(/\/api\/v1$/, "/api/mcp"),
+    },
     paths,
     components: {
       securitySchemes: {

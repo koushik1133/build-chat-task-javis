@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Loader2, RefreshCw, ScrollText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadMore } from "@/components/ui/load-more";
 import { PageContainer } from "@/components/page-container";
 import { cn, timeAgo } from "@/lib/utils";
 
@@ -38,29 +39,37 @@ function fmt(v: unknown): string {
 
 export default function AuditSettingsPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [nextBefore, setNextBefore] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entity, setEntity] = useState("");
   const [entityId, setEntityId] = useState("");
 
-  const load = useCallback(async (before?: string | null) => {
-    setLoading(true);
+  const load = useCallback(async (after?: string | null) => {
+    if (after) setLoadingMore(true);
+    else setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ limit: "50" });
       if (entity.trim()) params.set("entity", entity.trim());
       if (entityId.trim()) params.set("entityId", entityId.trim());
-      if (before) params.set("before", before);
+      if (after) params.set("cursor", after);
       const res = await fetch(`/api/audit?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.detail ?? data?.error ?? "Could not load the audit log.");
-      setEntries((prev) => (before ? [...prev, ...data.entries] : data.entries));
-      setNextBefore(data.entries.length === 50 ? data.nextBefore : null);
+      const next: AuditEntry[] = data.entries ?? [];
+      setEntries((prev) => {
+        if (!after) return next;
+        const seen = new Set(prev.map((e) => e.id));
+        return [...prev, ...next.filter((e) => !seen.has(e.id))];
+      });
+      setCursor(typeof data.next_cursor === "string" ? data.next_cursor : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the audit log.");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [entity, entityId]);
 
@@ -163,13 +172,7 @@ export default function AuditSettingsPage() {
         </ol>
       )}
 
-      {nextBefore && (
-        <div className="flex justify-center">
-          <Button variant="outline" onClick={() => void load(nextBefore)} disabled={loading}>
-            Load older
-          </Button>
-        </div>
-      )}
+      {entries.length > 0 && <LoadMore hasMore={Boolean(cursor)} loading={loadingMore} count={entries.length} onMore={() => load(cursor)} noun="entries" />}
     </PageContainer>
   );
 }

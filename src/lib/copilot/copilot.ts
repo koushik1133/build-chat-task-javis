@@ -7,6 +7,8 @@ import { assertBudget } from "@/lib/llm/budgets";
 import { recordUsage } from "@/lib/llm/metering";
 import { SYSTEM_BASE } from "@/lib/prompts";
 import { buildModuleContext, type CopilotModule } from "./context-builders";
+import { COPILOT_PACKS, toolModulesFor, type PageContext } from "./modules";
+import { getType } from "@/lib/records/store";
 // Tool modules self-register at import time; the barrel pulls them all in.
 // The three below are imported directly as well until the barrel lists them.
 import { ensureToolsLoaded } from "@/lib/agents/tools";
@@ -31,6 +33,20 @@ export interface CopilotRequest {
   message: string;
   recordId?: string;
   history?: CopilotHistoryItem[];
+  /** Where the user is: pathname + visible entity ids + record type slug. */
+  page?: PageContext;
+}
+
+/** What the copilot would be grounded with for a request (exported for tests). */
+export interface CopilotPlan {
+  module: CopilotModule;
+  toolModules: string[];
+  tools: ToolSpec[];
+  /** Record type `copilot_prompt` when on /r/<type>. */
+  recordTypePrompt: string | null;
+  /** "Call X first" hints derived from entity ids on the page. */
+  entityHints: string[];
+  system: string;
 }
 
 export interface CopilotToolCall {
@@ -51,18 +67,10 @@ const MAX_HISTORY = 10;
 /** Tool result payloads are clipped before going back to the model. */
 const MAX_TOOL_OUTPUT = 6000;
 
-/** Modules whose tools are always offered alongside the page's own. */
-const SHARED_MODULES = ["knowledge"] as const;
-/** Modules offered when no page-specific module applies. */
-const GENERAL_MODULES = ["knowledge", "comms", "tasks", "crm", "leads"] as const;
-
 function toolsFor(module: CopilotModule): ToolSpec[] {
-  const modules = new Set<string>(module === "general" ? GENERAL_MODULES : [module, ...SHARED_MODULES]);
-  // comms lets the CRM/leads copilots draft and (with approval) send follow-ups.
-  if (module === "crm" || module === "leads") modules.add("comms");
   const seen = new Set<string>();
   const out: ToolSpec[] = [];
-  for (const m of modules) {
+  for (const m of toolModulesFor(module)) {
     for (const t of listTools({ module: m })) {
       if (!seen.has(t.name)) {
         seen.add(t.name);
@@ -71,6 +79,17 @@ function toolsFor(module: CopilotModule): ToolSpec[] {
     }
   }
   return out;
+}
+
+function entityHints(module: CopilotModule, page?: PageContext): string[] {
+  const pack = COPILOT_PACKS[module];
+  const hints: string[] = [];
+  for (const [key, value] of Object.entries(page?.params ?? {})) {
+    const tool = pack.entityParams?.[key];
+    if (tool) hints.push(`The page shows ${key} ${value}; call ${tool} with it before answering about it.`);
+  }
+  if (page?.recordType) hints.push(`The page shows the "${page.recordType}" record type; use type="${page.recordType}" for records.* tools.`);
+  return hints;
 }
 
 function clip(v: unknown, max = MAX_TOOL_OUTPUT): string {
@@ -102,12 +121,16 @@ async function queueApproval(userId: string, spec: ToolSpec, input: unknown): Pr
   return id;
 }
 
-function systemPrompt(module: CopilotModule, context: string, tools: ToolSpec[]): string {
+function systemPrompt(module: CopilotModule, context: string, tools: ToolSpec[], extra: { page?: PageContext; recordTypePrompt: string | null; hints: string[] }): string {
   const toolLines = tools.map((t) => `- ${t.name} (${t.scope}${needsApprovalHint(t)}): ${t.description}`).join("\n");
+  const pack = COPILOT_PACKS[module];
   return [
     SYSTEM_BASE,
     "",
-    `You are the in-app copilot for the "${module}" page. Answer from the snapshot below first; call tools when you need fresher or fuller data, or to act on the user's request.`,
+    `You are the in-app copilot for the "${pack.label}" page${extra.page?.pathname ? ` (${extra.page.pathname})` : ""}. Answer from the snapshot below first; call tools when you need fresher or fuller data, or to act on the user's request.`,
+    pack.prompt,
+    ...(extra.hints.length ? ["## Page context", ...extra.hints.map((h) => `- ${h}`)] : []),
+    ...(extra.recordTypePrompt ? ["## Instructions for this record type", extra.recordTypePrompt] : []),
     "Rules:",
     "- Use tools to act (create, update, move, schedule) instead of describing what the user should click. Confirm what you did in one or two sentences.",
     "- Some writes are queued for the user's approval rather than executed; when a tool reports that, say it is waiting in the Approvals inbox.",
@@ -126,13 +149,34 @@ function needsApprovalHint(t: ToolSpec): string {
   return t.requiresApproval === true ? ", needs approval" : "";
 }
 
-export async function runCopilot(userId: string, req: CopilotRequest): Promise<CopilotResult> {
+/** Resolve module pack, tool subset, record-type prompt and grounding context without calling the model. */
+export async function planCopilot(userId: string, req: Pick<CopilotRequest, "module" | "recordId" | "page">): Promise<CopilotPlan> {
   ensureToolsLoaded();
   const tools = toolsFor(req.module);
-  const context = await buildModuleContext(userId, req.module, req.recordId);
+  const page = req.page;
+  let recordTypePrompt: string | null = null;
+  if (page?.recordType) {
+    const type = await getType(userId, page.recordType).catch(() => null);
+    recordTypePrompt = type?.copilot_prompt?.trim() || null;
+  }
+  const hints = entityHints(req.module, page);
+  const context = await buildModuleContext(userId, req.module, req.recordId, { params: page?.params, recordType: page?.recordType ?? null });
+  return {
+    module: req.module,
+    toolModules: toolModulesFor(req.module),
+    tools,
+    recordTypePrompt,
+    entityHints: hints,
+    system: systemPrompt(req.module, context, tools, { page, recordTypePrompt, hints }),
+  };
+}
+
+export async function runCopilot(userId: string, req: CopilotRequest): Promise<CopilotResult> {
+  const plan = await planCopilot(userId, req);
+  const tools = plan.tools;
   const ctx: ToolContext = { userId, runId: `copilot:${randomUUID()}`, agentId: null, autonomy: "approve" };
 
-  const messages: RouterMessage[] = [{ role: "system", content: systemPrompt(req.module, context, tools) }];
+  const messages: RouterMessage[] = [{ role: "system", content: plan.system }];
   for (const h of (req.history ?? []).slice(-MAX_HISTORY)) {
     if ((h.role === "user" || h.role === "assistant") && h.content.trim()) {
       messages.push({ role: h.role, content: h.content.slice(0, 4000) });

@@ -9,6 +9,7 @@ import { describeAccountingProviders } from "@/lib/accounting";
 import { channelStatus, twilioIsLive } from "@/lib/notifications/status";
 import { listRecentErrors } from "@/lib/errors/capture";
 import { CRON_TICK_KEY, getSystemState } from "@/lib/system/state";
+import { summariseVitals } from "@/lib/vitals";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,15 +61,17 @@ export async function GET() {
   };
 
   if (!database.ok) {
-    return NextResponse.json({ database, providers, cron: null, queue: null, outbox: null, webhooks: null, errors: [], errorsAvailable: false }, { status: 200 });
+    return NextResponse.json({ database, providers, cron: null, queue: null, outbox: null, webhooks: null, errors: [], errorsAvailable: false, vitals: null }, { status: 200 });
   }
 
-  const [cron, queue, outbox, webhooks, errorsAvailable] = await Promise.all([
+  const [cron, queue, outbox, webhooks, errorsAvailable, vitals] = await Promise.all([
     getSystemState<{ at: string; counts: Record<string, number> }>(CRON_TICK_KEY).catch(() => null),
     countsBy("agent_jobs", ["queued", "running", "failed", "dead"]),
     countsBy("notification_outbox", ["queued", "failed"]),
     countsBy("webhook_deliveries", ["queued", "failed", "dead"]),
     tableExists("app_errors"),
+    // Web Vitals are deployment-wide aggregates (anonymous, no tenant key) — not scoped to this org.
+    summariseVitals(24).catch(() => null),
   ]);
   const errors = errorsAvailable ? await listRecentErrors(50, scope.dataId).catch(() => []) : [];
 
@@ -81,5 +84,6 @@ export async function GET() {
     webhooks,
     errors,
     errorsAvailable,
+    vitals,
   });
 }

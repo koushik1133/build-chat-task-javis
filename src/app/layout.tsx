@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 import "./globals.css";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
+import { WebVitals } from "@/components/web-vitals";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-background text-foreground antialiased font-sans">
         {children}
         <RegisterServiceWorker />
+        <WebVitals />
       </body>
     </html>
   );

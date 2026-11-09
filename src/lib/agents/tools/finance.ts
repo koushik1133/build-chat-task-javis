@@ -224,3 +224,45 @@ registerTool<z.infer<typeof JobCostingInput>>({
     }
   },
 });
+
+/* ═══ Phase 6: change orders ═══ */
+import { createChangeOrder } from "@/lib/finance/change-orders";
+import { LineItemsSchema } from "@/lib/money/items";
+
+const ChangeOrderInput = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().max(4000).optional(),
+  quote_id: z.string().max(100).optional(),
+  invoice_id: z.string().max(100).optional(),
+  items: LineItemsSchema.optional(),
+  currency: CurrencySchema.optional(),
+});
+registerTool<z.infer<typeof ChangeOrderInput>>({
+  name: "finance.create_change_order",
+  module: "finance",
+  description: "Create a draft change order (priced scope change) against a quote and/or invoice. Items use minor-unit prices. Accepting it later bills the items.",
+  input: ChangeOrderInput,
+  parameters: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      description: { type: "string" },
+      quote_id: { type: "string" },
+      invoice_id: { type: "string" },
+      items: { type: "array", items: { type: "object", properties: { description: { type: "string" }, qty: { type: "number" }, unit_minor: { type: "integer" } }, required: ["description", "qty", "unit_minor"] } },
+      currency: { type: "string" },
+    },
+    required: ["title"],
+  },
+  scope: "write",
+  requiresApproval: false,
+  preview: (i) => `Create change order "${i.title}"${i.quote_id ? ` on quote ${i.quote_id}` : i.invoice_id ? ` on invoice ${i.invoice_id}` : ""}`,
+  async run(ctx, input) {
+    try {
+      const co = await createChangeOrder(ctx.userId, { title: input.title, description: input.description ?? null, quote_id: input.quote_id ?? null, invoice_id: input.invoice_id ?? null, items: input.items ?? [], currency: input.currency });
+      return { ok: true, data: { id: co.id, label: co.label, title: co.title, delta_minor: co.delta_minor, currency: co.currency, status: co.status }, summary: `Created ${co.label} "${co.title}" (${co.delta_minor} ${co.currency}, draft)` };
+    } catch (err) {
+      return fail(`Change order failed: ${errMsg(err)}`);
+    }
+  },
+});

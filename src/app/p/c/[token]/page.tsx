@@ -138,6 +138,19 @@ export default function ClientPortalPage() {
       </Section>
 
       <Section icon={Receipt} title="Invoices">
+        {data.balances && data.balances.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
+            <span>
+              Balance:{" "}
+              <span className="font-semibold tabular-nums">
+                {data.balances.map((b) => money(b.closing_minor, b.currency)).join(" · ")}
+              </span>
+            </span>
+            <Button asChild variant="outline" size="sm">
+              <a href={`/api/p/portal/${params.token}/statement?format=pdf`} target="_blank" rel="noopener">Statement</a>
+            </Button>
+          </div>
+        )}
         {data.invoices.length === 0 ? <Empty text="No invoices yet." /> : (
           <ul className="divide-y divide-border/60">
             {data.invoices.map((i) => (

@@ -28,7 +28,16 @@ interface Status {
   webhooks: Record<string, number> | null;
   errors: AppErrorRow[];
   errorsAvailable: boolean;
+  vitals: VitalsSummary | null;
 }
+interface VitalsRow { path: string; name: "LCP" | "CLS" | "INP" | "TTFB" | "FCP"; p75: number; samples: number; good_share: number }
+interface VitalsSummary { global: true; windowHours: number; rows: VitalsRow[] }
+
+/** Core Web Vitals "good" thresholds (p75) per web.dev. */
+const VITAL_GOOD: Record<VitalsRow["name"], number> = { LCP: 2500, CLS: 0.1, INP: 200, TTFB: 800, FCP: 1800 };
+const VITAL_POOR: Record<VitalsRow["name"], number> = { LCP: 4000, CLS: 0.25, INP: 500, TTFB: 1800, FCP: 3000 };
+const fmtVital = (name: VitalsRow["name"], v: number) => (name === "CLS" ? v.toFixed(3) : `${Math.round(v)} ms`);
+const vitalTone = (name: VitalsRow["name"], v: number): Tone => (v <= VITAL_GOOD[name] ? "success" : v <= VITAL_POOR[name] ? "warning" : "danger");
 
 const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
 const fmtTime = (iso: string | null | undefined) => (iso ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "Never");
@@ -169,6 +178,8 @@ export default function SystemHealthPage() {
             </ul>
           </section>
 
+          <VitalsSection vitals={status.vitals} />
+
           <section aria-labelledby="errors-heading" className="rounded-xl border border-border bg-card p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="errors-heading" className="text-sm font-semibold">Recent errors</h2>
@@ -242,5 +253,59 @@ function ErrorRows({ row, expanded, onToggle }: { row: AppErrorRow; expanded: bo
         </tr>
       )}
     </>
+  );
+}
+
+/** p75 Core Web Vitals by route. Global to the deployment (anonymous samples carry no tenant key). */
+function VitalsSection({ vitals }: { vitals: VitalsSummary | null }) {
+  const byPath = new Map<string, VitalsRow[]>();
+  for (const r of vitals?.rows ?? []) byPath.set(r.path, [...(byPath.get(r.path) ?? []), r]);
+  const metrics: VitalsRow["name"][] = ["LCP", "INP", "CLS", "TTFB"];
+  return (
+    <section aria-labelledby="vitals-heading" className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="vitals-heading" className="text-sm font-semibold">Web Vitals (p75 by route)</h2>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Pill tone="info">Global · all workspaces</Pill>
+          {vitals ? `last ${vitals.windowHours} h · 10% sample` : null}
+        </span>
+      </div>
+      {!vitals ? (
+        <Banner tone="warn" className="mt-3 mb-0">The web_vitals table is not present yet. Apply aws/phase6/d.sql and mount &lt;WebVitals /&gt; in the root layout.</Banner>
+      ) : byPath.size === 0 ? (
+        <Empty className="mt-3 py-8" title="No samples yet" text="Sampled page loads report LCP, INP, CLS and TTFB here. Nothing identifying is stored." />
+      ) : (
+        <TableScroller label="Web vitals by route" className="mt-3">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead className="text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-2 py-2">Route</th>
+                {metrics.map((m) => <th key={m} className="px-2 py-2 text-right">{m}</th>)}
+                <th className="px-2 py-2 text-right">Samples</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {[...byPath.entries()].map(([path, rows]) => {
+                const samples = Math.max(...rows.map((r) => r.samples));
+                return (
+                  <tr key={path}>
+                    <td className="px-2 py-2 font-mono text-xs break-all">{path}</td>
+                    {metrics.map((m) => {
+                      const r = rows.find((x) => x.name === m);
+                      return (
+                        <td key={m} className="px-2 py-2 text-right tabular-nums">
+                          {r ? <Pill tone={vitalTone(m, r.p75)} title={`${Math.round(r.good_share * 100)}% good`}>{fmtVital(m, r.p75)}</Pill> : <span className="text-muted-foreground">—</span>}
+                        </td>
+                      );
+                    })}
+                    <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{samples}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroller>
+      )}
+    </section>
   );
 }

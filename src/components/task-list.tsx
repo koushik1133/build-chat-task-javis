@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LoadMore } from "@/components/ui/load-more";
 import { timeAgo } from "@/lib/utils";
 
 type Task = { id: string; title: string; done: boolean; created_at: string };
@@ -11,10 +12,29 @@ type Task = { id: string; title: string; done: boolean; created_at: string };
 export function TaskList() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [draft, setDraft] = useState("");
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   async function refresh() {
-    const r = await fetch("/api/tasks").then((r) => r.json());
+    const r = await fetch("/api/tasks?limit=50").then((r) => r.json());
     setTasks(r.tasks ?? []);
+    setCursor(typeof r.next_cursor === "string" ? r.next_cursor : null);
+  }
+
+  async function loadMore() {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await fetch(`/api/tasks?limit=50&cursor=${encodeURIComponent(cursor)}`).then((r) => r.json());
+      const next: Task[] = r.tasks ?? [];
+      setTasks((arr) => {
+        const seen = new Set(arr.map((t) => t.id));
+        return [...arr, ...next.filter((t) => !seen.has(t.id))];
+      });
+      setCursor(typeof r.next_cursor === "string" ? r.next_cursor : null);
+    } finally {
+      setLoadingMore(false);
+    }
   }
   useEffect(() => {
     refresh();
@@ -71,6 +91,7 @@ export function TaskList() {
       {done.length > 0 && (
         <Section title={`Done (${done.length})`} tasks={done} onToggle={toggle} onDelete={remove} dim />
       )}
+      <LoadMore hasMore={Boolean(cursor)} loading={loadingMore} count={tasks.length} onMore={loadMore} noun="tasks" />
     </div>
   );
 }

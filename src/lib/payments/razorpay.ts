@@ -79,4 +79,8 @@ export const razorpayProvider: PaymentProvider = {
     }
     return parseRazorpayEvent(rawBody, headers.get("x-razorpay-event-id") ?? "");
   },
+  async refund() {
+    // Stub: payment links map to a payment id that POST /v1/payments/:id/refund would need.
+    throw new Error("Razorpay refunds are not wired yet; refund from the Razorpay dashboard and record it manually");
+  },
 };

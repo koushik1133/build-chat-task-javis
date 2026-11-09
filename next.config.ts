@@ -26,7 +26,7 @@ const nextConfig: NextConfig = {
       })),
       // Everything else: deny framing.
       {
-        source: "/((?!p/|book/|api/leads/widget/).*)",
+        source: "/((?!p/|book/|api/leads/widget/|widget-demo|api/widget).*)",
         headers: buildSecurityHeaders({ ...env, embeddable: false }),
       },
     ];

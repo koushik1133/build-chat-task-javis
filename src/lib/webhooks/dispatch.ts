@@ -135,6 +135,7 @@ const SAMPLE_DATA: Record<string, Record<string, unknown>> = {
   "invoice.paid": { total_minor: 125000, quote_id: null },
   "booking.created": { name: "Ada Lovelace", email: "ada@example.com", startsAt: "2026-11-10T15:00:00.000Z", endsAt: "2026-11-10T15:30:00.000Z", bookingTypeId: "bt_1", source: "public", contactId: "c_123" },
   "booking.cancelled": { name: "Ada Lovelace", startsAt: "2026-11-10T15:00:00.000Z", reason: null },
+  "booking.rescheduled": { name: "Ada Lovelace", from: "2026-11-10T15:00:00.000Z", to: "2026-11-11T15:00:00.000Z" },
   "record.created": { type: "deals", stage: "new", title: "Acme renewal" },
   "record.moved": { type: "deals", from: "new", to: "won", title: "Acme renewal" },
   "ticket.created": { number: 17, subject: "Cannot log in", priority: "normal", source: "portal", requester_email: "ada@example.com" },

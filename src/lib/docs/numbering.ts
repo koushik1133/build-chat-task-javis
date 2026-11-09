@@ -8,12 +8,14 @@ import { query, queryOne, withRetry } from "@/lib/dsql";
  * either way we retry via withRetry.
  */
 
-export type DocKind = "quote" | "invoice";
+export type DocKind = "quote" | "invoice" | "credit_note";
 
-const PREFIX: Record<DocKind, string> = { quote: "Q", invoice: "INV" };
+const PREFIX: Record<DocKind, string> = { quote: "Q", invoice: "INV", credit_note: "CN" };
 
-export function formatDocNumber(kind: DocKind, n: number): string {
-  return `${PREFIX[kind]}-${String(n).padStart(6, "0")}`;
+/** `prefix` overrides the default (org numbering settings); invalid values fall back. */
+export function formatDocNumber(kind: DocKind, n: number, prefix?: string | null): string {
+  const p = prefix && /^[A-Z0-9]{1,8}$/.test(prefix) ? prefix : PREFIX[kind];
+  return `${p}-${String(n).padStart(6, "0")}`;
 }
 
 class CounterRace extends Error {
@@ -23,7 +25,7 @@ class CounterRace extends Error {
   }
 }
 
-export async function nextDocNumber(dataId: string, kind: DocKind): Promise<string> {
+export async function nextDocNumber(dataId: string, kind: DocKind, prefix?: string | null): Promise<string> {
   return withRetry(async () => {
     const row = await queryOne<{ next_value: number | string }>(
       `SELECT next_value FROM doc_counters WHERE user_id = $1 AND kind = $2`,
@@ -37,7 +39,7 @@ export async function nextDocNumber(dataId: string, kind: DocKind): Promise<stri
         [dataId, kind]
       );
       if (inserted.length === 0) throw new CounterRace();
-      return formatDocNumber(kind, 1);
+      return formatDocNumber(kind, 1, prefix);
     }
     const old = Number(row.next_value);
     const updated = await query<{ user_id: string }>(
@@ -45,6 +47,6 @@ export async function nextDocNumber(dataId: string, kind: DocKind): Promise<stri
       [dataId, kind, old + 1, old]
     );
     if (updated.length === 0) throw new CounterRace();
-    return formatDocNumber(kind, old);
+    return formatDocNumber(kind, old, prefix);
   }, 6);
 }

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { CurrencySchema } from "@/lib/money/items";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /**
  * Time tracking. An entry with `ended_at = NULL` is a running timer; stopping
@@ -112,6 +113,9 @@ export interface ListTimeOpts {
   runningOnly?: boolean;
   unbilledOnly?: boolean;
   limit?: number;
+  /** "started" (default: running first, newest start) or "created" (newest first, cursor-friendly). */
+  order?: "started" | "created";
+  cursor?: Cursor | null;
 }
 
 export async function listTimeEntries(dataId: string, opts: ListTimeOpts = {}): Promise<TimeEntryDTO[]> {
@@ -135,8 +139,9 @@ export async function listTimeEntries(dataId: string, opts: ListTimeOpts = {}): 
   }
   if (opts.runningOnly) sql += ` AND ended_at IS NULL`;
   if (opts.unbilledOnly) sql += ` AND billable = TRUE AND invoice_id IS NULL AND ended_at IS NOT NULL`;
+  if (opts.order === "created") sql += keysetClause(opts.cursor, params);
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
-  sql += ` ORDER BY (ended_at IS NULL) DESC, started_at DESC LIMIT $${params.length}`;
+  sql += opts.order === "created" ? ` ORDER BY ${keysetOrder()} LIMIT $${params.length}` : ` ORDER BY (ended_at IS NULL) DESC, started_at DESC LIMIT $${params.length}`;
   return (await query<TimeEntryRow>(sql, params)).map(toTimeEntryDTO);
 }
 

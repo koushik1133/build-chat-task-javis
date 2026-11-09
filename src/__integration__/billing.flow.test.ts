@@ -127,6 +127,20 @@ describeDb("billing flow", () => {
     await api(pub.GET, `/api/p/quotes/nope-token`, { params: { token: "nope-token" }, expect: 404 });
   });
 
+  it("OTP request from an address other than the recipient is refused (link is bound to the email it was sent to)", async () => {
+    const otpRoute = await import("@/app/api/p/quotes/[token]/otp/route");
+    const bound = await sqlOne<{ recipient: string | null }>(`SELECT recipient FROM share_tokens WHERE kind = 'quote' AND entity_id = $1 ORDER BY created_at DESC LIMIT 1`, [quote.id]);
+    expect(bound?.recipient).toBe(clientEmail);
+    const r = await api<{ error: string; detail: string }>(otpRoute.POST, `/api/p/quotes/${shareToken}/otp`, {
+      json: { email: "eve@example.test" },
+      params: { token: shareToken },
+      expect: 400,
+    });
+    expect(r.body.detail).toMatch(/different email/i);
+    const pending = await sqlOne(`SELECT id FROM quote_acceptances WHERE quote_id = $1 AND lower(accepted_email) = 'eve@example.test'`, [quote.id]);
+    expect(pending).toBeNull();
+  });
+
   it("requests an OTP; the code lands in the outbox", async () => {
     const otpRoute = await import("@/app/api/p/quotes/[token]/otp/route");
     const r = await api<{ ok: boolean; expiresAt: string }>(otpRoute.POST, `/api/p/quotes/${shareToken}/otp`, {

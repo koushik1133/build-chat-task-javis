@@ -13,6 +13,7 @@ import { Pill, StatusPill } from "@/components/ui/pill";
 import { SearchField } from "@/components/ui/search-field";
 import { TabPanel, Tabs } from "@/components/ui/tabs";
 import { isAbortError, useAbortable, useDebouncedValue } from "@/components/ui/hooks";
+import { LoadMore } from "@/components/ui/load-more";
 import { PageContainer } from "@/components/page-container";
 import { PRIORITY_TONE, SlaBadge, TICKET_STATUS_TONE } from "@/components/helpdesk/sla-badge";
 import { cn, timeAgo } from "@/lib/utils";
@@ -78,6 +79,8 @@ function HelpdeskInner() {
   const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [policies, setPolicies] = useState<SlaPolicyRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -88,26 +91,53 @@ function HelpdeskInner() {
     window.setTimeout(() => setNotice((n) => (n?.text === text ? null : n)), 6000);
   }, []);
 
+  const listParams = useCallback(() => {
+    const params = new URLSearchParams({ status: filter, limit: "50" });
+    if (query) params.set("q", query);
+    if (priority) params.set("priority", priority);
+    return params;
+  }, [filter, query, priority]);
+
   const load = useCallback(async () => {
     const signal = nextSignal();
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ status: filter });
-      if (query) params.set("q", query);
-      if (priority) params.set("priority", priority);
-      const res = await fetch(`/api/helpdesk/tickets?${params}`, { cache: "no-store", signal });
+      const res = await fetch(`/api/helpdesk/tickets?${listParams()}`, { cache: "no-store", signal });
       if (!res.ok) throw new Error(await readError(res, "Could not load tickets"));
       const d = await res.json();
       setTickets(d.tickets ?? []);
       setPolicies(d.policies ?? []);
+      setCursor(typeof d.next_cursor === "string" ? d.next_cursor : null);
     } catch (err) {
       if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load tickets");
     } finally {
       if (!signal.aborted) setLoading(false);
     }
-  }, [filter, query, priority, nextSignal]);
+  }, [listParams, nextSignal]);
+
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const params = listParams();
+      params.set("cursor", cursor);
+      const res = await fetch(`/api/helpdesk/tickets?${params}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(await readError(res, "Could not load more tickets"));
+      const d = await res.json();
+      const next: TicketRow[] = d.tickets ?? [];
+      setTickets((prev) => {
+        const seen = new Set(prev.map((t) => t.id));
+        return [...prev, ...next.filter((t) => !seen.has(t.id))];
+      });
+      setCursor(typeof d.next_cursor === "string" ? d.next_cursor : null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load more tickets");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [cursor, loadingMore, listParams]);
 
   useEffect(() => {
     void load();
@@ -227,11 +257,14 @@ function HelpdeskInner() {
               }
             />
           ) : (
-            <ul className="space-y-2">
-              {tickets.map((t) => (
-                <TicketListItem key={t.id} ticket={t} active={t.id === selectedId} now={now} onSelect={select} />
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-2">
+                {tickets.map((t) => (
+                  <TicketListItem key={t.id} ticket={t} active={t.id === selectedId} now={now} onSelect={select} />
+                ))}
+              </ul>
+              <LoadMore hasMore={Boolean(cursor)} loading={loadingMore} count={tickets.length} onMore={loadMore} noun="tickets" />
+            </>
           )}
         </section>
 

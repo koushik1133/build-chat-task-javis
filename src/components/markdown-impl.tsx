@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import hljs from "highlight.js/lib/common";
 
-export function Markdown({ children }: { children: string }) {
+export default function MarkdownImpl({ children }: { children: string }) {
   return (
     <div
       className="prose max-w-none text-sm leading-relaxed

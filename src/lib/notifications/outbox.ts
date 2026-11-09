@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne, withRetry } from "@/lib/dsql";
 import { dispatch } from "./channels";
 import { isNotificationChannel, type NotificationChannel } from "./status";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /**
  * Notification outbox: every outbound message is a row first, then the cron
@@ -152,6 +153,8 @@ export interface ListOutboxOptions {
   /** Only unread in-app rows (status sent, read_at null). */
   unreadInApp?: boolean;
   limit?: number;
+  /** Keyset cursor (created_at, id). */
+  cursor?: Cursor | null;
 }
 
 export async function listOutbox(dataId: string, opts: ListOutboxOptions = {}): Promise<OutboxRow[]> {
@@ -169,10 +172,11 @@ export async function listOutbox(dataId: string, opts: ListOutboxOptions = {}): 
       where.push(`status = $${values.length}`);
     }
   }
-  values.push(Math.min(200, Math.max(1, opts.limit ?? 50)));
+  const keyset = keysetClause(opts.cursor, values);
+  values.push(Math.min(201, Math.max(1, opts.limit ?? 50)));
   return query<OutboxRow>(
-    `SELECT * FROM notification_outbox WHERE ${where.join(" AND ")}
-      ORDER BY created_at DESC LIMIT $${values.length}`,
+    `SELECT * FROM notification_outbox WHERE ${where.join(" AND ")}${keyset}
+      ORDER BY ${keysetOrder()} LIMIT $${values.length}`,
     values
   );
 }

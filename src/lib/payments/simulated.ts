@@ -61,4 +61,8 @@ export const simulatedProvider: PaymentProvider = {
   async verifyWebhook(rawBody, headers) {
     return verifySimulatedWebhook(rawBody, headers);
   },
+  async refund(input) {
+    if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) throw new Error("Refund amount must be a positive integer");
+    return { refundRef: `simrf_${input.providerRef.slice(0, 20)}_${Date.now().toString(36)}`, status: "succeeded" };
+  },
 };

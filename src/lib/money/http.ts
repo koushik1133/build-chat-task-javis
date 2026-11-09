@@ -21,6 +21,7 @@ export const InvoiceBodySchema = z.object({
   currency: CurrencySchema.optional(),
   items: LineItemsSchema.optional(),
   due_at: z.string().datetime({ offset: true }).nullable().optional(),
+  terms_days: z.number().int().min(0).max(365).nullable().optional(),
   notes: z.string().max(4000).nullable().optional(),
 });
 

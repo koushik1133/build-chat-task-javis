@@ -1,4 +1,5 @@
 import { query } from "@/lib/dsql";
+import { requestMemo } from "@/lib/request-cache";
 import { sortChannelIds, toChannelId, getChannel } from "@/lib/channels/registry";
 
 /** A channel the signed-in user has actually connected. */
@@ -14,7 +15,7 @@ export interface ChannelNavItem {
  * `userId` is the first parameter and there is no other way to call this, so a
  * caller cannot accidentally build another tenant's navigation.
  */
-export async function buildChannelNav(userId: string): Promise<ChannelNavItem[]> {
+export async function loadChannelNav(userId: string): Promise<ChannelNavItem[]> {
   const rows = await query<{ platform: string; count: string | number }>(
     `SELECT platform, COUNT(*) AS count
      FROM social_accounts
@@ -37,3 +38,6 @@ export async function buildChannelNav(userId: string): Promise<ChannelNavItem[]>
     accountCount: counts.get(id) ?? 0,
   }));
 }
+
+/** Per-request memoised `loadChannelNav` (layout + sidebar may both ask in one render). */
+export const buildChannelNav: (userId: string) => Promise<ChannelNavItem[]> = requestMemo(loadChannelNav);

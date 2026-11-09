@@ -1,5 +1,6 @@
 import { query, queryOne } from "@/lib/dsql";
 import { KERNELHUB_NAME } from "@/lib/brand";
+import { requestMemo } from "@/lib/request-cache";
 
 /**
  * White-label branding per org, keyed by the org data id (owner_user_id).
@@ -104,8 +105,8 @@ function rowToBranding(row: BrandingRow | null): Branding {
   };
 }
 
-/** Branding for an org, with defaults when unset or when the table is missing. */
-export async function getBranding(dataId: string): Promise<Branding> {
+/** Uncached loader (exported for tests); callers use `getBranding`. */
+export async function loadBranding(dataId: string): Promise<Branding> {
   const row = await queryOne<BrandingRow>(
     `SELECT brand_name, logo_url, primary_color, accent_color, email_footer, custom_domain, support_email, favicon_url, updated_at
        FROM org_branding WHERE user_id = $1`,
@@ -113,6 +114,13 @@ export async function getBranding(dataId: string): Promise<Branding> {
   ).catch(() => null);
   return rowToBranding(row);
 }
+
+/**
+ * Branding for an org, with defaults when unset or when the table is missing.
+ * Per-request memoised: public layouts, email wrappers and metadata all ask
+ * for the same org's branding within one render.
+ */
+export const getBranding: (dataId: string) => Promise<Branding> = requestMemo(loadBranding);
 
 /** Upsert the given fields (null clears a field). Returns the merged branding. */
 export async function updateBranding(dataId: string, patch: BrandingPatch): Promise<Branding> {
@@ -152,7 +160,8 @@ export async function updateBranding(dataId: string, patch: BrandingPatch): Prom
       next.favicon_url,
     ]
   );
-  return getBranding(dataId);
+  // Fresh read: the memoised `getBranding` may hold the pre-write row for this request.
+  return loadBranding(dataId);
 }
 
 export async function resetBranding(dataId: string): Promise<void> {

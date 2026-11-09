@@ -52,6 +52,7 @@ import {
   Fingerprint,
   Activity,
   LayoutDashboard,
+  MessageSquareCode,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -138,6 +139,7 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/settings/outbox", label: "Outbox", icon: Inbox },
       { href: "/settings/api-keys", label: "API Keys", icon: KeyRound },
       { href: "/settings/webhooks", label: "Webhooks", icon: Webhook },
+      { href: "/settings/widgets", label: "Website widgets", icon: MessageSquareCode },
       { href: "/settings/developers", label: "Developers", icon: Code2 },
       { href: "/settings/mail", label: "Email Inbox", icon: Mail },
       { href: "/settings/sso", label: "SSO & SCIM", icon: ShieldCheck },

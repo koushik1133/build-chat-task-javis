@@ -69,7 +69,7 @@ const ICONS: Record<Kind, LucideIcon> = {
   article: BookOpen,
 };
 
-export function CommandPalette() {
+export default function CommandPaletteBody() {
   const t = useT();
   const router = useRouter();
   const listId = useId();

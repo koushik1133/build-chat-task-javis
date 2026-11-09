@@ -28,7 +28,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     if (!share) return NextResponse.json({ error: "not_found" }, { status: 404 });
     const body = await parseBody(req, Body, 8_192);
     if (!body.ok) return body.res;
-    const out = await declineQuoteVerified(share.entity_id, { otp: body.data.otp, email: body.data.email, reason: body.data.reason ?? null });
+    const out = await declineQuoteVerified(share.entity_id, { otp: body.data.otp, email: body.data.email, reason: body.data.reason ?? null, recipient: share.recipient ?? null });
     return NextResponse.json({ quote: await toPublicQuote(out.quote, share.user_id, false) });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "error";

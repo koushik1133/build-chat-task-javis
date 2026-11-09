@@ -2,6 +2,8 @@ import { query, queryOne } from "@/lib/dsql";
 import { tableExists } from "@/lib/table-exists";
 import type { Area } from "@/lib/auth/roles";
 import { getOrgSettings } from "@/lib/org-settings";
+import { getBillingSettings } from "@/lib/money/settings";
+import { convertMinor, listFxRates } from "@/lib/money/fx";
 import { countUnreadInApp } from "@/lib/notifications/outbox";
 import { getBalance } from "@/lib/credits/ledger";
 import { runCashflow } from "@/lib/optimize";
@@ -112,18 +114,43 @@ async function buildKpis(scope: SummaryScope, ctx: KpiCtx): Promise<KpiTile[]> {
 
   tile("billing", "revenue", async () => {
     if (!(await tableExists("invoice_payments"))) return null;
-    const rows = await query<{ period: string; total: string | number }>(
-      `SELECT CASE WHEN p.created_at >= $2 THEN 'this' ELSE 'last' END AS period, COALESCE(SUM(p.amount_minor), 0) AS total
+    // Net receipts per currency; converted into the reporting currency when the org has FX rates.
+    const rows = await query<{ period: string; currency: string; total: string | number }>(
+      `SELECT CASE WHEN p.created_at >= $2 THEN 'this' ELSE 'last' END AS period, p.currency, COALESCE(SUM(p.amount_minor - COALESCE(p.refunded_minor, 0)), 0) AS total
          FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id
         WHERE i.user_id = $1 AND p.status = 'succeeded' AND p.created_at >= $3 AND p.created_at < $4
-        GROUP BY 1`,
+        GROUP BY 1, 2`,
       [dataId, ctx.mw.thisStart.toISOString(), ctx.mw.lastStart.toISOString(), ctx.mw.nextStart.toISOString()]
+    ).catch(() =>
+      query<{ period: string; currency: string; total: string | number }>(
+        `SELECT CASE WHEN p.created_at >= $2 THEN 'this' ELSE 'last' END AS period, p.currency, COALESCE(SUM(p.amount_minor), 0) AS total
+           FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id
+          WHERE i.user_id = $1 AND p.status = 'succeeded' AND p.created_at >= $3 AND p.created_at < $4
+          GROUP BY 1, 2`,
+        [dataId, ctx.mw.thisStart.toISOString(), ctx.mw.lastStart.toISOString(), ctx.mw.nextStart.toISOString()]
+      )
     );
-    const cur = Number(rows.find((r) => r.period === "this")?.total ?? 0);
-    const prev = Number(rows.find((r) => r.period === "last")?.total ?? 0);
+    const billing = await getBillingSettings(dataId).catch(() => null);
+    const reporting = billing?.reporting_currency ?? ctx.currency;
+    const rates = rows.some((r) => r.currency.toUpperCase() !== reporting) ? await listFxRates(dataId).catch(() => []) : [];
+    let unconverted = 0;
+    const sum = (period: string) =>
+      rows
+        .filter((r) => r.period === period)
+        .reduce((acc, r) => {
+          const v = convertMinor(Number(r.total), r.currency, reporting, rates);
+          if (v === null) {
+            unconverted++;
+            return acc;
+          }
+          return acc + v;
+        }, 0);
+    const cur = sum("this");
+    const prev = sum("last");
     const delta = pctDelta(cur, prev);
     return {
-      key: "revenue", label: "Revenue this month", value: formatMinor(cur, ctx.currency, ctx.locale), hint: deltaLabel(delta),
+      key: "revenue", label: "Revenue this month", value: formatMinor(cur, reporting, ctx.locale),
+      hint: unconverted > 0 ? `${deltaLabel(delta)} · some currencies lack an FX rate` : deltaLabel(delta),
       deltaPct: delta, tone: delta === null || delta >= 0 ? "good" : "bad", href: "/billing",
     };
   });

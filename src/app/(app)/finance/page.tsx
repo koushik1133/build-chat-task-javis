@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Pill, StatusPill } from "@/components/ui/pill";
 import { PageContainer } from "@/components/page-container";
+import { LoadMore } from "@/components/ui/load-more";
 import { cn } from "@/lib/utils";
 import { fmtDate, fmtMoney } from "@/lib/money/format";
 import { computeTotalsClient, type LineItem } from "@/components/billing/shared";
@@ -37,6 +38,9 @@ export default function FinancePage() {
   const [tab, setTab] = useState<Tab>("expenses");
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [time, setTime] = useState<TimeEntry[]>([]);
+  const [expenseCursor, setExpenseCursor] = useState<string | null>(null);
+  const [timeCursor, setTimeCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState<"expenses" | "time" | null>(null);
   const [cos, setCos] = useState<ChangeOrder[]>([]);
   const [docs, setDocs] = useState<Docs>({ quotes: [], invoices: [] });
   const [loading, setLoading] = useState(true);
@@ -61,14 +65,16 @@ export default function FinancePage() {
     setError(null);
     try {
       const [e, t, c, q, i] = await Promise.all([
-        api<{ expenses: Expense[] }>("/api/expenses"),
-        api<{ entries: TimeEntry[] }>("/api/time"),
+        api<{ expenses: Expense[]; next_cursor: string | null }>("/api/expenses?order=created&limit=50"),
+        api<{ entries: TimeEntry[]; next_cursor: string | null }>("/api/time?order=created&limit=50"),
         api<{ change_orders: ChangeOrder[] }>("/api/change-orders"),
         api<{ quotes: Doc[] }>("/api/quotes").catch(() => ({ quotes: [] as Doc[] })),
         api<{ invoices: Doc[] }>("/api/invoices").catch(() => ({ invoices: [] as Doc[] })),
       ]);
       setExpenses(e.expenses);
+      setExpenseCursor(e.next_cursor ?? null);
       setTime(t.entries);
+      setTimeCursor(t.next_cursor ?? null);
       setCos(c.change_orders);
       setDocs({ quotes: q.quotes, invoices: i.invoices });
     } catch (e) {
@@ -80,6 +86,40 @@ export default function FinancePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const moreExpenses = useCallback(async () => {
+    if (!expenseCursor || loadingMore) return;
+    setLoadingMore("expenses");
+    try {
+      const e = await api<{ expenses: Expense[]; next_cursor: string | null }>(`/api/expenses?order=created&limit=50&cursor=${encodeURIComponent(expenseCursor)}`);
+      setExpenses((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        return [...prev, ...e.expenses.filter((x) => !seen.has(x.id))];
+      });
+      setExpenseCursor(e.next_cursor ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load more expenses.");
+    } finally {
+      setLoadingMore(null);
+    }
+  }, [expenseCursor, loadingMore]);
+
+  const moreTime = useCallback(async () => {
+    if (!timeCursor || loadingMore) return;
+    setLoadingMore("time");
+    try {
+      const t = await api<{ entries: TimeEntry[]; next_cursor: string | null }>(`/api/time?order=created&limit=50&cursor=${encodeURIComponent(timeCursor)}`);
+      setTime((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        return [...prev, ...t.entries.filter((x) => !seen.has(x.id))];
+      });
+      setTimeCursor(t.next_cursor ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load more time entries.");
+    } finally {
+      setLoadingMore(null);
+    }
+  }, [timeCursor, loadingMore]);
 
   const act = useCallback(
     async (id: string, fn: () => Promise<string | void>) => {
@@ -213,9 +253,15 @@ export default function FinancePage() {
         {initial ? (
           <Loading />
         ) : tab === "expenses" ? (
-          <ExpenseList expenses={expenses} busyId={busyId} docLabel={docLabel} onEdit={onEditExpense} onDelete={onDeleteExpense} onNew={() => setExpenseDialog("new")} />
+          <>
+            <ExpenseList expenses={expenses} busyId={busyId} docLabel={docLabel} onEdit={onEditExpense} onDelete={onDeleteExpense} onNew={() => setExpenseDialog("new")} />
+            {expenses.length > 0 && <LoadMore hasMore={Boolean(expenseCursor)} loading={loadingMore === "expenses"} count={expenses.length} onMore={moreExpenses} noun="expenses" />}
+          </>
         ) : tab === "time" ? (
-          <TimeList entries={time} busyId={busyId} docLabel={docLabel} onEdit={onEditTime} onStop={stopTimer} onDelete={onDeleteTime} onNew={() => setTimeDialog("new")} />
+          <>
+            <TimeList entries={time} busyId={busyId} docLabel={docLabel} onEdit={onEditTime} onStop={stopTimer} onDelete={onDeleteTime} onNew={() => setTimeDialog("new")} />
+            {time.length > 0 && <LoadMore hasMore={Boolean(timeCursor)} loading={loadingMore === "time"} count={time.length} onMore={moreTime} noun="time entries" />}
+          </>
         ) : (
           <ChangeOrderList cos={cos} busyId={busyId} docLabel={docLabel} onEdit={onEditCo} onStatus={onStatusCo} onDelete={onDeleteCo} onNew={() => setCoDialog("new")} />
         )}

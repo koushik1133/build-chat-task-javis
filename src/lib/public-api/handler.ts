@@ -141,3 +141,28 @@ export function mustFind<T>(row: T | null | undefined, what: string): T {
   if (row === null || row === undefined) throw ApiError.notFound(what);
   return row;
 }
+
+/** Single-page list result for libs without keyset cursors (`limit` is still honoured). */
+export function singlePage<T>(rows: T[]): OpResult<T[]> {
+  return { data: rows, meta: { next_cursor: null } };
+}
+
+/**
+ * Run a lib call and translate its plain `Error`s into API errors: messages
+ * mentioning "not found" become 404, everything else a 422 `unprocessable`.
+ * `ApiError`s pass through untouched.
+ */
+export async function libCall<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    const status = (err as { status?: unknown }).status;
+    const message = err instanceof Error ? err.message : String(err);
+    if (/not found/i.test(message) || status === 404) throw ApiError.notFound(message.replace(/ not found.*$/i, "") || "Resource");
+    if (typeof status === "number" && status >= 400 && status < 500) throw new ApiError(status === 409 ? 409 : 422, status === 409 ? "conflict" : "unprocessable", message);
+    const issues = (err as { issues?: unknown }).issues;
+    if (Array.isArray(issues)) throw ApiError.validation(issues, message);
+    throw new ApiError(422, "unprocessable", message.slice(0, 500));
+  }
+}

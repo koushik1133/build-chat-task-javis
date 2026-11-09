@@ -2116,3 +2116,233 @@ ALTER TABLE voice_campaigns ADD COLUMN IF NOT EXISTS require_consent BOOLEAN;
 
 -- ==== PHASE 5 REVIEW ====
 CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_invoice_payments_provider_ref ON invoice_payments (invoice_id, provider, provider_ref) WHERE provider_ref IS NOT NULL;
+
+-- ==== PHASE 6 LANE A ====
+-- Phase 6 / Lane A: billing depth (tax engine, dunning, recurring invoices, credit notes & refunds, statements, FX, OTP recipient binding)
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- ── tax_rates: per-org tax catalogue (rate_bp = basis points, 1000 = 10%) ────
+CREATE TABLE IF NOT EXISTS tax_rates (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  rate_bp       INTEGER NOT NULL DEFAULT 0,
+  kind          TEXT NOT NULL DEFAULT 'other',   -- vat|gst|sales|other
+  jurisdiction  TEXT,
+  compound      BOOLEAN NOT NULL DEFAULT FALSE,
+  is_default    BOOLEAN NOT NULL DEFAULT FALSE,
+  active        BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_tax_rates_user ON tax_rates (user_id, active, created_at);
+
+-- Contacts: tax number + billing address (JSON TEXT) + reminder opt-out.
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS tax_number TEXT;
+
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS billing_address TEXT;
+
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS invoice_reminders_opt_out BOOLEAN;
+
+-- Quotes / invoices store the tax breakdown by rate (JSON TEXT).
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS tax_breakdown TEXT;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax_breakdown TEXT;
+
+-- Payment terms + dunning counters (due_at already exists on invoices).
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS terms_days INTEGER;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS reminder_count INTEGER;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS schedule_id TEXT;
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_invoices_user_due ON invoices (user_id, status, due_at);
+
+-- Refunds live on the payment row.
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS refunded_minor BIGINT;
+
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMPTZ;
+
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS refund_ref TEXT;
+
+-- ── invoice_schedules: recurring invoices ────────────────────────────────────
+CREATE TABLE IF NOT EXISTS invoice_schedules (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  contact_id      TEXT,
+  name            TEXT NOT NULL,
+  items           TEXT NOT NULL DEFAULT '[]',   -- JSON line items
+  currency        TEXT NOT NULL DEFAULT 'USD',
+  interval        TEXT NOT NULL DEFAULT 'monthly', -- weekly|monthly|quarterly|yearly
+  interval_count  INTEGER NOT NULL DEFAULT 1,
+  day_of_month    INTEGER,
+  next_run_at     TIMESTAMPTZ NOT NULL,
+  end_at          TIMESTAMPTZ,
+  auto_send       BOOLEAN NOT NULL DEFAULT FALSE,
+  terms_days      INTEGER,
+  notes           TEXT,
+  status          TEXT NOT NULL DEFAULT 'active', -- active|paused|ended
+  last_invoice_id TEXT,
+  last_run_at     TIMESTAMPTZ,
+  run_count       INTEGER NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_invoice_schedules_user ON invoice_schedules (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_invoice_schedules_due ON invoice_schedules (status, next_run_at);
+
+-- ── credit_notes ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS credit_notes (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  invoice_id      TEXT,
+  contact_id      TEXT,
+  number          TEXT NOT NULL,                 -- CN-000001
+  items           TEXT NOT NULL DEFAULT '[]',
+  subtotal_minor  BIGINT NOT NULL DEFAULT 0,
+  tax_minor       BIGINT NOT NULL DEFAULT 0,
+  total_minor     BIGINT NOT NULL DEFAULT 0,
+  tax_breakdown   TEXT,
+  currency        TEXT NOT NULL DEFAULT 'USD',
+  reason          TEXT,
+  status          TEXT NOT NULL DEFAULT 'draft',  -- draft|issued|applied|refunded
+  issued_at       TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_credit_notes_user ON credit_notes (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_credit_notes_invoice ON credit_notes (invoice_id);
+
+-- ── fx_rates: manual exchange rates (rate stored as decimal text) ────────────
+CREATE TABLE IF NOT EXISTS fx_rates (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  base       TEXT NOT NULL,
+  quote      TEXT NOT NULL,
+  rate       TEXT NOT NULL,
+  as_of      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_fx_rates_user_pair ON fx_rates (user_id, base, quote, as_of);
+
+-- Share tokens can be bound to the recipient email (OTP must match).
+ALTER TABLE share_tokens ADD COLUMN IF NOT EXISTS recipient TEXT;
+
+
+-- ==== PHASE 6 LANE D ====
+-- Phase 6 / Lane D — performance & scale: composite indexes + web_vitals.
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+-- Every index below matches a `WHERE user_id = $1 … ORDER BY …` list query; the query shape is documented in docs/PERFORMANCE.md.
+
+-- tasks: GET /api/tasks keyset (user_id, created_at DESC, id DESC)
+CREATE INDEX ASYNC IF NOT EXISTS idx_tasks_user_created_id ON tasks (user_id, created_at, id);
+
+-- tickets: GET /api/helpdesk/tickets?cursor= keyset (user_id, created_at DESC, id DESC)
+CREATE INDEX ASYNC IF NOT EXISTS idx_tickets_user_created_id ON tickets (user_id, created_at, id);
+
+-- tickets: status filter + keyset (user_id, status, created_at)
+CREATE INDEX ASYNC IF NOT EXISTS idx_tickets_user_status_created ON tickets (user_id, status, created_at);
+
+-- tickets: default "priority" ordering falls back to updated_at within a user
+CREATE INDEX ASYNC IF NOT EXISTS idx_tickets_user_updated ON tickets (user_id, updated_at);
+
+-- records: GET /api/records/[type]?cursor= keyset (user_id, type_id, created_at DESC, id DESC)
+CREATE INDEX ASYNC IF NOT EXISTS idx_records_user_type_created_id ON records (user_id, type_id, created_at, id);
+
+-- products: GET /api/products?cursor= keyset (user_id, created_at DESC, id DESC)
+CREATE INDEX ASYNC IF NOT EXISTS idx_products_user_created_id ON products (user_id, created_at, id);
+
+-- expenses: GET /api/expenses?cursor= keyset (user_id, created_at DESC, id DESC)
+CREATE INDEX ASYNC IF NOT EXISTS idx_expenses_user_created_id ON expenses (user_id, created_at, id);
+
+-- time_entries: GET /api/time?cursor= keyset (user_id, created_at DESC, id DESC)
+CREATE INDEX ASYNC IF NOT EXISTS idx_time_entries_user_created_id ON time_entries (user_id, created_at, id);
+
+-- crm_contacts: default list ordering before a cursor is supplied (user_id, updated_at DESC)
+CREATE INDEX ASYNC IF NOT EXISTS idx_crm_contacts_user_updated ON crm_contacts (user_id, updated_at);
+
+-- crm_contacts: lifecycle filter + keyset
+CREATE INDEX ASYNC IF NOT EXISTS idx_crm_contacts_user_lifecycle_created ON crm_contacts (user_id, lifecycle, created_at);
+
+-- audit_log: GET /api/audit keyset incl. tie-break id
+CREATE INDEX ASYNC IF NOT EXISTS idx_audit_log_user_created_id ON audit_log (user_id, created_at, id);
+
+-- audit_log: entity filter + timeline
+CREATE INDEX ASYNC IF NOT EXISTS idx_audit_log_user_entity_created ON audit_log (user_id, entity, created_at);
+
+-- notification_outbox: GET /api/notifications/outbox timeline (user_id, created_at DESC, id DESC)
+CREATE INDEX ASYNC IF NOT EXISTS idx_notification_outbox_user_created_id ON notification_outbox (user_id, created_at, id);
+
+-- notification_outbox: bell query (user_id, channel='in_app', status='sent', read_at IS NULL) ordered by created_at
+CREATE INDEX ASYNC IF NOT EXISTS idx_notification_outbox_user_channel_status_created ON notification_outbox (user_id, channel, status, created_at);
+
+-- ai_credit_ledger: GET /api/ai/credits ledger keyset tie-break
+CREATE INDEX ASYNC IF NOT EXISTS idx_ai_credit_ledger_user_created_id ON ai_credit_ledger (user_id, created_at, id);
+
+-- memberships: requireScope() org switch lookup (user_id, org_id) — was only (user_id, status)
+CREATE INDEX ASYNC IF NOT EXISTS idx_memberships_user_org ON memberships (user_id, org_id);
+
+-- role_area_overrides: effectivePermissions() (org_id, role)
+CREATE INDEX ASYNC IF NOT EXISTS idx_role_area_overrides_org_role ON role_area_overrides (org_id, role);
+
+-- social_accounts: buildChannelNav() GROUP BY platform over connected accounts
+CREATE INDEX ASYNC IF NOT EXISTS idx_social_accounts_user_connected ON social_accounts (user_id, connected, platform);
+
+-- bookings: GET /api/bookings range scan with status filter
+CREATE INDEX ASYNC IF NOT EXISTS idx_bookings_user_status_starts ON bookings (user_id, status, starts_at);
+
+-- web_vitals: anonymous Core Web Vitals samples (no PII; global aggregate, not tenant-scoped)
+CREATE TABLE IF NOT EXISTS web_vitals (
+  id              TEXT PRIMARY KEY,
+  path            TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  value           DOUBLE PRECISION NOT NULL,
+  rating          TEXT NOT NULL,
+  navigation_type TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- web_vitals: p75-by-route aggregation window
+CREATE INDEX ASYNC IF NOT EXISTS idx_web_vitals_path_name_created ON web_vitals (path, name, created_at);
+
+-- web_vitals: retention prune
+CREATE INDEX ASYNC IF NOT EXISTS idx_web_vitals_created ON web_vitals (created_at);
+
+
+-- ==== PHASE 6 LANE E ====
+-- Phase 6 lane E: embeddable widgets (web chat sessions + per-site widget config)
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id                 TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL,
+  site_id            TEXT NOT NULL,
+  visitor_id         TEXT,
+  session_token_hash TEXT NOT NULL,
+  conversation_id    TEXT,
+  contact_id         TEXT,
+  lead_id            TEXT,
+  status             TEXT NOT NULL DEFAULT 'open',   -- open | handed_off | closed
+  page_url           TEXT,
+  user_agent         TEXT,
+  ip_hash            TEXT,
+  expires_at         TIMESTAMPTZ NOT NULL,
+  started_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  closed_at          TIMESTAMPTZ
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_chat_sessions_user_status ON chat_sessions (user_id, status, last_seen_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_chat_sessions_token ON chat_sessions (session_token_hash);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_chat_sessions_conversation ON chat_sessions (conversation_id);
+
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS widget_config TEXT;
+

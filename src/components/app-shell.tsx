@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import type { ChannelNavItem } from "@/lib/nav/channel-nav";
 import { GlobalNotificationBell } from "@/components/global-notification-bell";
 import { KERNELHUB_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
-import { ProductTour } from "@/components/product-tour";
 import { CopilotDrawer } from "@/components/copilot-drawer";
 import { SearchButton } from "@/components/search-button";
+
+// Product tour only renders for first-time visitors; keep it out of the shell chunk.
+const ProductTour = dynamic(() => import("@/components/product-tour").then((m) => m.ProductTour), { ssr: false });
 
 export function AppShell({
   userEmail,

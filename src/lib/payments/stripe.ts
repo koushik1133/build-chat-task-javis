@@ -106,4 +106,8 @@ export const stripeProvider: PaymentProvider = {
     if (!v.ok) return v;
     return parseStripeEvent(rawBody);
   },
+  async refund() {
+    // Stub: Checkout Sessions must be refunded through the underlying PaymentIntent (POST /v1/refunds).
+    throw new Error("Stripe refunds are not wired yet; refund from the Stripe dashboard and record it manually");
+  },
 };

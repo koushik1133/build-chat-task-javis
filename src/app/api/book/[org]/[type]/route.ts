@@ -12,6 +12,9 @@ import { groupSlotsByDay } from "@/lib/calendar/slots";
 import { recordConsent } from "@/lib/privacy/consent";
 
 export const runtime = "nodejs";
+// Slot availability is time-sensitive and public: never cache at any layer.
+export const dynamic = "force-dynamic";
+const NO_STORE = { "Cache-Control": "no-store, max-age=0" } as const;
 
 type Ctx = { params: Promise<{ org: string; type: string }> };
 
@@ -48,21 +51,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (to.getTime() - from.getTime() > 62 * 86_400_000) return NextResponse.json({ error: "range too large" }, { status: 400 });
     const { timezone, slots } = await availableSlots(r.type, from, to, now);
     const t = r.type;
-    return NextResponse.json({
-      org: { name: r.org.name, slug: r.org.slug },
-      type: {
-        slug: t.slug,
-        name: t.name,
-        description: t.description,
-        durationMinutes: t.duration_minutes,
-        priceMinor: t.price_minor,
-        currency: t.currency,
-        maxDaysAhead: t.max_days_ahead,
-      },
-      timezone,
-      slots,
+    return NextResponse.json(
+      {
+        org: { name: r.org.name, slug: r.org.slug },
+        type: {
+          slug: t.slug,
+          name: t.name,
+          description: t.description,
+          durationMinutes: t.duration_minutes,
+          priceMinor: t.price_minor,
+          currency: t.currency,
+          maxDaysAhead: t.max_days_ahead,
+        },
+        timezone,
+        slots,
       byDay: groupSlotsByDay(slots, timezone),
-    });
+      },
+      { headers: NO_STORE }
+    );
   } catch (err) {
     console.error("[book] GET failed:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
