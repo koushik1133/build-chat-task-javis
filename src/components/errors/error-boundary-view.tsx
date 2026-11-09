@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Copy, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { AlertTriangle, Check, Copy, Home, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -14,14 +15,22 @@ export function ErrorBoundaryView({
   reset,
   route,
   title = "Something went wrong",
+  homeHref = "/home",
 }: {
   error: Error & { digest?: string };
   reset: () => void;
   route: string;
   title?: string;
+  /** Where "Go home" leads; the root boundary points at "/" (login / public). */
+  homeHref?: string;
 }) {
   const [errorId, setErrorId] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -50,35 +59,51 @@ export function ErrorBoundaryView({
     if (!reference) return;
     try {
       await navigator.clipboard.writeText(reference);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      setCopied("ok");
     } catch {
-      setCopied(false);
+      setCopied("fail");
     }
+    window.setTimeout(() => setCopied(null), 2000);
   }
 
   return (
-    <div role="alert" className="mx-auto flex min-h-[60vh] w-full max-w-md flex-col items-center justify-center px-4 py-10 text-center">
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-700 dark:text-red-300" aria-hidden>
-        <AlertTriangle className="h-6 w-6" />
+    <div role="alert" className="mx-auto flex min-h-[60dvh] w-full max-w-md flex-col items-center justify-center px-4 py-10 text-center">
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-accent-foreground" aria-hidden>
+        <AlertTriangle className="h-7 w-7" />
       </span>
-      <h1 className="mt-4 text-lg font-semibold">{title}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        The page hit an unexpected error. It has been logged. You can try again, or share the error id with support.
+      <h1 ref={headingRef} tabIndex={-1} className="mt-5 text-balance text-xl font-semibold tracking-tight focus-visible:outline-none sm:text-2xl">
+        {title}
+      </h1>
+      <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
+        The page hit a problem it couldn&apos;t recover from. It has been logged. Try again, go back to your dashboard, or share the reference below with support.
       </p>
-      {reference && (
-        <p className="mt-3 break-all font-mono text-xs text-muted-foreground" aria-live="polite">
-          Error id: {reference}
-        </p>
-      )}
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
+
+      <dl className="mt-5 w-full rounded-xl border border-border bg-card p-3 text-left text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <dt className="text-xs font-medium text-muted-foreground">Reference</dt>
+          <dd className="min-w-0 flex-1 break-all text-right font-mono text-xs" aria-live="polite">
+            {reference ?? <span className="text-muted-foreground">Logging…</span>}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="mt-5 flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-center">
         <Button touch onClick={reset}>
           <RefreshCw className="h-4 w-4" aria-hidden /> Try again
         </Button>
-        <Button touch variant="outline" onClick={() => void copy()} disabled={!reference} aria-label="Copy error id">
-          {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />} {copied ? "Copied" : "Copy error id"}
+        <Button touch variant="outline" asChild>
+          <Link href={homeHref}>
+            <Home className="h-4 w-4" aria-hidden /> Go home
+          </Link>
+        </Button>
+        <Button touch variant="outline" onClick={() => void copy()} disabled={!reference} aria-label="Copy error reference">
+          {copied === "ok" ? <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+          {copied === "ok" ? "Copied" : copied === "fail" ? "Couldn't copy" : "Copy reference"}
         </Button>
       </div>
+      <p className="sr-only" role="status">
+        {copied === "ok" ? "Error reference copied to the clipboard." : copied === "fail" ? "Copying failed. Select the reference and copy it by hand." : ""}
+      </p>
     </div>
   );
 }

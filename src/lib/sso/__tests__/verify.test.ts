@@ -36,3 +36,18 @@ describe("verifyDomainDns", () => {
     expect(verificationRecord("Acme.com", token)).toEqual({ host: "_kernelhub-verification.acme.com", value: `kernelhub-verification=${token}` });
   });
 });
+
+describe("verifyDomainDns TXT quoting", () => {
+  it("accepts a value stored with literal surrounding quotes", async () => {
+    const resolver = vi.fn(async () => [[`"${TOKEN_PREFIX}${token}"`]]);
+    expect(await verifyDomainDns("acme.com", token, resolver)).toEqual({ ok: true });
+  });
+  it("names the host that had records but no match", async () => {
+    const resolver = vi.fn(async (host: string) => {
+      if (host.startsWith(VERIFICATION_LABEL)) throw new Error("ENOTFOUND");
+      return [["v=spf1 -all"]];
+    });
+    const r = await verifyDomainDns("acme.com", token, resolver);
+    expect(r).toEqual({ ok: false, error: "acme.com: no matching TXT record" });
+  });
+});

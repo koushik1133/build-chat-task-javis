@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Clock, FileDiff, Loader2, Pencil, Play, Plus, Receipt, RefreshCw, Square, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
@@ -45,6 +46,15 @@ export default function FinancePage() {
   const [expenseDialog, setExpenseDialog] = useState<Expense | "new" | null>(null);
   const [timeDialog, setTimeDialog] = useState<TimeEntry | "new" | null>(null);
   const [coDialog, setCoDialog] = useState<ChangeOrder | "new" | null>(null);
+  const router = useRouter();
+
+  // Deep link from Home quick actions: /finance?timer=start opens the Time tab with the timer dialog, then the URL is cleaned.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("timer") !== "start") return;
+    setTab("time");
+    setTimeDialog("new");
+    router.replace("/finance", { scroll: false });
+  }, [router]);
 
   const load = useCallback(async () => {
     setLoading(true);

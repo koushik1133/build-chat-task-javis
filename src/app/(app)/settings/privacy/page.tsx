@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useState } from "react";
-import { AlertTriangle, Download, Fingerprint, Plus, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Download, Fingerprint, Inbox, Loader2, Plus, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter, Drawer } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
@@ -45,6 +45,8 @@ const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
 
 const STATUS_TONE: Record<string, Tone> = { received: "info", verifying: "info", in_progress: "warning", completed: "success", rejected: "danger" };
 const fmt = (iso: string | null) => (iso ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "—");
+const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1).replace(/_/g, " ") : s);
+const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
 
 async function readError(res: Response, fallback: string): Promise<string> {
   const d = await res.json().catch(() => null);
@@ -142,10 +144,19 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
       ) : rows === null ? (
         <Loading />
       ) : rows.length === 0 ? (
-        <Empty title="No requests" text="Access, erasure and correction requests from clients appear here with their due dates." />
+        <Empty
+          icon={<Inbox className="h-5 w-5" />}
+          title={filter === "open" ? "No open requests" : "No requests yet"}
+          text="Access, erasure and correction requests from clients appear here with their due dates. You can also open one on a subject's behalf."
+          action={
+            <Button touch onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4" aria-hidden /> New request
+            </Button>
+          }
+        />
       ) : (
         <TableScroller label="Data subject requests">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className={THEAD}>
               <tr>
                 <th className={TH}>Kind</th>
@@ -157,15 +168,28 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="cursor-pointer border-t border-border/60 hover:bg-secondary/40" onClick={() => openDrawer(r)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && openDrawer(r)}>
-                  <td className="px-3 py-2 capitalize">{r.kind}</td>
+                <tr
+                  key={r.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open ${r.kind} request for ${r.subject_email ?? r.subject_id}`}
+                  className="cursor-pointer border-t border-border/60 hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  onClick={() => void openDrawer(r)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void openDrawer(r);
+                    }
+                  }}
+                >
+                  <td className="px-3 py-2">{cap(r.kind)}</td>
                   <td className="px-3 py-2">
-                    <div className="truncate">{r.subject_email ?? r.subject_id}</div>
+                    <div className="max-w-[16rem] break-all">{r.subject_email ?? r.subject_id}</div>
                     <div className="text-xs text-muted-foreground">{r.subject_kind} · {timeAgo(r.requested_at)}</div>
                   </td>
-                  <td className="px-3 py-2"><Pill tone={STATUS_TONE[r.status] ?? "neutral"} className="capitalize">{r.status.replace("_", " ")}</Pill></td>
+                  <td className="px-3 py-2"><Pill tone={STATUS_TONE[r.status] ?? "neutral"}>{cap(r.status)}</Pill></td>
                   <td className="px-3 py-2"><DuePill dueAt={r.due_at} status={r.status} /></td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{r.source}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{cap(r.source)}</td>
                 </tr>
               ))}
             </tbody>
@@ -197,15 +221,15 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
             </Field>
             <Field label="Request kind">
               <Select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
-                {DSR_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+                {DSR_KINDS.map((k) => <option key={k} value={k}>{cap(k)}</option>)}
               </Select>
             </Field>
             <Field label="Verification email" hint="Defaults to the email on file">
               <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </Field>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreating(false)}>Cancel</Button>
-              <Button type="submit" disabled={busy === "create" || !form.subject_id.trim()}>Open request</Button>
+              <Button type="button" variant="outline" touch onClick={() => setCreating(false)}>Cancel</Button>
+              <Button type="submit" touch disabled={busy === "create" || !form.subject_id.trim()}>{busy === "create" && spinner} Open request</Button>
             </DialogFooter>
           </form>
         </Dialog>
@@ -217,14 +241,14 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
           onClose={() => setOpen(null)}
           header={
             <div className="min-w-0">
-              <h2 id={titleId} className="text-base font-semibold capitalize">{open.kind} request</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">{open.subject_kind} {open.subject_id} · {open.subject_email ?? "no email"}</p>
+              <h2 id={titleId} className="text-base font-semibold">{cap(open.kind)} request</h2>
+              <p className="mt-0.5 break-all text-xs text-muted-foreground">{cap(open.subject_kind)} {open.subject_id} · {open.subject_email ?? "no email"}</p>
             </div>
           }
         >
           <div className="space-y-5 text-sm">
             <div className="flex flex-wrap gap-2">
-              <Pill tone={STATUS_TONE[open.status] ?? "neutral"} className="capitalize">{open.status.replace("_", " ")}</Pill>
+              <Pill tone={STATUS_TONE[open.status] ?? "neutral"}>{cap(open.status)}</Pill>
               <DuePill dueAt={open.due_at} status={open.status} />
               {open.verified_at ? <Pill tone="success">Verified {timeAgo(open.verified_at)}</Pill> : <Pill tone="warning">Unverified</Pill>}
             </div>
@@ -232,7 +256,7 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
               <dt className="text-muted-foreground">Requested</dt><dd>{fmt(open.requested_at)}</dd>
               <dt className="text-muted-foreground">Due</dt><dd>{fmt(open.due_at)}</dd>
               <dt className="text-muted-foreground">Completed</dt><dd>{fmt(open.completed_at)}</dd>
-              <dt className="text-muted-foreground">Source</dt><dd>{open.source}</dd>
+              <dt className="text-muted-foreground">Source</dt><dd>{cap(open.source)}</dd>
             </dl>
 
             {!open.verified_at && open.status !== "completed" && open.status !== "rejected" && (
@@ -240,10 +264,10 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
                 <h3 className="font-medium">1. Verify the subject</h3>
                 <p className="mt-1 text-xs text-muted-foreground">Email a one-time code to {open.subject_email ?? "the subject"}, then enter the code they read back. Or mark in progress if you verified another way.</p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" disabled={busy !== null || !open.subject_email} onClick={() => act("otp", () => api(`/api/privacy/requests/${open.id}/verify`, { method: "POST", body: "{}" }), "Code sent.")}>Send code</Button>
+                  <Button size="sm" variant="outline" touch disabled={busy !== null || !open.subject_email} onClick={() => act("otp", () => api(`/api/privacy/requests/${open.id}/verify`, { method: "POST", body: "{}" }), "Code sent.")}>{busy === "otp" && spinner} Send code</Button>
                   <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" inputMode="numeric" className="w-32" aria-label="Verification code" />
-                  <Button size="sm" disabled={busy !== null || !/^\d{6}$/.test(code)} onClick={() => act("verify", () => api(`/api/privacy/requests/${open.id}/verify`, { method: "POST", body: JSON.stringify({ code }) }), "Subject verified.")}>Verify</Button>
-                  <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => patch({ status: "in_progress" }, "Marked in progress (manually verified).")}>Mark in progress</Button>
+                  <Button size="sm" touch disabled={busy !== null || !/^\d{6}$/.test(code)} onClick={() => act("verify", () => api(`/api/privacy/requests/${open.id}/verify`, { method: "POST", body: JSON.stringify({ code }) }), "Subject verified.")}>{busy === "verify" && spinner} Verify</Button>
+                  <Button size="sm" variant="ghost" touch disabled={busy !== null} onClick={() => patch({ status: "in_progress" }, "Marked in progress (manually verified).")}>Mark in progress</Button>
                 </div>
               </section>
             )}
@@ -251,11 +275,11 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
             <section className="rounded-lg border border-border p-3">
               <h3 className="font-medium">2. Fulfil</h3>
               <div className="mt-2 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" asChild>
+                <Button size="sm" variant="outline" touch asChild>
                   <a href={`/api/privacy/requests/${open.id}/export`} download><Download className="h-3.5 w-3.5" aria-hidden /> Export JSON</a>
                 </Button>
                 {open.status !== "completed" && open.status !== "rejected" && (
-                  <Button size="sm" variant="destructive" disabled={busy !== null || !open.verified_at} onClick={() => setEraseMode("anonymize")} title={open.verified_at ? undefined : "Verify first"}>
+                  <Button size="sm" variant="destructive" touch disabled={busy !== null || !open.verified_at} onClick={() => setEraseMode("anonymize")} title={open.verified_at ? undefined : "Verify first"}>
                     Erase subject…
                   </Button>
                 )}
@@ -269,11 +293,11 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
                 <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
               </Field>
               <div className="mt-2 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => patch({ notes }, "Notes saved.")}>Save notes</Button>
+                <Button size="sm" variant="outline" touch disabled={busy !== null} onClick={() => patch({ notes }, "Notes saved.")}>Save notes</Button>
                 {open.status !== "completed" && open.status !== "rejected" && (
                   <>
-                    <Button size="sm" disabled={busy !== null} onClick={() => patch({ status: "completed", notes }, "Request completed.")}>Complete</Button>
-                    <Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => patch({ status: "rejected", notes }, "Request rejected.")}>Reject</Button>
+                    <Button size="sm" touch disabled={busy !== null} onClick={() => patch({ status: "completed", notes }, "Request completed.")}>Complete</Button>
+                    <Button size="sm" variant="destructive" touch disabled={busy !== null} onClick={() => patch({ status: "rejected", notes }, "Request rejected.")}>Reject</Button>
                   </>
                 )}
               </div>
@@ -288,7 +312,7 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
                   {consents.map((c) => (
                     <li key={c.id} className="flex justify-between gap-2 py-1.5">
                       <span>{CONSENT_PURPOSE_LABELS[c.purpose] ?? c.purpose}</span>
-                      <span className="text-muted-foreground">{c.status} · {c.source} · {timeAgo(c.occurred_at)}</span>
+                      <span className="text-muted-foreground">{cap(c.status)} · {c.source} · {timeAgo(c.occurred_at)}</span>
                     </li>
                   ))}
                 </ul>
@@ -310,9 +334,9 @@ function RequestsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
             </Select>
           </Field>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEraseMode(null)}>Cancel</Button>
-            <Button variant="destructive" disabled={busy !== null} onClick={() => act("erase", () => api(`/api/privacy/requests/${open.id}/erase`, { method: "POST", body: JSON.stringify({ mode: eraseMode }) }), "Subject erased and request completed.").then(() => setEraseMode(null))}>
-              Erase permanently
+            <Button variant="outline" touch disabled={busy === "erase"} onClick={() => setEraseMode(null)}>Cancel</Button>
+            <Button variant="destructive" touch disabled={busy !== null} onClick={() => act("erase", () => api(`/api/privacy/requests/${open.id}/erase`, { method: "POST", body: JSON.stringify({ mode: eraseMode }) }), "Subject erased and request completed.").then(() => setEraseMode(null))}>
+              {busy === "erase" && spinner} Erase permanently
             </Button>
           </DialogFooter>
         </Dialog>
@@ -375,13 +399,13 @@ function ConsentsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
         <ErrorState message={error} onRetry={load} />
       ) : hits ? (
         hits.length === 0 ? (
-          <Empty title="No contacts match" />
+          <Empty title="No contacts match" text="Try a different name, email or phone number. Only CRM contacts are searched here." />
         ) : (
           <ul className="space-y-3">
             {hits.map((c) => (
               <li key={c.id} className="rounded-xl border border-border bg-card p-4">
                 <div className="font-medium">{c.full_name}</div>
-                <div className="text-xs text-muted-foreground">{[c.email, c.phone].filter(Boolean).join(" · ") || "no contact details"}</div>
+                <div className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{[c.email, c.phone].filter(Boolean).join(" · ") || "No contact details"}</div>
                 <ul className="mt-3 grid gap-2 sm:grid-cols-2">
                   {CONSENT_PURPOSES.map((p) => {
                     const cur = c.consent[p];
@@ -390,9 +414,10 @@ function ConsentsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
                       <li key={p} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2 text-sm">
                         <div className="min-w-0">
                           <div className="truncate">{CONSENT_PURPOSE_LABELS[p]}</div>
-                          <div className="text-[11px] text-muted-foreground">{cur ? `${cur.status} ${timeAgo(cur.at)}` : "no record"}</div>
+                          <div className="text-[11px] text-muted-foreground">{cur ? `${cap(cur.status)} ${timeAgo(cur.at)}` : "No record"}</div>
                         </div>
-                        <Button size="sm" variant={granted ? "outline" : "default"} disabled={busy === `${c.id}:${p}`} onClick={() => set(c.id, p, granted ? "withdrawn" : "granted")}>
+                        <Button size="sm" touch variant={granted ? "outline" : "default"} disabled={busy === `${c.id}:${p}`} onClick={() => set(c.id, p, granted ? "withdrawn" : "granted")} aria-label={`${granted ? "Withdraw" : "Grant"} ${CONSENT_PURPOSE_LABELS[p]} for ${c.full_name}`}>
+                          {busy === `${c.id}:${p}` && spinner}
                           {granted ? "Withdraw" : "Grant"}
                         </Button>
                       </li>
@@ -409,7 +434,7 @@ function ConsentsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
         <Empty title="No consent records yet" text="Consent is captured from forms, the client portal, imports and manual entries. Search a contact to grant or withdraw." />
       ) : (
         <TableScroller label="Recent consent ledger">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className={THEAD}>
               <tr><th className={TH}>When</th><th className={TH}>Subject</th><th className={TH}>Purpose</th><th className={TH}>Status</th><th className={TH}>Source</th></tr>
             </thead>
@@ -417,10 +442,10 @@ function ConsentsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
               {history.map((r) => (
                 <tr key={r.id} className="border-t border-border/60">
                   <td className="px-3 py-2 text-xs text-muted-foreground">{fmt(r.occurred_at)}</td>
-                  <td className="px-3 py-2 text-xs">{r.subject_kind} {r.subject_id.slice(0, 8)}…</td>
+                  <td className="px-3 py-2 font-mono text-xs" title={r.subject_id}>{cap(r.subject_kind)} {r.subject_id.slice(0, 8)}…</td>
                   <td className="px-3 py-2">{CONSENT_PURPOSE_LABELS[r.purpose] ?? r.purpose}</td>
-                  <td className="px-3 py-2"><Pill tone={r.status === "granted" ? "success" : "warning"}>{r.status}</Pill></td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{r.source}</td>
+                  <td className="px-3 py-2"><Pill tone={r.status === "granted" ? "success" : "warning"}>{cap(r.status)}</Pill></td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{cap(r.source)}</td>
                 </tr>
               ))}
             </tbody>
@@ -472,7 +497,7 @@ function RetentionTab({ onNotice }: { onNotice: (n: Notice) => void }) {
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">The nightly sweep applies enabled policies. Invoices, quotes and payments are never purged. Audit log has a statutory floor of 365 days.</p>
       <TableScroller label="Retention policies">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[720px] text-sm">
           <thead className={THEAD}><tr><th className={TH}>Data</th><th className={TH}>Keep</th><th className={TH}>Then</th><th className={TH}>Status</th><th className={TH}>Last run</th><th className={TH}><span className="sr-only">Edit</span></th></tr></thead>
           <tbody>
             {policies.map((p) => {
@@ -481,10 +506,10 @@ function RetentionTab({ onNotice }: { onNotice: (n: Notice) => void }) {
                 <tr key={p.entity_kind} className="border-t border-border/60">
                   <td className="px-3 py-2"><div className="font-medium">{meta.label}</div><div className="text-xs text-muted-foreground">{meta.description}</div></td>
                   <td className="px-3 py-2 tabular-nums">{p.keep_days} days</td>
-                  <td className="px-3 py-2 capitalize">{p.action}</td>
+                  <td className="px-3 py-2">{cap(p.action)}</td>
                   <td className="px-3 py-2">{p.enabled ? <Pill tone="success">Enabled</Pill> : <Pill tone="neutral">Off</Pill>}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{p.last_run_at ? `${timeAgo(p.last_run_at)} · ${p.last_affected ?? 0} rows` : "never"}</td>
-                  <td className="px-3 py-2 text-right"><Button size="sm" variant="outline" onClick={() => setEdit({ ...p })}>Edit</Button></td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{p.last_run_at ? `${timeAgo(p.last_run_at)} · ${p.last_affected ?? 0} rows` : "Never"}</td>
+                  <td className="px-3 py-2 text-right"><Button size="sm" variant="outline" touch onClick={() => setEdit({ ...p })} aria-label={`Edit retention for ${meta.label}`}>Edit</Button></td>
                 </tr>
               );
             })}
@@ -499,14 +524,14 @@ function RetentionTab({ onNotice }: { onNotice: (n: Notice) => void }) {
             </Field>
             <Field label="Then">
               <Select value={edit.action} onChange={(e) => setEdit({ ...edit, action: e.target.value as RetentionPolicyRow["action"] })}>
-                {RETENTION_META[edit.entity_kind as RetentionKind].actions.map((a) => <option key={a} value={a}>{a}</option>)}
+                {RETENTION_META[edit.entity_kind as RetentionKind].actions.map((a) => <option key={a} value={a}>{cap(a)}</option>)}
               </Select>
             </Field>
             <Checkbox label="Enabled" checked={edit.enabled} onChange={(e) => setEdit({ ...edit, enabled: e.target.checked })} />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
-            <Button disabled={busy} onClick={save}>Save</Button>
+            <Button variant="outline" touch disabled={busy} onClick={() => setEdit(null)}>Cancel</Button>
+            <Button touch disabled={busy} onClick={save}>{busy && spinner} Save</Button>
           </DialogFooter>
         </Dialog>
       )}
@@ -565,20 +590,20 @@ function NoticesTab({ onNotice }: { onNotice: (n: Notice) => void }) {
           <Select value={locale} onChange={(e) => setLocale(e.target.value as "en" | "es" | "hi")} aria-label="Notice language" className="w-auto">
             <option value="en">English</option><option value="es">Español</option><option value="hi">हिन्दी</option>
           </Select>
-          {slug && <a className="text-xs underline" href={`/p/privacy/${slug}?lang=${locale}`} target="_blank" rel="noreferrer">View public page</a>}
+          {slug && <a className="inline-flex min-h-11 items-center text-xs underline sm:min-h-0" href={`/p/privacy/${slug}?lang=${locale}`} target="_blank" rel="noreferrer">View public page</a>}
         </div>
         <Field label="Notice (Markdown)" hint="Publishing creates a new immutable version; past versions stay on record so consent evidence can reference them.">
           <Textarea rows={18} value={body} onChange={(e) => setBody(e.target.value)} placeholder={"## What we collect\n- Name, email, phone…\n\n## Why\n…\n\n## Your rights\n…"} />
         </Field>
-        <Button disabled={busy || body.trim().length < 20} onClick={publish}>Publish version {(versions[0]?.version ?? 0) + 1}</Button>
+        <Button touch disabled={busy || body.trim().length < 20} onClick={publish}>{busy && spinner} Publish version {(versions[0]?.version ?? 0) + 1}</Button>
       </div>
       <aside className="rounded-xl border border-border bg-card p-4 text-sm">
         <h3 className="font-medium">Versions</h3>
         {versions.length === 0 ? <p className="mt-1 text-xs text-muted-foreground">Nothing published yet.</p> : (
-          <ul className="mt-2 space-y-1 text-xs">
+          <ul className="mt-2 divide-y divide-border/60 text-xs">
             {versions.map((v) => (
-              <li key={v.id} className="flex justify-between gap-2">
-                <button type="button" className="underline" onClick={() => setBody(v.body_md)}>v{v.version}</button>
+              <li key={v.id} className="flex items-center justify-between gap-2">
+                <button type="button" className="inline-flex min-h-11 items-center rounded px-1 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8" onClick={() => setBody(v.body_md)} aria-label={`Load version ${v.version} into the editor`}>v{v.version}</button>
                 <span className="text-muted-foreground">{fmt(v.published_at)}</span>
               </li>
             ))}
@@ -656,11 +681,22 @@ function IncidentsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">Log a suspected breach the moment it is detected. Affected people must be told without delay; the authority within 72 hours.</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 flex-1 basis-64 text-sm text-muted-foreground">Log a suspected breach the moment it is detected. Affected people must be told without delay; the authority within 72 hours.</p>
         <Button touch onClick={() => setCreating(true)}><ShieldAlert className="h-4 w-4" aria-hidden /> Log incident</Button>
       </div>
-      {error ? <ErrorState message={error} onRetry={load} /> : rows === null ? <Loading /> : rows.length === 0 ? <Empty title="No incidents logged" /> : (
+      {error ? <ErrorState message={error} onRetry={load} /> : rows === null ? <Loading /> : rows.length === 0 ? (
+        <Empty
+          icon={<ShieldAlert className="h-5 w-5" />}
+          title="No incidents logged"
+          text="When you suspect a breach, log it here to start the 72-hour notification clock and record who was told and when."
+          action={
+            <Button touch onClick={() => setCreating(true)}>
+              <ShieldAlert className="h-4 w-4" aria-hidden /> Log incident
+            </Button>
+          }
+        />
+      ) : (
         <ul className="space-y-3">
           {rows.map((i) => {
             const now = new Date().toISOString();
@@ -669,9 +705,9 @@ function IncidentsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-medium">{i.title}</h3>
-                      <Pill tone={i.severity === "critical" || i.severity === "high" ? "danger" : i.severity === "medium" ? "warning" : "neutral"} className="capitalize">{i.severity}</Pill>
-                      <Pill tone="neutral" className="capitalize">{i.status}</Pill>
+                      <h3 className="break-words font-medium">{i.title}</h3>
+                      <Pill tone={i.severity === "critical" || i.severity === "high" ? "danger" : i.severity === "medium" ? "warning" : "neutral"}>{cap(i.severity)}</Pill>
+                      <Pill tone="neutral">{cap(i.status)}</Pill>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">Detected {fmt(i.detected_at)}{i.affected_count !== null ? ` · ${i.affected_count} affected` : ""}</p>
                     {i.description && <p className="mt-2 text-sm">{i.description}</p>}
@@ -680,10 +716,10 @@ function IncidentsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
                 </div>
                 {i.status !== "closed" && (
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {!i.contained_at && <Button size="sm" variant="outline" disabled={busy === i.id} onClick={() => mark(i.id, { contained_at: now, status: "contained" }, "Marked contained.")}>Mark contained</Button>}
-                    {!i.notified_subjects_at && <Button size="sm" variant="outline" disabled={busy === i.id} onClick={() => mark(i.id, { notified_subjects_at: now }, "Recorded: affected people notified.")}>Affected people notified</Button>}
-                    {!i.notified_authority_at && <Button size="sm" disabled={busy === i.id} onClick={() => mark(i.id, { notified_authority_at: now, status: "notified" }, "Recorded: authority notified.")}>Authority notified</Button>}
-                    <Button size="sm" variant="ghost" disabled={busy === i.id} onClick={() => mark(i.id, { status: "closed" }, "Incident closed.")}>Close</Button>
+                    {!i.contained_at && <Button size="sm" variant="outline" touch disabled={busy === i.id} onClick={() => mark(i.id, { contained_at: now, status: "contained" }, "Marked contained.")}>Mark contained</Button>}
+                    {!i.notified_subjects_at && <Button size="sm" variant="outline" touch disabled={busy === i.id} onClick={() => mark(i.id, { notified_subjects_at: now }, "Recorded: affected people notified.")}>Affected people notified</Button>}
+                    {!i.notified_authority_at && <Button size="sm" touch disabled={busy === i.id} onClick={() => mark(i.id, { notified_authority_at: now, status: "notified" }, "Recorded: authority notified.")}>Authority notified</Button>}
+                    <Button size="sm" variant="ghost" touch disabled={busy === i.id} onClick={() => mark(i.id, { status: "closed" }, "Incident closed.")} aria-label={`Close incident ${i.title}`}>Close</Button>
                   </div>
                 )}
               </li>
@@ -697,13 +733,13 @@ function IncidentsTab({ onNotice }: { onNotice: (n: Notice) => void }) {
             <Field label="Title" required><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required minLength={3} /></Field>
             <Field label="What happened"><Textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Severity"><Select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })}>{INCIDENT_SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}</Select></Field>
+              <Field label="Severity"><Select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })}>{INCIDENT_SEVERITIES.map((s) => <option key={s} value={s}>{cap(s)}</option>)}</Select></Field>
               <Field label="Detected at"><Input type="datetime-local" value={form.detected_at} onChange={(e) => setForm({ ...form, detected_at: e.target.value })} required /></Field>
               <Field label="People affected"><Input type="number" min={0} value={form.affected_count} onChange={(e) => setForm({ ...form, affected_count: e.target.value })} /></Field>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreating(false)}>Cancel</Button>
-              <Button type="submit" disabled={busy === "create"}>Log incident</Button>
+              <Button type="button" variant="outline" touch disabled={busy === "create"} onClick={() => setCreating(false)}>Cancel</Button>
+              <Button type="submit" touch disabled={busy === "create"}>{busy === "create" && spinner} Log incident</Button>
             </DialogFooter>
           </form>
         </Dialog>
@@ -752,14 +788,14 @@ function GrievanceTab({ onNotice }: { onNotice: (n: Notice) => void }) {
   if (!s) return <Loading />;
   return (
     <form onSubmit={save} className="max-w-xl space-y-4">
-      <p className="text-sm text-muted-foreground">Shown on the public privacy notice{slug && <> (<a className="underline" href={`/p/privacy/${slug}`} target="_blank" rel="noreferrer">/p/privacy/{slug}</a>)</>} and in the client portal.</p>
+      <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">Shown on the public privacy notice{slug && <> (<a className="underline" href={`/p/privacy/${slug}`} target="_blank" rel="noreferrer">/p/privacy/{slug}</a>)</>} and in the client portal.</p>
       <Field label="Grievance officer name"><Input value={s.grievance_officer_name ?? ""} onChange={(e) => setS({ ...s, grievance_officer_name: e.target.value })} /></Field>
       <Field label="Grievance officer email"><Input type="email" value={s.grievance_officer_email ?? ""} onChange={(e) => setS({ ...s, grievance_officer_email: e.target.value })} /></Field>
       <Field label="Published response period (days)" hint={`Requests are due this many days after receipt. Maximum ${MAX_DSR_DUE_DAYS}.`}>
         <Input type="number" min={1} max={MAX_DSR_DUE_DAYS} value={s.dsr_due_days} onChange={(e) => setS({ ...s, dsr_due_days: Number(e.target.value) })} />
       </Field>
       <Checkbox label={<span>Auto-fulfil portal access requests <span className="text-xs text-muted-foreground">— the client downloads their data instantly; otherwise staff export it from Requests.</span></span>} checked={s.auto_fulfil_access} onChange={(e) => setS({ ...s, auto_fulfil_access: e.target.checked })} />
-      <Button type="submit" disabled={busy}>Save</Button>
+      <Button type="submit" touch disabled={busy}>{busy && spinner} Save</Button>
     </form>
   );
 }
@@ -778,16 +814,16 @@ export default function PrivacySettingsPage() {
       wide
       title="Privacy & data"
       description="Consent, data-subject requests, retention, notices and breach log — the controls behind DPDP and GDPR duties."
-      icon={<Fingerprint className="h-6 w-6 text-primary" aria-hidden />}
+      icon={<Fingerprint className="h-5 w-5" aria-hidden />}
       actions={
-        <Button variant="outline" asChild>
+        <Button variant="outline" touch asChild>
           <a href="/docs/PRIVACY.md" target="_blank" rel="noreferrer"><AlertTriangle className="h-4 w-4" aria-hidden /> How this maps to the law</a>
         </Button>
       }
     >
       <Tabs id="privacy" label="Privacy sections" tabs={TABS} value={tab} onChange={(t) => { setTab(t); setNotice(null); }} className="mb-4" />
       {notice && (
-        <div className="mb-4"><Banner tone={notice.tone} onDismiss={() => setNotice(null)}>{notice.text}</Banner></div>
+        <Banner tone={notice.tone} onDismiss={() => setNotice(null)}>{notice.text}</Banner>
       )}
       <TabPanel id="privacy" value={tab}>
         {tab === "requests" && <RequestsTab onNotice={onNotice} />}

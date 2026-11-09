@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { resolveShareToken } from "@/lib/share-tokens";
 import { currentConsent, recordConsent } from "@/lib/privacy/consent";
 import { CONSENT_PURPOSE_LABELS, DSR_KINDS, SELF_SERVICE_PURPOSES } from "@/lib/privacy/constants";
@@ -30,7 +30,7 @@ async function auth(ctx: Ctx) {
 
 /** GET → consents (self-service purposes), open requests, notice path, grievance contact. */
 export async function GET(req: NextRequest, ctx: Ctx) {
-  if (!rateLimit(`portal-privacy:${ip(req)}`, 60, 60_000).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (!(await rateLimitAsync(`portal-privacy:${ip(req)}`, 60, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   try {
     const a = await auth(ctx);
     if (!a) return NextResponse.json({ error: "not_found" }, { status: 404 });
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
  * contact). Access requests return the export inline when the org enabled auto_fulfil_access.
  */
 export async function POST(req: NextRequest, ctx: Ctx) {
-  if (!rateLimit(`portal-privacy:${ip(req)}`, 30, 60_000).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (!(await rateLimitAsync(`portal-privacy:${ip(req)}`, 30, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   try {
     const a = await auth(ctx);
     if (!a) return NextResponse.json({ error: "not_found" }, { status: 404 });

@@ -146,10 +146,25 @@ export async function rateLimitDb(key: string, opts: RateLimitOptions): Promise<
     if (rows.length === 0) {
       const existing = await queryOne<DbRow>(`SELECT count, window_start FROM rate_limits WHERE key = $1`, [key]);
       if (!existing) {
-        rows = await query<DbRow>(
-          `INSERT INTO rate_limits (key, count, window_start, updated_at) VALUES ($1, 1, $2, $2) RETURNING count, window_start`,
-          [key, nowIso]
-        );
+        try {
+          rows = await query<DbRow>(
+            `INSERT INTO rate_limits (key, count, window_start, updated_at) VALUES ($1, 1, $2, $2) RETURNING count, window_start`,
+            [key, nowIso]
+          );
+        } catch (insertErr) {
+          // Lost an INSERT race with a concurrent first hit: the row now exists
+          // with a live window, so count this request against it instead of failing open.
+          rows = await query<DbRow>(
+            `UPDATE rate_limits SET count = count + 1, updated_at = $2
+              WHERE key = $1 AND window_start > $3 AND count < $4 RETURNING count, window_start`,
+            [key, nowIso, cutoff, opts.limit]
+          );
+          if (rows.length === 0) {
+            const raced = await queryOne<DbRow>(`SELECT count, window_start FROM rate_limits WHERE key = $1`, [key]);
+            if (!raced) throw insertErr;
+            return { allowed: false, remaining: 0, resetAt: new Date(raced.window_start).getTime() + opts.windowMs };
+          }
+        }
       } else {
         // Row exists, window live, count at limit.
         return { allowed: false, remaining: 0, resetAt: new Date(existing.window_start).getTime() + opts.windowMs };

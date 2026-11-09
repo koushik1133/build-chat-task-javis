@@ -1,7 +1,8 @@
-import { createHash, randomInt, randomUUID } from "crypto";
+import { createHash, randomInt, randomUUID, timingSafeEqual } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { recordAudit } from "@/lib/audit";
 import { enqueueNotification } from "@/lib/notifications/outbox";
+import { likeContains } from "@/lib/like";
 import { revokeShareTokens } from "@/lib/share-tokens";
 import { tableExists } from "@/lib/table-exists";
 import { anonymizeRow, ERASED_CUSTOMER_LABEL, ERASED_NAME, REDACTED, stripInternalKeys, tombstonesFor } from "./anonymize";
@@ -138,6 +139,13 @@ function hashOtp(requestId: string, otp: string): string {
   return createHash("sha256").update(`${requestId}:${otp}`, "utf8").digest("hex");
 }
 
+/** Constant-time hash comparison (same guarantee as quote acceptance). Exported for tests. */
+export function otpMatches(expectedHash: string, storedHash: string): boolean {
+  const a = Buffer.from(expectedHash, "utf8");
+  const b = Buffer.from(storedHash, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 /** Send a 6-digit code to the subject's email. Moves the request to `verifying`. */
 export async function sendVerification(dataId: string, requestId: string): Promise<{ expiresAt: string }> {
   const r = await getRequest(dataId, requestId);
@@ -167,7 +175,7 @@ export async function verifyRequest(dataId: string, requestId: string, code: str
   if (!row.export_token_hash) throw new DsrError("Send a verification code first");
   if (row.otp_expires_at && new Date(row.otp_expires_at).getTime() < Date.now()) throw new DsrError("Code expired; send a new one");
   if (Number(row.otp_attempts) >= OTP_MAX_ATTEMPTS) throw new DsrError("Too many attempts; send a new code");
-  if (hashOtp(requestId, code.trim()) !== row.export_token_hash) {
+  if (!otpMatches(hashOtp(requestId, code.trim()), row.export_token_hash)) {
     await query(`UPDATE dsr_requests SET otp_attempts = otp_attempts + 1 WHERE id = $1`, [requestId]);
     throw new DsrError("Incorrect code");
   }
@@ -270,6 +278,14 @@ const W = {
   optout: "id, channel, reason, created_at",
 } as const;
 
+/**
+ * LIKE pattern that finds `email` inside the JSON `to_addrs` column. Metacharacters
+ * are escaped (not stripped) so `john_doe@x.com` still matches. Exported for tests.
+ */
+export function mailAddressPattern(email: string): string {
+  return likeContains(email.toLowerCase());
+}
+
 async function safeRows<T extends Record<string, unknown>>(table: string, sql: string, params: unknown[]): Promise<T[]> {
   if (!(await tableExists(table))) return [];
   return query<T>(sql, params).catch(() => []);
@@ -315,7 +331,7 @@ export async function buildSubjectExport(dataId: string, subject: Subject): Prom
     contactId ? safeRows("quotes", `SELECT ${W.quote} FROM quotes WHERE user_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 500`, [dataId, contactId]) : Promise.resolve([]),
     contactId ? safeRows<Record<string, unknown> & { id: string }>("invoices", `SELECT ${W.invoice} FROM invoices WHERE user_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 500`, [dataId, contactId]) : Promise.resolve([]),
     contactId ? safeRows("records", `SELECT ${W.record} FROM records WHERE user_id = $1 AND contact_id = $2 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 500`, [dataId, contactId]) : Promise.resolve([]),
-    email ? safeRows("mail_messages", `SELECT ${W.mail} FROM mail_messages WHERE user_id = $1 AND (lower(from_addr) = $2 OR lower(to_addrs) LIKE $3) ORDER BY received_at DESC LIMIT 500`, [dataId, email, `%${email.replace(/[%_]/g, "")}%`]) : Promise.resolve([]),
+    email ? safeRows("mail_messages", `SELECT ${W.mail} FROM mail_messages WHERE user_id = $1 AND (lower(from_addr) = $2 OR lower(to_addrs) LIKE $3) ORDER BY received_at DESC LIMIT 500`, [dataId, email, mailAddressPattern(email)]) : Promise.resolve([]),
     phone ? safeRows("messaging_conversations", `SELECT ${W.conversation} FROM messaging_conversations WHERE user_id = $1 AND from_number = $2 ORDER BY updated_at DESC LIMIT 100`, [dataId, phone]) : Promise.resolve([]),
     safeRows("voice_campaign_targets", `SELECT ${W.voice} FROM voice_campaign_targets WHERE user_id = $1 AND (($2::text IS NOT NULL AND contact_id = $2) OR ($3::text IS NOT NULL AND phone = $3)) ORDER BY created_at DESC LIMIT 500`, [dataId, contactId, phone]),
     safeRows("contact_optouts", `SELECT ${W.optout} FROM contact_optouts WHERE user_id = $1 AND (($2::text IS NOT NULL AND contact_id = $2) OR ($3::text IS NOT NULL AND lower(email) = $3) OR ($4::text IS NOT NULL AND phone = $4)) LIMIT 200`, [dataId, contactId, email, phone]),
@@ -360,9 +376,14 @@ export interface EraseResult {
   pinecone: "deleted" | "skipped" | "failed";
 }
 
+/**
+ * One erasure statement. A missing table is a legitimate 0; any other failure
+ * propagates so `eraseSubject` never reports a half-done erasure as completed
+ * (the request stays in_progress and staff can retry — tombstones are already written).
+ */
 async function run(table: string, sql: string, params: unknown[]): Promise<number> {
   if (!(await tableExists(table))) return 0;
-  const rows = await query<{ id: string }>(`${sql} RETURNING id`, params).catch(() => []);
+  const rows = await query<{ id: string }>(`${sql} RETURNING id`, params);
   return rows.length;
 }
 
@@ -424,7 +445,7 @@ export async function eraseSubject(dataId: string, subject: Subject, opts: { mod
     affected.share_tokens = 1;
   }
   if (email) {
-    affected.mail_messages = await run("mail_messages", `UPDATE mail_messages SET body_text = NULL, body_html = NULL, snippet = NULL, subject = $3 WHERE user_id = $1 AND (lower(from_addr) = $2 OR lower(to_addrs) LIKE $4)`, [dataId, email, REDACTED, `%${email.replace(/[%_]/g, "")}%`]);
+    affected.mail_messages = await run("mail_messages", `UPDATE mail_messages SET body_text = NULL, body_html = NULL, snippet = NULL, subject = $3 WHERE user_id = $1 AND (lower(from_addr) = $2 OR lower(to_addrs) LIKE $4)`, [dataId, email, REDACTED, mailAddressPattern(email)]);
   }
   if (phone) {
     affected.messaging_conversations = del

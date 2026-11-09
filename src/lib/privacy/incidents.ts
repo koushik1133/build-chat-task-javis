@@ -66,13 +66,18 @@ export interface IncidentPatch {
   affected_count?: number | null;
 }
 
+/** Columns a patch may touch; anything else is ignored so the SET list is never caller-controlled. */
+const PATCHABLE: ReadonlySet<string> = new Set<keyof IncidentPatch>([
+  "title", "description", "severity", "status", "contained_at", "notified_authority_at", "notified_subjects_at", "affected_count",
+]);
+
 export async function updateIncident(dataId: string, id: string, patch: IncidentPatch, actorId: string | null): Promise<IncidentRow | null> {
   const before = await queryOne<IncidentRow>(`SELECT ${COLS} FROM security_incidents WHERE id = $1 AND user_id = $2`, [id, dataId]);
   if (!before) return null;
   const sets: string[] = ["updated_at = NOW()"];
   const values: unknown[] = [id, dataId];
   for (const [k, v] of Object.entries(patch)) {
-    if (v === undefined) continue;
+    if (v === undefined || !PATCHABLE.has(k)) continue;
     values.push(v);
     sets.push(`${k} = $${values.length}`);
   }

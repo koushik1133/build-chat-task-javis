@@ -307,10 +307,10 @@ export default function SsoSettingsPage() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="flex flex-wrap items-center gap-2 font-mono text-sm">
-                          <span className="truncate">{d.domain}</span>
+                          <span className="break-all">{d.domain}</span>
                           {d.verified_at ? <Pill tone="success">Verified</Pill> : <Pill tone="warning">Pending verification</Pill>}
                         </p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="break-all text-xs text-muted-foreground">
                           {d.provider_id ? `Provider ${d.provider_id}` : "Resolved by domain"} · added {fmtDate(d.created_at)}
                           {d.verified_at ? ` · verified ${fmtDate(d.verified_at)}` : ""}
                         </p>
@@ -330,7 +330,7 @@ export default function SsoSettingsPage() {
                       <dl className="mt-2 rounded-md border border-dashed border-border bg-secondary/30 px-3">
                         <Row label="TXT record host" value={d.record.host} />
                         <Row label="TXT record value" value={d.record.value} />
-                        {d.last_verify_error && <p className="pb-2 text-xs text-amber-800 dark:text-amber-300">Last check: {d.last_verify_error}</p>}
+                        {d.last_verify_error && <p role="status" className="pb-2 text-xs text-amber-800 dark:text-amber-300 [overflow-wrap:anywhere]">Last check: {d.last_verify_error}</p>}
                       </dl>
                     )}
                   </li>
@@ -383,7 +383,7 @@ export default function SsoSettingsPage() {
               <code className="min-w-0 flex-1 break-all font-mono text-xs">{newToken.token}</code>
               <CopyButton text={newToken.token} label="Copy SCIM token" />
             </div>
-            <p className="text-xs text-muted-foreground">Base URL: <code className="font-mono">{data?.baseUrl}</code></p>
+            <p className="text-xs text-muted-foreground">Base URL: <code className="break-all font-mono">{data?.baseUrl}</code></p>
             <DialogFooter>
               <Button touch onClick={() => setNewToken(null)}>Done</Button>
             </DialogFooter>

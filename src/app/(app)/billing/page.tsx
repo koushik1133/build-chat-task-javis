@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Ban, Copy, FileCheck2, FileDown, Link2, Loader2, Plus, Receipt, RefreshCw, Send, Sparkles, Trash2, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Pill, type Tone } from "@/components/ui/pill";
@@ -52,6 +53,16 @@ export default function BillingPage() {
   // Accounting sync pills: only when a ledger is connected (one fetch, then the invoice links).
   const [syncState, setSyncState] = useState<Record<string, SyncState> | null>(null);
   const nextSignal = useAbortable();
+  const router = useRouter();
+
+  // Deep link from Home quick actions: /billing?new=quote|invoice opens the dialog once, then the URL is cleaned.
+  useEffect(() => {
+    const want = new URLSearchParams(window.location.search).get("new");
+    if (want !== "quote" && want !== "invoice") return;
+    setTab(want === "quote" ? "quotes" : "invoices");
+    setDialog(want);
+    router.replace("/billing", { scroll: false });
+  }, [router]);
 
   const load = useCallback(async () => {
     const signal = nextSignal();

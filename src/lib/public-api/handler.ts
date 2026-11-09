@@ -47,10 +47,14 @@ export function op<Q extends ZodTypeAny, P extends ZodTypeAny, B extends ZodType
 ): (req: Request, context: RouteContext) => Promise<Response> {
   return async function handler(req: Request, context: RouteContext): Promise<Response> {
     let rlHeaders: Record<string, string> = {};
+    let ownerDataId: string | null = null;
     try {
       const url = new URL(req.url);
       const principal = def.scope === null ? PUBLIC_PRINCIPAL : await requireApiKey(req, def.scope);
-      if (def.scope !== null) rlHeaders = rateLimitHeaders(principal.rate);
+      if (def.scope !== null) {
+        rlHeaders = rateLimitHeaders(principal.rate);
+        ownerDataId = principal.dataId;
+      }
 
       const rawParams = (await context?.params) ?? {};
       const params = def.params ? parseOrThrow(def.params, rawParams, "params") : ({} as Infer<P>);
@@ -106,7 +110,7 @@ export function op<Q extends ZodTypeAny, P extends ZodTypeAny, B extends ZodType
     } catch (err) {
       const res = errorToResponse(err, rlHeaders);
       if (res.status >= 500) {
-        void captureError(err, { route: `/api/v1${def.path}`, method: def.method, status: res.status, userId: null });
+        void captureError(err, { route: `/api/v1${def.path}`, method: def.method, status: res.status, userId: ownerDataId });
       }
       return res;
     }

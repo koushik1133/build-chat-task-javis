@@ -259,13 +259,40 @@ export async function addTargets(dataId: string, campaignId: string, input: Audi
     }
     candidates.push({ phone, contact_id: c.id, first_name: firstNameOf(c.full_name) || null, tags: parseTags(c.tags) });
   }
+  // Raw numbers go through the same gate: under require_consent a number is only
+  // dialled when a CRM contact holding that phone has a live marketing_voice grant,
+  // so the consent check cannot be bypassed by passing phones instead of contacts.
+  const rawPhones: Array<{ phone: string; first_name: string | null }> = [];
   for (const p of input.phones ?? []) {
     const phone = normalizePhone(p.phone);
     if (!phone) {
       result.skipped_invalid++;
       continue;
     }
-    candidates.push({ phone, contact_id: null, first_name: p.first_name?.trim() || null, tags: [] });
+    rawPhones.push({ phone, first_name: p.first_name?.trim() || null });
+  }
+  if (rawPhones.length && campaign?.require_consent !== false) {
+    const owners = await query<{ id: string; phone: string | null }>(
+      `SELECT id, phone FROM crm_contacts WHERE user_id = $1 AND deleted_at IS NULL AND phone IS NOT NULL`,
+      [dataId]
+    ).catch(() => []);
+    const byPhone = new Map<string, string[]>();
+    for (const o of owners) {
+      const n = normalizePhone(o.phone);
+      if (n) byPhone.set(n, [...(byPhone.get(n) ?? []), o.id]);
+    }
+    const granted = await grantedSubset(dataId, "contact", owners.map((o) => o.id), "marketing_voice");
+    for (const r of rawPhones) {
+      const ids = byPhone.get(r.phone) ?? [];
+      const contactId = ids.find((id) => granted.has(id));
+      if (!contactId) {
+        result.skipped_no_consent++;
+        continue;
+      }
+      candidates.push({ phone: r.phone, contact_id: contactId, first_name: r.first_name, tags: [] });
+    }
+  } else {
+    for (const r of rawPhones) candidates.push({ phone: r.phone, contact_id: null, first_name: r.first_name, tags: [] });
   }
 
   const dnc = await loadDnc(dataId);

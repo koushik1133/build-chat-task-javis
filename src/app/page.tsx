@@ -24,7 +24,7 @@ export default async function Landing() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (user) redirect("/chat");
+  if (user) redirect("/home");
 
   return (
     <main className="relative min-h-screen overflow-hidden">

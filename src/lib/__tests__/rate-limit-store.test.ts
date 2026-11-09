@@ -84,3 +84,26 @@ describe("pruneRateLimits", () => {
     warn.mockRestore();
   });
 });
+
+describe("rateLimitDb insert race", () => {
+  it("counts the request against the row that won a concurrent first INSERT instead of failing open", async () => {
+    const start = new Date().toISOString();
+    db.query
+      .mockResolvedValueOnce([]) // elapsed-window reset: no row
+      .mockResolvedValueOnce([]) // live-window increment: no row yet
+      .mockRejectedValueOnce(new Error('duplicate key value violates unique constraint "rate_limits_pkey"'))
+      .mockResolvedValueOnce([{ count: 2, window_start: start }]); // retry increment
+    db.queryOne.mockResolvedValueOnce(null);
+    const r = await rateLimitDb("racy", { limit: 3, windowMs: 1000 });
+    expect(r).toMatchObject({ allowed: true, remaining: 1 });
+    expect(String(db.query.mock.calls[3][0])).toMatch(/count = count \+ 1/);
+  });
+
+  it("denies when the winner of the race already filled the window", async () => {
+    const start = new Date().toISOString();
+    db.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockRejectedValueOnce(new Error("duplicate key")).mockResolvedValueOnce([]);
+    db.queryOne.mockResolvedValueOnce(null).mockResolvedValueOnce({ count: 1, window_start: start });
+    const r = await rateLimitDb("racy2", { limit: 1, windowMs: 1000 });
+    expect(r.allowed).toBe(false);
+  });
+});

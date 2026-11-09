@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { dbUnavailableResponse } from "@/lib/api-db";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { CompleteBody, completeOnboarding } from "@/lib/onboarding/complete";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const limit = rateLimit(`onboarding-complete:${scope.dataId}`, 10, 60 * 60 * 1000);
+  const limit = await rateLimitAsync(`onboarding-complete:${scope.dataId}`, 10, 60 * 60 * 1000);
   if (!limit.allowed) return NextResponse.json({ error: "rate limited" }, { status: 429 });
 
   const parsed = CompleteBody.safeParse(await req.json().catch(() => null));

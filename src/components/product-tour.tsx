@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, HelpCircle, LayoutDashboard, Boxes, LifeBuoy, Receipt, Bot, Command } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useModal } from "@/components/ui/hooks";
+import { cn } from "@/lib/utils";
 
 type TourStep = {
   title: string;
@@ -83,18 +86,6 @@ export function ProductTour() {
     if (!readCompleted()) setIsOpen(true);
   }, []);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        writeCompleted();
-        setIsOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen]);
-
   const handleClose = () => {
     writeCompleted();
     setIsOpen(false);
@@ -108,8 +99,8 @@ export function ProductTour() {
           setCurrentStep(0);
           setIsOpen(true);
         }}
-        className="fixed bottom-4 right-4 z-50 flex min-h-[44px] items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-lg transition-all hover:scale-105 hover:bg-primary/95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        title="Start product tour"
+        className="fixed right-4 z-50 flex min-h-11 touch-manipulation items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-lg transition-all hover:scale-105 hover:bg-primary/95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:scale-100 [bottom:max(1rem,env(safe-area-inset-bottom))]"
+        aria-label="Start product tour"
       >
         <HelpCircle className="h-4 w-4" aria-hidden />
         <span>Tour</span>
@@ -117,38 +108,63 @@ export function ProductTour() {
     );
   }
 
+  return <TourDialog step={currentStep} onStep={setCurrentStep} onClose={handleClose} />;
+}
+
+/** Separate component so useModal mounts fresh each time the tour opens (focus trap, Escape, scroll lock, focus restore). */
+function TourDialog({ step: currentStep, onStep, onClose }: { step: number; onStep: (n: number) => void; onClose: () => void }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModal(panelRef, onClose, { initialFocus: "container" });
+
   const step = TOUR_STEPS[currentStep];
   const Icon = step.icon;
+  const last = currentStep === TOUR_STEPS.length - 1;
 
   const handleNext = () => {
-    if (currentStep < TOUR_STEPS.length - 1) setCurrentStep(currentStep + 1);
-    else handleClose();
+    if (!last) onStep(currentStep + 1);
+    else onClose();
   };
   const handleBack = () => {
-    if (currentStep > 0) setCurrentStep(currentStep - 1);
+    if (currentStep > 0) onStep(currentStep - 1);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200" role="dialog" aria-modal="true" aria-labelledby="tour-title">
-      <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm animate-in fade-in duration-200 motion-reduce:animate-none sm:items-center sm:p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tour-title"
+        aria-describedby="tour-desc"
+        tabIndex={-1}
+        className="relative max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-card p-6 shadow-2xl outline-none animate-in zoom-in-95 duration-200 motion-reduce:animate-none sm:rounded-2xl [padding-bottom:max(1.5rem,env(safe-area-inset-bottom))]"
+      >
         <button
           type="button"
-          onClick={handleClose}
+          data-dialog-close=""
+          onClick={onClose}
           aria-label="Close tour"
-          className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="absolute right-2 top-2 inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:right-3 sm:top-3 sm:h-9 sm:w-9"
         >
           <X className="h-4 w-4" aria-hidden />
         </button>
 
         <div className="mb-6 flex gap-1.5" aria-hidden>
           {TOUR_STEPS.map((_, idx) => (
-            <div key={idx} className={`h-1 flex-1 rounded-full transition-all duration-300 ${idx <= currentStep ? "bg-primary" : "bg-secondary"}`} />
+            <div key={idx} className={cn("h-1 flex-1 rounded-full transition-all duration-300 motion-reduce:transition-none", idx <= currentStep ? "bg-primary" : "bg-secondary")} />
           ))}
         </div>
 
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between gap-2 pr-10">
           <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">{step.badge}</span>
-          <span className="text-xs font-medium text-muted-foreground">Step {currentStep + 1} of {TOUR_STEPS.length}</span>
+          <span className="text-xs font-medium text-muted-foreground" aria-live="polite">
+            Step {currentStep + 1} of {TOUR_STEPS.length}
+          </span>
         </div>
 
         <div className="mb-4 inline-flex items-center justify-center rounded-2xl bg-primary/5 p-4 text-primary" aria-hidden>
@@ -156,26 +172,26 @@ export function ProductTour() {
         </div>
 
         <h3 id="tour-title" className="mb-2 text-lg font-bold text-foreground">{step.title}</h3>
-        <p className="mb-4 text-sm leading-relaxed text-muted-foreground">{step.description}</p>
+        <p id="tour-desc" className="mb-4 text-sm leading-relaxed text-muted-foreground">{step.description}</p>
 
         <div className="mb-6 flex flex-col gap-1 rounded-xl border border-border/50 bg-secondary/40 p-3 text-xs text-muted-foreground">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground">Try this</span>
           <span>{step.actionDescription}</span>
         </div>
 
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <button type="button" onClick={handleClose} className="min-h-[44px] rounded-md px-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <Button type="button" variant="ghost" size="sm" touch onClick={onClose} className="text-muted-foreground hover:text-foreground">
             Skip tour
-          </button>
+          </Button>
           <div className="flex gap-2">
             {currentStep > 0 && (
-              <button type="button" onClick={handleBack} className="min-h-[44px] rounded-lg border border-border px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Button type="button" variant="outline" size="sm" touch onClick={handleBack}>
                 Back
-              </button>
+              </Button>
             )}
-            <button type="button" onClick={handleNext} className="min-h-[44px] rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              {currentStep === TOUR_STEPS.length - 1 ? "Finish" : "Next"}
-            </button>
+            <Button type="button" size="sm" touch onClick={handleNext}>
+              {last ? "Finish" : "Next"}
+            </Button>
           </div>
         </div>
       </div>

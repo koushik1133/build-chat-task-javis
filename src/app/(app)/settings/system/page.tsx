@@ -146,7 +146,7 @@ export default function SystemHealthPage() {
               <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {Object.entries(status.cron.counts).map(([k, v]) => (
                   <div key={k} className="rounded-lg bg-secondary/40 px-3 py-2">
-                    <dt className="text-xs text-muted-foreground">{k.replace(/_/g, " ")}</dt>
+                    <dt className="text-xs text-muted-foreground first-letter:uppercase">{k.replace(/_/g, " ")}</dt>
                     <dd className="text-sm font-medium tabular-nums">{v}</dd>
                   </div>
                 ))}
@@ -183,7 +183,7 @@ export default function SystemHealthPage() {
                 <table className="w-full min-w-[640px] text-sm">
                   <thead className="text-left text-xs text-muted-foreground">
                     <tr>
-                      <th className="w-8 px-2 py-2"><span className="sr-only">Expand</span></th>
+                      <th className="w-12 px-2 py-2 sm:w-8"><span className="sr-only">Expand</span></th>
                       <th className="px-2 py-2">Route</th>
                       <th className="px-2 py-2">Message</th>
                       <th className="px-2 py-2 text-right">Count</th>
@@ -214,7 +214,7 @@ function ErrorRows({ row, expanded, onToggle }: { row: AppErrorRow; expanded: bo
     <>
       <tr className={cn("align-top", expanded && "bg-secondary/30")}>
         <td className="px-2 py-2">
-          <button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={panelId} aria-label={expanded ? "Collapse error" : "Expand error"} className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={panelId} aria-label={expanded ? "Collapse error" : "Expand error"} className="flex h-11 w-11 items-center justify-center rounded-md hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:w-8">
             {expanded ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
           </button>
         </td>

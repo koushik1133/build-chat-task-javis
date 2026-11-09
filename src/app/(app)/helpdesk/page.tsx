@@ -113,6 +113,15 @@ function HelpdeskInner() {
     void load();
   }, [load]);
 
+  // Deep link from Home quick actions: /helpdesk?new=ticket opens the dialog once, then the param is stripped.
+  useEffect(() => {
+    if (search.get("new") !== "ticket") return;
+    setShowNew(true);
+    const params = new URLSearchParams(search.toString());
+    params.delete("new");
+    router.replace(`/helpdesk${params.size ? `?${params}` : ""}`, { scroll: false });
+  }, [search, router]);
+
   const select = useCallback(
     (id: string | null) => {
       const params = new URLSearchParams(search.toString());

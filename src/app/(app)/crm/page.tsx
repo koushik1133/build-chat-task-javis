@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Globe, Plus, Search, Filter, Users, DollarSign,
   Mail, Phone, Building2, Tag, X, Loader2, Pencil, Trash2, Check
@@ -103,6 +104,16 @@ export default function CrmPage() {
     const timer = setTimeout(() => fetchContacts(), search ? 400 : 0);
     return () => clearTimeout(timer);
   }, [fetchContacts, search]);
+
+  // Deep link from Home quick actions: /crm?new=contact opens the add dialog once, then the URL is cleaned.
+  const router = useRouter();
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") !== "contact") return;
+    setEditingId(null);
+    setForm({ full_name: "", email: "", phone: "", company: "", role: "", tags: "", lifecycle: "lead", notes: "", deal_value: 0, domain: "general" });
+    setShowAdd(true);
+    router.replace("/crm", { scroll: false });
+  }, [router]);
 
   function openAdd() {
     setEditingId(null);

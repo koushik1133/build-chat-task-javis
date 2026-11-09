@@ -24,11 +24,12 @@ vi.mock("@/lib/money/quotes", () => ({ expireQuotes: vi.fn(async () => ({ scanne
 vi.mock("@/lib/mail/sync", () => ({ syncDueAccounts: vi.fn(async () => ({ claimed: 0 })) }));
 vi.mock("@/lib/voice/dialer", () => ({ dialNext: vi.fn(async () => ({ dialed: 0 })) }));
 vi.mock("@/lib/request-limits", async (orig) => ({ ...(await orig<Record<string, unknown>>()), pruneRateLimits: vi.fn(async () => 0) }));
-vi.mock("@/lib/system/state", () => ({ recordCronTick: vi.fn(async () => undefined) }));
+const state = vi.hoisted(() => ({ getSystemState: vi.fn(), setSystemState: vi.fn(async () => undefined), applyRetention: vi.fn(async () => ({ policies: 0, affected: {} })) }));
+vi.mock("@/lib/system/state", () => ({ recordCronTick: vi.fn(async () => undefined), getSystemState: state.getSystemState, setSystemState: state.setSystemState }));
 vi.mock("@/lib/errors/capture", () => ({ captureError: vi.fn(async () => null) }));
 vi.mock("@/lib/accounting/sync", () => ({ processAccountingEvents: vi.fn(async () => ({ pushed: 0 })), pushDue: vi.fn(async () => ({ pushed: 0 })), pullDue: vi.fn(async () => ({ recorded: 0 })) }));
 vi.mock("@/lib/privacy/dsr", () => ({ remindDueSoon: vi.fn(async () => ({ reminded: 0 })) }));
-vi.mock("@/lib/privacy/retention", () => ({ applyRetention: vi.fn(async () => ({ affected: 0 })) }));
+vi.mock("@/lib/privacy/retention", () => ({ applyRetention: state.applyRetention }));
 
 import { GET } from "@/app/api/cron/agents/route";
 
@@ -40,6 +41,9 @@ beforeEach(() => {
   mocks.promoteDueTriggers.mockResolvedValue({ promoted: 0 });
   mocks.drainOutbox.mockReset();
   mocks.runSlaSweep.mockReset();
+  state.getSystemState.mockReset().mockResolvedValue(null);
+  state.setSystemState.mockClear();
+  state.applyRetention.mockClear();
 });
 afterEach(() => {
   if (savedSecret === undefined) delete process.env.CRON_SECRET;
@@ -74,5 +78,33 @@ describe("cron tick resilience", () => {
     const body = (await res.json()) as { ok: boolean; sla: number; outbox: number };
     expect(body).toMatchObject({ ok: true, outbox: 3, sla: 0 });
     spy.mockRestore();
+  });
+});
+
+describe("cron hourly gate", () => {
+  it("runs retention when no hourly stamp exists and records the slot", async () => {
+    const res = await tick();
+    const body = (await res.json()) as { hourly_ran: number };
+    expect(body.hourly_ran).toBe(1);
+    expect(state.applyRetention).toHaveBeenCalledTimes(1);
+    expect(state.setSystemState).toHaveBeenCalledWith("cron:agents:hourly_jobs", expect.objectContaining({ at: expect.any(String) }));
+  });
+
+  it("skips retention and reminders when the last hourly run was under an hour ago", async () => {
+    state.getSystemState.mockResolvedValue({ value: { at: new Date(Date.now() - 10 * 60_000).toISOString() }, updatedAt: "" });
+    const res = await tick();
+    const body = (await res.json()) as { hourly_ran: number; retention: number };
+    expect(body.hourly_ran).toBe(0);
+    expect(state.applyRetention).not.toHaveBeenCalled();
+    expect(state.setSystemState).not.toHaveBeenCalled();
+  });
+
+  it("runs again once the hour has elapsed, and falls back to running when the gate errors", async () => {
+    state.getSystemState.mockResolvedValue({ value: { at: new Date(Date.now() - 61 * 60_000).toISOString() }, updatedAt: "" });
+    expect(((await (await tick()).json()) as { hourly_ran: number }).hourly_ran).toBe(1);
+    state.getSystemState.mockRejectedValue(new Error("system_state missing"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(((await (await tick()).json()) as { hourly_ran: number }).hourly_ran).toBe(1);
+    warn.mockRestore();
   });
 });

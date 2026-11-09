@@ -70,7 +70,7 @@ export async function GET() {
     countsBy("webhook_deliveries", ["queued", "failed", "dead"]),
     tableExists("app_errors"),
   ]);
-  const errors = errorsAvailable ? await listRecentErrors(50).catch(() => []) : [];
+  const errors = errorsAvailable ? await listRecentErrors(50, scope.dataId).catch(() => []) : [];
 
   return NextResponse.json({
     database,

@@ -95,7 +95,7 @@ export async function updateSession(request: NextRequest) {
 
   if (!user) {
     const redirect = NextResponse.redirect(
-      publicRedirect(`/login?next=${encodeURIComponent(path)}`, request)
+      publicRedirect(`/login?next=${encodeURIComponent(path + request.nextUrl.search)}`, request)
     );
     return denyCaching(clearSupabaseCookies(redirect, request));
   }

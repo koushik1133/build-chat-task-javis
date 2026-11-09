@@ -333,18 +333,41 @@ export async function recordPayment(input: {
   if (st === "succeeded" && inv.currency.toUpperCase() !== input.currency.toUpperCase()) {
     throw new Error(`Currency mismatch: invoice ${inv.currency}, payment ${input.currency}`);
   }
-  if (input.providerRef && st === "succeeded") {
-    const dup = await queryOne(
-      `SELECT id FROM invoice_payments WHERE invoice_id = $1 AND provider = $2 AND provider_ref = $3 AND status = 'succeeded'`,
+  if (input.providerRef) {
+    // One row per (invoice, provider, provider_ref) — enforced by uq_invoice_payments_provider_ref.
+    // A `pending` row written by createPayLink (or an earlier `failed` attempt) is promoted in
+    // place; a provider object that already succeeded is never downgraded or double-counted.
+    const existing = await queryOne<{ id: string; status: string }>(
+      `SELECT id, status FROM invoice_payments WHERE invoice_id = $1 AND provider = $2 AND provider_ref = $3 ORDER BY created_at DESC LIMIT 1`,
       [input.invoiceId, input.provider, input.providerRef]
     );
-    if (dup) return { status: inv.status, duplicate: true };
+    if (existing?.status === "succeeded") return { status: inv.status, duplicate: true };
+    if (existing) {
+      const promoted = await query<{ id: string }>(
+        `UPDATE invoice_payments SET status = $2, amount_minor = $3, currency = $4,
+                created_at = CASE WHEN $2 = 'succeeded' THEN NOW() ELSE created_at END
+          WHERE id = $1 AND status <> 'succeeded' RETURNING id`,
+        [existing.id, st, input.amountMinor, input.currency.toUpperCase()]
+      );
+      // Lost a race with a concurrent success for the same provider object: nothing more to record.
+      if (promoted.length === 0) return { status: inv.status, duplicate: true };
+      const status = await recomputeInvoiceStatus(input.invoiceId);
+      return { status, duplicate: false };
+    }
   }
-  await query(
-    `INSERT INTO invoice_payments (id, invoice_id, provider, provider_ref, amount_minor, currency, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [randomUUID(), input.invoiceId, input.provider, input.providerRef, input.amountMinor, input.currency.toUpperCase(), st]
-  );
+  try {
+    await query(
+      `INSERT INTO invoice_payments (id, invoice_id, provider, provider_ref, amount_minor, currency, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [randomUUID(), input.invoiceId, input.provider, input.providerRef, input.amountMinor, input.currency.toUpperCase(), st]
+    );
+  } catch (err) {
+    // Concurrent first write for the same provider_ref won the unique index: treat as the duplicate it is.
+    const code = err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
+    const cause = err && typeof err === "object" && "cause" in err ? (err as { cause?: { code?: unknown } }).cause : null;
+    if (input.providerRef && (code === "23505" || String(cause?.code ?? "") === "23505")) return { status: inv.status, duplicate: true };
+    throw err;
+  }
   const status = await recomputeInvoiceStatus(input.invoiceId);
   return { status, duplicate: false };
 }

@@ -128,3 +128,42 @@ describe("consent gating", () => {
     expect(await canSendMarketing("u1", "c", "email")).toEqual({ allowed: true, reason: "granted" });
   });
 });
+
+import { otpMatches } from "@/lib/privacy/dsr";
+
+describe("DSR OTP comparison", () => {
+  it("SEC: uses a constant-time, length-checked comparison", () => {
+    expect(otpMatches("a".repeat(64), "a".repeat(64))).toBe(true);
+    expect(otpMatches("a".repeat(64), "b".repeat(64))).toBe(false);
+    expect(otpMatches("a".repeat(64), "a".repeat(63))).toBe(false);
+  });
+});
+
+import { eraseSubject, mailAddressPattern } from "@/lib/privacy/dsr";
+
+describe("DSR mail matching + erasure failure handling", () => {
+  it("escapes LIKE metacharacters in the address instead of stripping them", () => {
+    expect(mailAddressPattern("John_Doe@Example.com")).toBe("%john\\_doe@example.com%");
+    expect(mailAddressPattern("a%b@x.io")).toBe("%a\\%b@x.io%");
+  });
+
+  it("does not mark the request completed when an erasure statement fails", async () => {
+    mocks.query.mockReset();
+    mocks.queryOne.mockReset();
+    mocks.queryOne.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM crm_contacts")) return { full_name: "Maya", email: "maya@example.com", phone: null };
+      if (sql.includes("INSERT INTO consent_records")) return { id: "t" };
+      return null;
+    });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("UPDATE crm_contacts")) throw new Error("column does not exist");
+      return [];
+    });
+    await expect(eraseSubject("u1", { kind: "contact", id: "c1" }, { mode: "anonymize", requestId: "req-1" })).rejects.toThrow(/column does not exist/);
+    const completed = mocks.query.mock.calls.find((c) => String(c[0]).includes("status = 'completed'"));
+    expect(completed).toBeUndefined();
+    // Tombstones were written before the failing statement.
+    const tomb = mocks.queryOne.mock.calls.find((c) => String(c[0]).includes("INSERT INTO consent_records"));
+    expect(tomb).toBeDefined();
+  });
+});

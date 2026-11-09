@@ -2113,3 +2113,6 @@ ALTER TABLE sites ADD COLUMN IF NOT EXISTS consent_text TEXT;
 -- Voice campaigns skip contacts without marketing_voice consent unless FALSE (NULL = TRUE).
 ALTER TABLE voice_campaigns ADD COLUMN IF NOT EXISTS require_consent BOOLEAN;
 
+
+-- ==== PHASE 5 REVIEW ====
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_invoice_payments_provider_ref ON invoice_payments (invoice_id, provider, provider_ref) WHERE provider_ref IS NOT NULL;

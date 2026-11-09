@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { dbUnavailableResponse } from "@/lib/api-db";
-import { rateLimit } from "@/lib/request-limits";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { requireDemoActor } from "@/lib/demo/auth";
 import { seedDemoWorkspace, demoRowCount } from "@/lib/demo/seed";
 
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const actor = await requireDemoActor(req);
   if (actor instanceof NextResponse) return actor;
-  const limit = rateLimit(`demo-seed:${actor.dataId}`, 5, 60 * 60 * 1000);
+  const limit = await rateLimitAsync(`demo-seed:${actor.dataId}`, 5, 60 * 60 * 1000);
   if (!limit.allowed) return NextResponse.json({ error: "rate limited" }, { status: 429 });
   const raw = await req.text().catch(() => "");
   let json: unknown = {};

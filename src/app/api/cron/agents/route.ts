@@ -11,7 +11,7 @@ import { expireQuotes } from "@/lib/money/quotes";
 import { syncDueAccounts } from "@/lib/mail/sync";
 import { dialNext } from "@/lib/voice/dialer";
 import { pruneRateLimits } from "@/lib/request-limits";
-import { recordCronTick } from "@/lib/system/state";
+import { getSystemState, recordCronTick, setSystemState } from "@/lib/system/state";
 import { captureError } from "@/lib/errors/capture";
 import { processAccountingEvents, pullDue, pushDue } from "@/lib/accounting/sync";
 import { remindDueSoon } from "@/lib/privacy/dsr";
@@ -24,6 +24,28 @@ export const maxDuration = 60;
 /** Stop claiming new jobs once a tick has been running this long. */
 const DRAIN_BUDGET_MS = 45_000;
 const CLAIM_BATCH = 5;
+
+/**
+ * Retention sweeps and DSR reminders are day-granular work that scans every
+ * org's policies; running them on every (minute) tick is wasted load. They run
+ * at most once per hour, gated by a system_state timestamp shared across
+ * instances. Any failure reading the gate falls back to running (old behaviour).
+ */
+const HOURLY_KEY = "cron:agents:hourly_jobs";
+const HOURLY_MS = 60 * 60 * 1000;
+
+async function claimHourlySlot(now: Date): Promise<boolean> {
+  try {
+    const prev = await getSystemState<{ at?: string }>(HOURLY_KEY);
+    const at = prev?.value?.at ? Date.parse(prev.value.at) : Number.NaN;
+    if (Number.isFinite(at) && now.getTime() - at < HOURLY_MS) return false;
+    await setSystemState(HOURLY_KEY, { at: now.toISOString() });
+    return true;
+  } catch (err) {
+    console.warn("[cron/agents] hourly gate unavailable; running hourly jobs:", err instanceof Error ? err.message : err);
+    return true;
+  }
+}
 
 type PlaybookModule = {
   runPlaybook?: (userId: string, playbookId: string, entityId?: string) => Promise<unknown>;
@@ -87,7 +109,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, hourly_ran: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -149,8 +171,11 @@ async function handleTick(req: Request) {
   try { counts.accounting_events = (await processAccountingEvents(200)).pushed; } catch (err) { console.error("[cron/agents] accounting events failed:", err); }
   try { counts.accounting_push = (await pushDue(50)).pushed; } catch (err) { console.error("[cron/agents] accounting push failed:", err); }
   try { counts.accounting_pull = (await pullDue(10)).recorded; } catch (err) { console.error("[cron/agents] accounting pull failed:", err); }
-  try { counts.privacy_reminders = (await remindDueSoon(200)).reminded; } catch (err) { console.error("[cron/agents] privacy reminders failed:", err); }
-  try { const r = await applyRetention(500); counts.retention = Object.values(r.affected).reduce((a, b) => a + b, 0); } catch (err) { console.error("[cron/agents] retention failed:", err); }
+  if (await claimHourlySlot(new Date())) {
+    counts.hourly_ran = 1;
+    try { counts.privacy_reminders = (await remindDueSoon(200)).reminded; } catch (err) { console.error("[cron/agents] privacy reminders failed:", err); }
+    try { const r = await applyRetention(500); counts.retention = Object.values(r.affected).reduce((a, b) => a + b, 0); } catch (err) { console.error("[cron/agents] retention failed:", err); }
+  }
   await pruneRateLimits().catch(() => 0);
 
   counts.ms = Date.now() - tickStart;

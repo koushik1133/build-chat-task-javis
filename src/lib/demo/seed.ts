@@ -120,14 +120,15 @@ export async function seedDemoWorkspace(dataId: string, opts: SeedOptions = {}):
         full_name: c.full_name, email: c.email, phone: c.phone, company: c.company, role: c.role,
         lifecycle: c.lifecycle, deal_value: c.deal_value, notes: c.notes, tags: [DEMO_TAG],
       });
+      // Register before follow-up mutations so a later failure never leaves an untracked row.
+      await register(dataId, "contact", row.id);
+      bump("contacts");
+      contactIds.set(c.ref, { id: row.id, email: c.email, phone: c.phone, name: c.full_name });
       if (c.lastContactDaysAgo === null) {
         await query(`UPDATE crm_contacts SET last_contact = NULL, created_at = $3 WHERE id = $1 AND user_id = $2`, [row.id, dataId, new Date(now.getTime() - 21 * DAY).toISOString()]).catch(() => undefined);
       } else {
         await query(`UPDATE crm_contacts SET last_contact = $3 WHERE id = $1 AND user_id = $2`, [row.id, dataId, new Date(now.getTime() - c.lastContactDaysAgo * DAY).toISOString()]).catch(() => undefined);
       }
-      contactIds.set(c.ref, { id: row.id, email: c.email, phone: c.phone, name: c.full_name });
-      await register(dataId, "contact", row.id);
-      bump("contacts");
     });
   }
   const contact = (ref: string) => contactIds.get(ref) ?? null;
@@ -187,9 +188,9 @@ export async function seedDemoWorkspace(dataId: string, opts: SeedOptions = {}):
           calendarId: cal.id, contactId: c?.id ?? null, name: c?.name ?? "Sample customer", email: c?.email ?? null, phone: c?.phone ?? null,
           startsAt: at(now, b.dayOffset, b.hour), durationMinutes: b.durationMinutes, notes: `${b.notes} (${DEMO_TAG})`, source: "manual", ignoreRules: true,
         });
-        if (b.outcome) await setBookingStatus(dataId, booking.id, b.outcome);
         await register(dataId, "booking", booking.id);
         bump("bookings");
+        if (b.outcome) await setBookingStatus(dataId, booking.id, b.outcome);
       });
     }
   });
@@ -208,6 +209,8 @@ export async function seedDemoWorkspace(dataId: string, opts: SeedOptions = {}):
           subject: t.subject, body: t.body, priority: t.priority, source: "email", contact_id: c?.id ?? null,
           requester_email: c?.email ?? null, requester_name: c?.name ?? null, sla_policy_id: policy?.id ?? null, tags: [...t.tags, DEMO_TAG],
         });
+        await register(dataId, "ticket", row.id);
+        bump("tickets");
         const past = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
         const soon = new Date(now.getTime() + 20 * 60_000).toISOString();
         switch (t.sla) {
@@ -226,8 +229,6 @@ export async function seedDemoWorkspace(dataId: string, opts: SeedOptions = {}):
           default:
             break;
         }
-        await register(dataId, "ticket", row.id);
-        bump("tickets");
       });
     }
   });
@@ -256,9 +257,9 @@ export async function seedDemoWorkspace(dataId: string, opts: SeedOptions = {}):
           title: r.title, summary: `${r.summary} (${DEMO_TAG})`, stage: stages[i % Math.max(1, stages.length)] ?? null,
           data: sampleRecordData(type.fields, c.email, c.phone), currency: plan.currency, actorId: opts.actorId ?? null,
         });
-        if (cid) await query(`UPDATE records SET contact_id = $3, due_at = $4 WHERE id = $1 AND user_id = $2`, [rec.id, dataId, cid, new Date(now.getTime() + (i - 2) * 3 * DAY).toISOString()]).catch(() => undefined);
         await register(dataId, "record", rec.id);
         bump("records");
+        if (cid) await query(`UPDATE records SET contact_id = $3, due_at = $4 WHERE id = $1 AND user_id = $2`, [rec.id, dataId, cid, new Date(now.getTime() + (i - 2) * 3 * DAY).toISOString()]).catch(() => undefined);
       });
     }
   });

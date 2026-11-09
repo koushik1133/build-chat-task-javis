@@ -79,7 +79,9 @@ async function pushWithHash(
   }
   try {
     const res = await send(ref);
-    await upsertLink(s.conn.user_id, s.conn.id, kind, id, { remote_id: res.remoteId, remote_updated_at: res.remoteUpdatedAt, remote_meta: res.meta ?? null, hash: payloadHash(stripVolatile(res.payload as Record<string, unknown>)), error: null, pushed: true });
+    // Store the hash of the SAME neutral payload compared above (not the
+    // provider-shaped `res.payload`), otherwise the unchanged-skip never fires.
+    await upsertLink(s.conn.user_id, s.conn.id, kind, id, { remote_id: res.remoteId, remote_updated_at: res.remoteUpdatedAt, remote_meta: res.meta ?? null, hash, error: null, pushed: true });
     await logSync(s.conn.user_id, s.conn.id, { direction: "push", kind, entityId: id, remoteId: res.remoteId, status: "ok", message: ref ? "updated" : "created" });
     return { kind, id, status: "ok", remoteId: res.remoteId };
   } catch (err) {

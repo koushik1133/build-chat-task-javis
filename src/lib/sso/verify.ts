@@ -66,9 +66,11 @@ export async function verifyDomainDns(domain: string, token: string, resolver: T
       continue;
     }
     for (const chunks of records) {
-      const value = chunks.join("").trim();
+      // Some DNS UIs store the literal quotes; chunked strings are joined first.
+      const value = chunks.join("").trim().replace(/^"(.*)"$/s, "$1").trim();
       if (constantTimeEqual(value, expected)) return { ok: true };
     }
+    lastError = `${host}: no matching TXT record`;
   }
   return { ok: false, error: lastError };
 }

@@ -7,7 +7,7 @@ export default function RootError({ error, reset }: { error: Error & { digest?: 
   const route = typeof window !== "undefined" ? window.location.pathname : "/";
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <ErrorBoundaryView error={error} reset={reset} route={route} />
+      <ErrorBoundaryView error={error} reset={reset} route={route} homeHref="/" />
     </main>
   );
 }

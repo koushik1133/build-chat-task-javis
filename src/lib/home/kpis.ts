@@ -90,6 +90,47 @@ export function monthWindows(now: Date): { thisStart: Date; nextStart: Date; las
   };
 }
 
+function zonedParts(d: Date, timeZone: string): { y: number; m: number; day: number; h: number; mi: number; s: number } | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    }).formatToParts(d);
+    const get = (t: Intl.DateTimeFormatPart["type"]) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+    return { y: get("year"), m: get("month") - 1, day: get("day"), h: get("hour"), mi: get("minute"), s: get("second") };
+  } catch {
+    return null;
+  }
+}
+
+/** The instant of local midnight on (y, m, day) in `timeZone`; month may overflow (Date.UTC semantics). */
+function zonedMidnight(y: number, m: number, day: number, timeZone: string): Date {
+  const guess = Date.UTC(y, m, day);
+  let instant = guess;
+  // Two passes absorb a DST transition sitting between the guess and the real midnight.
+  for (let i = 0; i < 2; i++) {
+    const p = zonedParts(new Date(instant), timeZone);
+    if (!p) return new Date(guess);
+    const wallAsUtc = Date.UTC(p.y, p.m, p.day, p.h, p.mi, p.s);
+    instant = guess - (wallAsUtc - instant);
+  }
+  return new Date(instant);
+}
+
+/**
+ * Month windows for "this month" and "last month" using the org's calendar
+ * (midnight on the 1st in `timeZone`), so revenue deltas roll over when the
+ * business's month does, not UTC's. Invalid zones fall back to UTC.
+ */
+export function monthWindowsInTz(now: Date, timeZone: string): { thisStart: Date; nextStart: Date; lastStart: Date } {
+  const p = zonedParts(now, timeZone);
+  if (!p) return monthWindows(now);
+  return {
+    thisStart: zonedMidnight(p.y, p.m, 1, timeZone),
+    nextStart: zonedMidnight(p.y, p.m + 1, 1, timeZone),
+    lastStart: zonedMidnight(p.y, p.m - 1, 1, timeZone),
+  };
+}
+
 /** Start and end (exclusive) of the calendar day containing `now` in `timeZone`. */
 export function dayRangeInTz(now: Date, timeZone: string): { start: Date; end: Date } {
   let parts: Intl.DateTimeFormatPart[];

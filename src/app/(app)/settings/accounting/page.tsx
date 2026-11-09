@@ -11,6 +11,7 @@ import { Field } from "@/components/ui/field";
 import { Checkbox, Input, Select } from "@/components/ui/input";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
+import { TabPanel, Tabs } from "@/components/ui/tabs";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { PageContainer } from "@/components/page-container";
 import type { AccountOption, AccountingConnectionView, AccountingEntityKind, AccountingSettings, AccountingSyncLogRow, LiveAccountingProviderId } from "@/lib/accounting/types";
@@ -25,7 +26,8 @@ const LOG_TONE: Record<string, Tone> = { ok: "success", error: "danger", skipped
 const KINDS: AccountingEntityKind[] = ["invoice", "payment", "expense", "contact", "product"];
 
 const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
-const fmt = (iso: string | null) => (iso ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "—");
+const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const fmt =(iso: string | null) => (iso ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "—");
 
 async function readError(res: Response, fallback: string): Promise<string> {
   const d = await res.json().catch(() => null);
@@ -154,31 +156,28 @@ function AccountingSettings() {
         <Empty icon={<Landmark className="h-5 w-5" />} title="No ledger connected" text="Connect QuickBooks or Xero above, or start with the simulated ledger to see exactly what would be sent." />
       ) : (
         <>
-          {connections.length > 1 && (
-            <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="Connections">
-              {connections.map((c) => (
-                <button
-                  key={c.id}
-                  role="tab"
-                  aria-selected={c.id === selected}
-                  onClick={() => setSelected(c.id)}
-                  className={cn("rounded-full border px-3 py-1.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", c.id === selected ? "border-foreground bg-foreground text-background" : "border-border bg-card hover:bg-secondary")}
-                >
-                  {providerLabel(c.provider)}{c.company_name ? ` · ${c.company_name}` : ""}
-                </button>
-              ))}
-            </div>
+          {connections.length > 1 && current && (
+            <Tabs
+              id="acct-conn"
+              label="Connections"
+              className="mb-3"
+              tabs={connections.map((c) => ({ id: c.id, label: `${providerLabel(c.provider)}${c.company_name ? ` · ${c.company_name}` : ""}` }))}
+              value={current.id}
+              onChange={setSelected}
+            />
           )}
           {current && (
-            <ConnectionPanel
-              key={current.id}
-              c={current}
-              busy={busy}
-              onSync={() => void syncNow(current)}
-              onDisconnect={() => setDisconnect(current)}
-              onNotice={setNotice}
-              onChanged={load}
-            />
+            <TabPanel id="acct-conn" value={current.id}>
+              <ConnectionPanel
+                key={current.id}
+                c={current}
+                busy={busy}
+                onSync={() => void syncNow(current)}
+                onDisconnect={() => setDisconnect(current)}
+                onNotice={setNotice}
+                onChanged={load}
+              />
+            </TabPanel>
           )}
         </>
       )}
@@ -206,7 +205,7 @@ function ProviderCard({ p, connected, disabled }: { p: LiveProviderInfo; connect
   return (
     <div className="flex flex-col justify-between gap-3 rounded-xl border border-border bg-card p-4">
       <div>
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold">{p.label}</h3>
           <Pill tone={p.configured ? (connected.length ? "success" : "info") : "neutral"}>{connected.length ? `${connected.length} connected` : p.configured ? "Ready" : "Not configured"}</Pill>
         </div>
@@ -289,10 +288,10 @@ function ConnectionPanel({ c, busy, onSync, onDisconnect, onNotice, onChanged }:
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-semibold">{c.company_name ?? providerLabel(c.provider)}</h2>
-              <Pill tone={STATUS_TONE[c.status] ?? "neutral"}>{c.status}</Pill>
+              <h2 className="break-words text-base font-semibold">{c.company_name ?? providerLabel(c.provider)}</h2>
+              <Pill tone={STATUS_TONE[c.status] ?? "neutral"}>{cap(c.status)}</Pill>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
               {providerLabel(c.provider)}{c.realm_id ? ` · company ${c.realm_id}` : ""}{c.tenant_id ? ` · tenant ${c.tenant_id.slice(0, 8)}…` : ""} · last sync {c.last_sync_at ? timeAgo(c.last_sync_at) : "never"} · {c.counts.linked} linked{c.counts.errors ? `, ${c.counts.errors} with errors` : ""}
             </p>
             {c.last_error && <p className="mt-2 text-xs text-red-700 dark:text-red-300 [overflow-wrap:anywhere]">{c.last_error}</p>}
@@ -304,7 +303,7 @@ function ConnectionPanel({ c, busy, onSync, onDisconnect, onNotice, onChanged }:
             <Button size="sm" variant="outline" touch onClick={() => void toggleEnabled()} disabled={saving || busy !== null}>
               {c.status === "disabled" ? "Enable" : "Pause"}
             </Button>
-            <Button size="sm" variant="ghost" touch onClick={onDisconnect} disabled={busy !== null} aria-label="Disconnect">
+            <Button size="sm" variant="ghost" touch onClick={onDisconnect} disabled={busy !== null}>
               <Trash2 className="h-3.5 w-3.5" aria-hidden /> Disconnect
             </Button>
           </div>
@@ -314,7 +313,7 @@ function ConnectionPanel({ c, busy, onSync, onDisconnect, onNotice, onChanged }:
       <section aria-labelledby="mappings-heading" className="rounded-xl border border-border bg-card p-4 sm:p-5">
         <h2 id="mappings-heading" className="text-sm font-semibold">Account mappings</h2>
         <p className="mt-1 text-xs text-muted-foreground">Where each kind of record lands in the ledger. Pulled from the chart of accounts{detail ? ` (${accounts.length} accounts)` : ""}.</p>
-        {detailError && <p className="mt-2 text-xs text-red-700 dark:text-red-300">{detailError}</p>}
+        {detailError && <p role="alert" className="mt-2 text-xs text-red-700 dark:text-red-300 [overflow-wrap:anywhere]">{detailError}</p>}
         {detail?.accountsError && <Banner tone="warn" className="mt-3">Could not load the chart of accounts: {detail.accountsError}</Banner>}
         {!detail && !detailError ? (
           <Loading label="Loading accounts…" className="mt-3" />
@@ -396,7 +395,7 @@ function PushNow({ connectionId, disabled, onNotice, onChanged }: { connectionId
       <form className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={(e) => void push(e)}>
         <Field label="Kind" className="sm:w-40">
           <Select value={kind} onChange={(e) => setKind(e.target.value as AccountingEntityKind)}>
-            {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+            {KINDS.map((k) => <option key={k} value={k}>{cap(k)}</option>)}
           </Select>
         </Field>
         <Field label="Record id" className="flex-1">
@@ -446,13 +445,13 @@ function SyncLog({ connectionId, refreshKey }: { connectionId: string; refreshKe
         </div>
         <div className="flex flex-wrap gap-2">
           <Select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
-            <option value="">All statuses</option><option value="ok">ok</option><option value="error">error</option><option value="skipped">skipped</option>
+            <option value="">All statuses</option><option value="ok">OK</option><option value="error">Error</option><option value="skipped">Skipped</option>
           </Select>
           <Select aria-label="Filter by direction" value={direction} onChange={(e) => setDirection(e.target.value)} className="w-auto">
-            <option value="">Push + pull</option><option value="push">push</option><option value="pull">pull</option>
+            <option value="">Push + pull</option><option value="push">Push</option><option value="pull">Pull</option>
           </Select>
           <Select aria-label="Filter by kind" value={kind} onChange={(e) => setKind(e.target.value)} className="w-auto">
-            <option value="">All kinds</option>{KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+            <option value="">All kinds</option>{KINDS.map((k) => <option key={k} value={k}>{cap(k)}</option>)}
           </Select>
           <Button size="sm" variant="outline" touch onClick={() => void load()} aria-label="Refresh log"><RefreshCw className="h-3.5 w-3.5" aria-hidden /></Button>
         </div>
@@ -477,14 +476,14 @@ function SyncLog({ connectionId, refreshKey }: { connectionId: string; refreshKe
                   return (
                     <tr key={e.id} className={cn("align-top", e.status === "error" && "bg-red-500/5")}>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground" title={fmt(e.created_at)}>{timeAgo(e.created_at)}</td>
-                      <td className="px-3 py-2 text-xs">{e.direction}</td>
-                      <td className="px-3 py-2 text-xs">{e.entity_kind ?? "—"}</td>
-                      <td className="px-3 py-2"><Pill tone={LOG_TONE[e.status] ?? "neutral"}>{e.status}</Pill></td>
-                      <td className="px-3 py-2 font-mono text-[11px]">{e.entity_id ? e.entity_id.slice(0, 8) : "—"}</td>
-                      <td className="px-3 py-2 font-mono text-[11px]">{e.remote_id ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs">{cap(e.direction)}</td>
+                      <td className="px-3 py-2 text-xs">{e.entity_kind ? cap(e.entity_kind) : "—"}</td>
+                      <td className="px-3 py-2"><Pill tone={LOG_TONE[e.status] ?? "neutral"}>{e.status === "ok" ? "OK" : cap(e.status)}</Pill></td>
+                      <td className="px-3 py-2 font-mono text-[11px]" title={e.entity_id ?? undefined}>{e.entity_id ? e.entity_id.slice(0, 8) : "—"}</td>
+                      <td className="break-all px-3 py-2 font-mono text-[11px]">{e.remote_id ?? "—"}</td>
                       <td className="px-3 py-2 text-xs">
                         {long ? (
-                          <button type="button" className="flex items-start gap-1 text-left" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : e.id)}>
+                          <button type="button" className="flex min-h-11 items-start gap-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0" aria-expanded={expanded} aria-label={expanded ? "Collapse message" : "Expand message"} onClick={() => setOpen(expanded ? null : e.id)}>
                             {expanded ? <ChevronDown className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /> : <ChevronRight className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />}
                             <span className={cn("[overflow-wrap:anywhere]", !expanded && "line-clamp-1")}>{e.message}</span>
                           </button>
@@ -516,9 +515,9 @@ function SimulatedObjects({ objects }: { objects: Detail["simulated"] }) {
         <ul className="mt-3 divide-y divide-border">
           {objects.map((o) => (
             <li key={o.id} className="py-2">
-              <button type="button" className="flex w-full items-center justify-between gap-2 text-left text-xs" aria-expanded={open === o.id} onClick={() => setOpen(open === o.id ? null : o.id)}>
-                <span className="flex items-center gap-2"><Pill tone={o.source === "remote" ? "violet" : "info"}>{o.kind}</Pill><code>{o.remote_id}</code></span>
-                <span className="text-muted-foreground">{timeAgo(o.updated_at)}</span>
+              <button type="button" className="flex min-h-11 w-full items-center justify-between gap-2 rounded text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0" aria-expanded={open === o.id} aria-label={`${open === o.id ? "Collapse" : "Expand"} ${o.kind} ${o.remote_id}`} onClick={() => setOpen(open === o.id ? null : o.id)}>
+                <span className="flex min-w-0 flex-wrap items-center gap-2"><Pill tone={o.source === "remote" ? "violet" : "info"}>{cap(o.kind)}</Pill><code className="break-all">{o.remote_id}</code></span>
+                <span className="shrink-0 text-muted-foreground">{timeAgo(o.updated_at)}</span>
               </button>
               {open === o.id && <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-secondary/50 p-3 text-[11px]">{JSON.stringify(o.payload, null, 2)}</pre>}
             </li>

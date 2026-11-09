@@ -1,6 +1,25 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
+import { readCappedText } from "@/lib/request-limits";
+
+/** Legacy business-profile upsert (the wizard posts here). Every field is bounded; unknown keys are rejected. */
+const Str = (max: number) => z.string().trim().max(max);
+const ProfileBody = z
+  .object({
+    company_name: Str(200).min(1),
+    industry: Str(80).default(""),
+    stage: Str(80).default(""),
+    team_size: Str(40).default(""),
+    geography: Str(120).default(""),
+    product_desc: Str(2000).default(""),
+    target_market: Str(2000).default(""),
+    challenge: Str(2000).default(""),
+    revenue_range: Str(80).default(""),
+    modules: z.array(Str(40)).max(40).default([]),
+  })
+  .strict();
 
 export async function GET() {
   let scope;
@@ -18,11 +37,20 @@ export async function POST(req: Request) {
   try { scope = await requireScope({ area: "settings", edit: true }); }
   catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
 
-  const body = await req.json();
+  const raw = await readCappedText(req, 16_384);
+  if (raw === null) return NextResponse.json({ error: "payload too large" }, { status: 413 });
+  let json: unknown;
+  try {
+    json = JSON.parse(raw || "{}");
+  } catch {
+    return NextResponse.json({ error: "invalid json" }, { status: 400 });
+  }
+  const parsed = ProfileBody.safeParse(json);
+  if (!parsed.success) return NextResponse.json({ error: "bad request", issues: parsed.error.issues }, { status: 400 });
   const {
     company_name, industry, stage, team_size, geography,
     product_desc, target_market, challenge, revenue_range, modules,
-  } = body;
+  } = parsed.data;
 
   // Upsert profile
   try {
@@ -35,9 +63,8 @@ export async function POST(req: Request) {
          company_name=$2, industry=$3, stage=$4, team_size=$5, geography=$6,
          product_desc=$7, target_market=$8, challenge=$9, revenue_range=$10,
          modules=$11, completed=true`,
-      [scope.dataId, company_name, industry, stage, team_size, geography ?? "",
-       product_desc ?? "", target_market ?? "", challenge ?? "",
-       revenue_range ?? "", JSON.stringify(modules ?? [])]
+      [scope.dataId, company_name, industry, stage, team_size, geography,
+       product_desc, target_market, challenge, revenue_range, JSON.stringify(modules)]
     );
   } catch (err) {
     console.warn("[onboarding] business_profile upsert non-fatal error:", err);

@@ -10,7 +10,7 @@ import {
   dayRangeInTz,
   deltaLabel,
   formatMinor,
-  monthWindows,
+  monthWindowsInTz,
   pctDelta,
   sortNeedsYou,
   type AgentRunItem,
@@ -50,7 +50,7 @@ export async function buildHomeSummary(scope: SummaryScope, now = new Date()): P
   const settings = await getOrgSettings(dataId).catch(() => ({ currency: "USD", timezone: "UTC", locale: "en" as const }));
   const currency = settings.currency || "USD";
   const timezone = settings.timezone || "UTC";
-  const mw = monthWindows(now);
+  const mw = monthWindowsInTz(now, timezone);
   const day = dayRangeInTz(now, timezone);
   const nowIso = now.toISOString();
 
@@ -97,7 +97,7 @@ export async function buildHomeSummary(scope: SummaryScope, now = new Date()): P
 interface KpiCtx {
   currency: string;
   locale: string;
-  mw: ReturnType<typeof monthWindows>;
+  mw: ReturnType<typeof monthWindowsInTz>;
   day: { start: Date; end: Date };
   nowIso: string;
 }

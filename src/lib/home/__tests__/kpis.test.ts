@@ -59,3 +59,27 @@ describe("home kpis helpers", () => {
     expect(sorted.map((s) => s.id)).toEqual(["3", "2", "1"]);
   });
 });
+
+import { monthWindowsInTz } from "../kpis";
+
+describe("monthWindowsInTz", () => {
+  it("rolls the month over at local midnight in the org timezone", () => {
+    // 2026-03-01 02:00 UTC is still Feb 28 in Los Angeles (UTC-8).
+    const now = new Date("2026-03-01T02:00:00Z");
+    const la = monthWindowsInTz(now, "America/Los_Angeles");
+    expect(la.thisStart.toISOString()).toBe("2026-02-01T08:00:00.000Z");
+    expect(la.nextStart.toISOString()).toBe("2026-03-01T08:00:00.000Z");
+    expect(la.lastStart.toISOString()).toBe("2026-01-01T08:00:00.000Z");
+    // …but already March in Kolkata (UTC+5:30).
+    const kol = monthWindowsInTz(now, "Asia/Kolkata");
+    expect(kol.thisStart.toISOString()).toBe("2026-02-28T18:30:00.000Z");
+    expect(kol.nextStart.toISOString()).toBe("2026-03-31T18:30:00.000Z");
+  });
+  it("handles a DST change inside the window and falls back to UTC for bad zones", () => {
+    const now = new Date("2026-03-20T12:00:00Z"); // US DST started 2026-03-08
+    const ny = monthWindowsInTz(now, "America/New_York");
+    expect(ny.thisStart.toISOString()).toBe("2026-03-01T05:00:00.000Z"); // EST
+    expect(ny.nextStart.toISOString()).toBe("2026-04-01T04:00:00.000Z"); // EDT
+    expect(monthWindowsInTz(now, "Nope/Zone")).toEqual(monthWindows(now));
+  });
+});
