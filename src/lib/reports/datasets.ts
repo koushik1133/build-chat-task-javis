@@ -74,6 +74,10 @@ export const STATIC_DATASETS: Record<string, Dataset> = {
     key: "invoices", label: "Invoices", description: "Invoices issued, paid and outstanding.", from: "invoices", table: "invoices", scopeColumn: "user_id", area: "billing", defaultDate: "created_at", currencyColumn: "currency",
     fields: [dim("id", "Invoice"), dim("number", "Number"), dim("status", "Status"), dim("contact_id", "Contact"), dim("currency", "Currency"), money("subtotal_minor", "Subtotal"), money("tax_minor", "Tax"), money("total_minor", "Total"), money("paid_minor", "Paid"), money("outstanding_minor", "Outstanding", "(total_minor - COALESCE(paid_minor, 0))"), date("created_at", "Created"), date("sent_at", "Sent"), date("due_at", "Due"), date("paid_at", "Paid at")],
   },
+  orders: {
+    key: "orders", label: "Orders", description: "Storefront orders by status, customer and value.", from: "orders", table: "orders", scopeColumn: "user_id", area: "billing", defaultDate: "created_at", currencyColumn: "currency",
+    fields: [dim("id", "Order"), dim("number", "Number"), dim("status", "Status"), dim("customer_email", "Customer email"), dim("customer_name", "Customer"), dim("contact_id", "Contact"), dim("invoice_id", "Invoice"), dim("currency", "Currency"), money("subtotal_minor", "Subtotal"), money("tax_minor", "Tax"), money("shipping_minor", "Shipping"), money("total_minor", "Total"), date("created_at", "Created"), date("paid_at", "Paid at"), date("fulfilled_at", "Fulfilled at"), date("cancelled_at", "Cancelled at")],
+  },
   payments: {
     key: "payments", label: "Payments", description: "Payments received against invoices.", from: "invoice_payments p JOIN invoices i ON i.id = p.invoice_id", table: "invoice_payments", scopeColumn: "i.user_id", area: "billing", defaultDate: "created_at", currencyColumn: "p.currency",
     fields: [dim("id", "Payment", "p.id"), dim("invoice_id", "Invoice", "p.invoice_id"), dim("invoice_number", "Invoice number", "i.number"), dim("contact_id", "Contact", "i.contact_id"), dim("provider", "Provider", "p.provider"), dim("status", "Status", "p.status"), dim("currency", "Currency", "p.currency"), money("amount_minor", "Amount", "p.amount_minor"), money("refunded_minor", "Refunded", "COALESCE(p.refunded_minor, 0)"), money("net_minor", "Net", "(p.amount_minor - COALESCE(p.refunded_minor, 0))"), date("created_at", "Received", "p.created_at"), date("refunded_at", "Refunded at", "p.refunded_at")],
@@ -121,6 +125,22 @@ export const STATIC_DATASETS: Record<string, Dataset> = {
   shifts: {
     key: "shifts", label: "Shifts", description: "Rostered shifts by staff, role and location.", from: "shifts", table: "shifts", scopeColumn: "user_id", area: "team", defaultDate: "starts_at",
     fields: [dim("id", "Shift"), dim("staff_id", "Staff"), dim("role_title", "Role"), dim("location", "Location"), dim("status", "Status"), num("break_minutes", "Break (min)", "break_minutes", "minutes"), num("hours", "Hours", "(EXTRACT(EPOCH FROM (ends_at - starts_at)) / 3600)"), date("starts_at", "Starts"), date("ends_at", "Ends"), date("published_at", "Published")],
+  },
+  campaigns: {
+    key: "campaigns", label: "Marketing campaigns", description: "Email / SMS campaigns with funnel counters.", from: "campaigns", table: "campaigns", scopeColumn: "user_id", area: "crm", defaultDate: "created_at",
+    fields: [dim("id", "Campaign"), dim("name", "Name"), dim("channel", "Channel"), dim("status", "Status"), dim("audience_id", "Audience"), dim("template_id", "Template"), num("sent_count", "Sent"), num("delivered_count", "Delivered"), num("opened_count", "Opened"), num("clicked_count", "Clicked"), num("bounced_count", "Bounced"), num("unsubscribed_count", "Unsubscribed"), num("skipped_count", "Skipped (no consent)"), date("created_at", "Created"), date("started_at", "Started"), date("finished_at", "Finished")],
+  },
+  campaign_recipients: {
+    key: "campaign_recipients", label: "Campaign recipients", description: "Per-recipient delivery, open and click outcomes.", from: "campaign_recipients", table: "campaign_recipients", scopeColumn: "user_id", area: "crm", defaultDate: "created_at",
+    fields: [dim("id", "Recipient"), dim("campaign_id", "Campaign"), dim("contact_id", "Contact"), dim("status", "Status"), dim("opened", "Opened", "(opened_at IS NOT NULL)::text"), dim("clicked", "Clicked", "(clicked_at IS NOT NULL)::text"), date("created_at", "Added"), date("sent_at", "Sent"), date("opened_at", "Opened at"), date("clicked_at", "Clicked at")],
+  },
+  projects: {
+    key: "projects", label: "Projects", description: "Projects by status, owner and client with budget.", from: "projects", table: "projects", scopeColumn: "user_id", area: "tasks", defaultDate: "created_at", currencyColumn: "currency",
+    fields: [dim("id", "Project"), dim("name", "Name"), dim("code", "Code"), dim("status", "Status"), dim("billing_mode", "Billing mode"), dim("contact_id", "Client"), dim("owner_member_id", "Owner"), dim("currency", "Currency"), money("budget_minor", "Budget"), money("hourly_rate_minor", "Hourly rate"), date("starts_on", "Starts"), date("due_on", "Due"), date("archived_at", "Archived"), date("created_at", "Created"), date("updated_at", "Updated")],
+  },
+  project_milestones: {
+    key: "project_milestones", label: "Project milestones", description: "Milestones by project and status with due and completion dates.", from: "project_milestones", table: "project_milestones", scopeColumn: "user_id", area: "tasks", defaultDate: "due_on",
+    fields: [dim("id", "Milestone"), dim("project_id", "Project"), dim("name", "Name"), dim("status", "Status"), num("sort", "Order"), date("due_on", "Due"), date("completed_at", "Completed"), date("created_at", "Created")],
   },
 };
 

@@ -196,6 +196,13 @@ export const ROUTES = {
   openDsr: def({ id: "openDataSubjectRequest", method: "POST", path: "/privacy/dsr", summary: "Open a data-subject request", description: "Opens in `received`; verification is emailed to the subject.", tag: "Privacy", scope: "write:settings", body: S.DsrOpen, response: S.DsrRequest, status: 201, tools: ["privacy.open_request"] }),
 
   /* voice */
+  /* marketing */
+  listMarketingCampaigns: def({ id: "listMarketingCampaigns", method: "GET", path: "/marketing/campaigns", summary: "List email/SMS campaigns", tag: "Marketing", scope: "read:crm", query: S.MarketingCampaignListQuery, response: S.MarketingCampaignWithStats, list: true, tools: ["marketing.campaign_stats"] }),
+  getMarketingCampaign: def({ id: "getMarketingCampaign", method: "GET", path: "/marketing/campaigns/{id}", summary: "Get a campaign with funnel stats", tag: "Marketing", scope: "read:crm", params: S.IdParams, response: S.MarketingCampaignWithStats, tools: ["marketing.campaign_stats"] }),
+  launchMarketingCampaign: def({ id: "launchMarketingCampaign", method: "POST", path: "/marketing/campaigns/{id}/launch", summary: "Launch a campaign", description: "Materialises recipients from the audience; contacts without current marketing consent for the channel are skipped, never sent. Refuses (400) when nobody is eligible.", tag: "Marketing", scope: "write:crm", params: S.IdParams, body: S.MarketingLaunchBody, response: S.MarketingLaunchResult, emits: ["campaign.sent"] }),
+  listMarketingAudiences: def({ id: "listMarketingAudiences", method: "GET", path: "/marketing/audiences", summary: "List audiences", tag: "Marketing", scope: "read:crm", query: S.ListQuery, response: S.MarketingAudience, list: true, tools: ["marketing.audience_count"] }),
+  listMarketingTemplates: def({ id: "listMarketingTemplates", method: "GET", path: "/marketing/templates", summary: "List email templates", tag: "Marketing", scope: "read:crm", query: S.ListQuery, response: S.MarketingTemplate, list: true }),
+
   listVoiceCampaigns: def({ id: "listVoiceCampaigns", method: "GET", path: "/voice/campaigns", summary: "List voice campaigns", tag: "Voice", scope: "read:messaging", response: S.VoiceCampaignWithStats, list: true, tools: ["voice.list_campaigns"] }),
   createVoiceCampaign: def({ id: "createVoiceCampaign", method: "POST", path: "/voice/campaigns", summary: "Create a voice campaign (draft)", tag: "Voice", scope: "write:messaging", body: S.VoiceCampaignCreate, response: S.VoiceCampaign, status: 201 }),
   getVoiceCampaign: def({ id: "getVoiceCampaign", method: "GET", path: "/voice/campaigns/{id}", summary: "Get a voice campaign", tag: "Voice", scope: "read:messaging", params: S.IdParams, response: S.VoiceCampaignWithStats, tools: ["voice.campaign_status"] }),
@@ -262,6 +269,23 @@ export const ROUTES = {
   disableAutomation: def({ id: "disableAutomation", method: "POST", path: "/automations/{id}/disable", summary: "Disable an automation", tag: "Automations", scope: "write:agents", params: S.IdParams, response: S.Automation, tools: ["automations.toggle"] }),
   listAutomationRuns: def({ id: "listAutomationRuns", method: "GET", path: "/automations/{id}/runs", summary: "List runs of an automation", tag: "Automations", scope: "read:agents", params: S.IdParams, query: S.AutomationRunListQuery, response: S.AutomationRun, list: true, emits: ["automation.run_finished", "automation.run_failed"] }),
   getAutomationRun: def({ id: "getAutomationRun", method: "GET", path: "/automations/runs/{id}", summary: "Get an automation run", tag: "Automations", scope: "read:agents", params: S.IdParams, response: S.AutomationRun }),
+
+  /* projects */
+  listProjects: def({ id: "listProjects", method: "GET", path: "/projects", summary: "List projects", tag: "Projects", scope: "read:tasks", query: S.ProjectListQuery, response: S.Project, list: true, tools: ["projects.list"] }),
+  createProject: def({ id: "createProject", method: "POST", path: "/projects", summary: "Create a project", tag: "Projects", scope: "write:tasks", body: S.ProjectCreate, response: S.Project, status: 201, emits: ["project.created"] }),
+  getProject: def({ id: "getProject", method: "GET", path: "/projects/{id}", summary: "Get a project", tag: "Projects", scope: "read:tasks", params: S.IdParams, response: S.Project, tools: ["projects.status"] }),
+  updateProject: def({ id: "updateProject", method: "PATCH", path: "/projects/{id}", summary: "Update a project", description: "Changing `status` emits `project.status_changed`.", tag: "Projects", scope: "write:tasks", params: S.IdParams, body: S.ProjectPatch, response: S.Project, emits: ["project.status_changed"] }),
+  listProjectMilestones: def({ id: "listProjectMilestones", method: "GET", path: "/projects/{id}/milestones", summary: "List milestones of a project", tag: "Projects", scope: "read:tasks", params: S.IdParams, response: S.ProjectMilestone, list: true }),
+  createProjectMilestone: def({ id: "createProjectMilestone", method: "POST", path: "/projects/{id}/milestones", summary: "Add a milestone", tag: "Projects", scope: "write:tasks", params: S.IdParams, body: S.ProjectMilestoneCreate, response: S.ProjectMilestone, status: 201 }),
+  listProjectTasks: def({ id: "listProjectTasks", method: "GET", path: "/projects/{id}/tasks", summary: "List tasks of a project", tag: "Projects", scope: "read:tasks", params: S.IdParams, query: S.ProjectTaskListQuery, response: S.ProjectTask, list: true }),
+  createProjectTask: def({ id: "createProjectTask", method: "POST", path: "/projects/{id}/tasks", summary: "Add a task to a project", description: "Creates a row in the shared tasks table with `project_id` set; assignee, due date, priority and estimate are optional.", tag: "Projects", scope: "write:tasks", params: S.IdParams, body: S.ProjectTaskCreate, response: S.ProjectTask, status: 201, emits: ["task.created"], tools: ["projects.create_task"] }),
+  /* ── Phase 8 lane B: storefront + orders ────────────────────────────── */
+  listOrders: def({ id: "listOrders", method: "GET", path: "/orders", summary: "List storefront orders", tag: "Orders", scope: "read:billing", query: S.OrderListQuery, response: S.Order, list: true, tools: ["orders.list"] }),
+  getOrder: def({ id: "getOrder", method: "GET", path: "/orders/{id}", summary: "Get an order", tag: "Orders", scope: "read:billing", params: S.IdParams, response: S.Order }),
+  fulfilOrder: def({ id: "fulfilOrder", method: "POST", path: "/orders/{id}/fulfil", summary: "Mark a paid order fulfilled", description: "Only `paid` orders can be fulfilled. Emails the customer a dispatch / ready-for-collection notice.", tag: "Orders", scope: "write:billing", params: S.IdParams, response: S.Order, emits: ["order.fulfilled"], tools: ["orders.fulfil"] }),
+  cancelOrder: def({ id: "cancelOrder", method: "POST", path: "/orders/{id}/cancel", summary: "Cancel an order", description: "Pending orders release their stock reservation and void the invoice; paid orders are refunded through the payment provider (`restock` receives the goods back).", tag: "Orders", scope: "write:billing", params: S.IdParams, body: S.OrderCancel, response: S.OrderCancelResult, emits: ["order.cancelled"] }),
+  listStorefrontProducts: def({ id: "listStorefrontProducts", method: "GET", path: "/storefront/products", summary: "List products with storefront visibility", tag: "Orders", scope: "read:billing", response: S.StorefrontProduct, list: true, tools: ["storefront.catalog"] }),
+  putStorefrontProduct: def({ id: "putStorefrontProduct", method: "PATCH", path: "/storefront/products", summary: "Set a product's storefront visibility, order, description or image", tag: "Orders", scope: "write:billing", body: S.StorefrontProductPut, response: S.StorefrontProduct }),
 } as const;
 
 export type RouteId = keyof typeof ROUTES;
@@ -288,6 +312,7 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Marketplace", description: "Installable agents, playbooks, automations and record packs." },
   { name: "Credits", description: "AI credit balance and ledger." },
   { name: "Privacy", description: "Consent ledger and data-subject requests." },
+  { name: "Marketing", description: "Consent-first email / SMS campaigns, audiences and templates." },
   { name: "Voice", description: "Outbound voice campaigns." },
   { name: "Mail", description: "Connected mailboxes." },
   { name: "Accounting", description: "Accounting connections and sync." },
@@ -298,5 +323,7 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Documents", description: "Templates, generated documents and e-signatures." },
   { name: "Reports", description: "Saved reports, report runs and dashboards." },
   { name: "Procurement", description: "Suppliers, purchase orders, receiving and supplier bills (accounts payable)." },
+  { name: "Orders", description: "Public storefront orders and catalog visibility." },
+  { name: "Projects", description: "Projects, milestones and project tasks (assignees, due dates, budgets)." },
 ];
 

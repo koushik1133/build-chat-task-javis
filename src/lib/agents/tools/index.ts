@@ -38,6 +38,9 @@ import "./automations";
 import "./reports";
 import "./procurement";
 import "./workforce";
+import "./marketing";
+import "./projects";
+import "./orders";
 // END tool-module imports
 // ─────────────────────────────────────────────────────────────────────────────
 

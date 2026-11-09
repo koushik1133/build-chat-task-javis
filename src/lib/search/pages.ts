@@ -32,6 +32,7 @@ const AREA_BY_PREFIX: Array<[string, Area]> = [
   ["/settings/accounting", "billing"],
   ["/settings/privacy", "settings"],
   ["/voice", "messaging"],
+  ["/marketing", "crm"],
   ["/documents", "crm"],
   ["/crm", "crm"],
   ["/leads", "leads"],
@@ -51,10 +52,12 @@ const AREA_BY_PREFIX: Array<[string, Area]> = [
   ["/r", "crm"],
   ["/billing", "billing"],
   ["/procurement", "billing"],
+  ["/orders", "billing"],
   ["/inventory", "billing"],
   ["/calendar", "calendar"],
   ["/helpdesk", "helpdesk"],
   ["/workforce", "team"],
+  ["/projects", "tasks"],
   ["/analytics", "reports"],
   ["/reports", "reports"],
 ];
@@ -80,6 +83,7 @@ const EXTRA: Array<{ href: string; label: string }> = [
   { href: "/settings/accounting", label: "Accounting" },
   { href: "/settings/privacy", label: "Privacy & data" },
   { href: "/voice", label: "Voice Campaigns" },
+  { href: "/marketing", label: "Marketing" },
   { href: "/documents", label: "Documents" },
   { href: "/helpdesk", label: "Helpdesk" },
   { href: "/knowledge", label: "Knowledge Base" },
@@ -90,6 +94,8 @@ const EXTRA: Array<{ href: string; label: string }> = [
   { href: "/marketplace", label: "Marketplace" },
   { href: "/workforce", label: "Workforce" },
   { href: "/procurement", label: "Procurement" },
+  { href: "/projects", label: "Projects" },
+  { href: "/orders", label: "Orders & storefront" },
   { href: "/reports", label: "Reports" },
 ];
 

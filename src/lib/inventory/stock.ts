@@ -190,18 +190,17 @@ export interface ReserveResult {
   alreadyReserved: boolean;
 }
 
+type ReservationRef = "quote" | "order";
+
 /**
- * Reserve tracked stock for an accepted quote. Idempotent per quote: a second
- * call is a no-op. On an InsufficientStockError every reservation made by this
- * call is rolled back before rethrowing.
- *
- * Wire into src/lib/money/acceptance.ts after the quote is marked accepted:
- *   await reserveForQuote(owner, quoteId, q.items);
+ * Reserve tracked stock against a reference (quote or order). Idempotent per
+ * ref: a second call is a no-op. On an InsufficientStockError every
+ * reservation made by this call is rolled back before rethrowing.
  */
-export async function reserveForQuote(dataId: string, quoteId: string, items: readonly LineItem[]): Promise<ReserveResult> {
+async function reserveForRef(dataId: string, refKind: ReservationRef, refId: string, items: readonly LineItem[], note: string): Promise<ReserveResult> {
   const prior = await query<StockMovementRow>(
-    `SELECT product_id, kind, qty FROM stock_movements WHERE user_id = $1 AND ref_kind = 'quote' AND ref_id = $2`,
-    [dataId, quoteId]
+    `SELECT product_id, kind, qty FROM stock_movements WHERE user_id = $1 AND ref_kind = $2 AND ref_id = $3`,
+    [dataId, refKind, refId]
   );
   if (outstandingReservations(prior).size > 0) {
     return { reserved: [...outstandingReservations(prior)].map(([product_id, qty]) => ({ product_id, qty })), alreadyReserved: true };
@@ -213,44 +212,77 @@ export async function reserveForQuote(dataId: string, quoteId: string, items: re
     for (const op of ops) {
       await reserveOne(dataId, op.product_id, op.qty);
       done.push(op);
-      await logMovement(dataId, { product_id: op.product_id, kind: "reserve", qty: op.qty, ref_kind: "quote", ref_id: quoteId, note: "Quote accepted" });
+      await logMovement(dataId, { product_id: op.product_id, kind: "reserve", qty: op.qty, ref_kind: refKind, ref_id: refId, note });
     }
   } catch (err) {
     for (const op of done) {
       await unreserveOne(dataId, op.product_id, op.qty).catch(() => undefined);
-      await logMovement(dataId, { product_id: op.product_id, kind: "release", qty: op.qty, ref_kind: "quote", ref_id: quoteId, note: "Rolled back: reservation failed" }).catch(() => undefined);
+      await logMovement(dataId, { product_id: op.product_id, kind: "release", qty: op.qty, ref_kind: refKind, ref_id: refId, note: "Rolled back: reservation failed" }).catch(() => undefined);
     }
     throw err;
   }
   return { reserved: done, alreadyReserved: false };
 }
 
-/** Release whatever is still reserved for a quote (declined / expired / voided). */
-export async function releaseForQuote(dataId: string, quoteId: string, note = "Quote released"): Promise<StockOp[]> {
+async function releaseForRef(dataId: string, refKind: ReservationRef, refId: string, note: string): Promise<StockOp[]> {
   const rows = await query<StockMovementRow>(
-    `SELECT product_id, kind, qty FROM stock_movements WHERE user_id = $1 AND ref_kind = 'quote' AND ref_id = $2`,
-    [dataId, quoteId]
+    `SELECT product_id, kind, qty FROM stock_movements WHERE user_id = $1 AND ref_kind = $2 AND ref_id = $3`,
+    [dataId, refKind, refId]
   );
   const open = outstandingReservations(rows);
   const released: StockOp[] = [];
   for (const [product_id, qty] of open) {
     await unreserveOne(dataId, product_id, qty);
-    await logMovement(dataId, { product_id, kind: "release", qty, ref_kind: "quote", ref_id: quoteId, note });
+    await logMovement(dataId, { product_id, kind: "release", qty, ref_kind: refKind, ref_id: refId, note });
     released.push({ product_id, qty });
   }
   return released;
 }
 
 /**
+ * Reserve tracked stock for an accepted quote. Idempotent per quote.
+ *
+ * Wire into src/lib/money/acceptance.ts after the quote is marked accepted:
+ *   await reserveForQuote(owner, quoteId, q.items);
+ */
+export async function reserveForQuote(dataId: string, quoteId: string, items: readonly LineItem[]): Promise<ReserveResult> {
+  return reserveForRef(dataId, "quote", quoteId, items, "Quote accepted");
+}
+
+/** Release whatever is still reserved for a quote (declined / expired / voided). */
+export async function releaseForQuote(dataId: string, quoteId: string, note = "Quote released"): Promise<StockOp[]> {
+  return releaseForRef(dataId, "quote", quoteId, note);
+}
+
+/** Storefront: reserve stock when an order is placed (pending payment). Idempotent per order. */
+export async function reserveForOrder(dataId: string, orderId: string, items: readonly LineItem[]): Promise<ReserveResult> {
+  return reserveForRef(dataId, "order", orderId, items, "Order placed");
+}
+
+/** Storefront: release an order's reservation (cancelled / expired unpaid). */
+export async function releaseForOrder(dataId: string, orderId: string, note = "Order cancelled"): Promise<StockOp[]> {
+  return releaseForRef(dataId, "order", orderId, note);
+}
+
+/**
+ * Storefront: goods leave the shelf once the order is paid. Consumes against
+ * the order's linked invoice (so the invoice-side consumption is a no-op) and
+ * clears the order reservation. Idempotent per invoice.
+ */
+export async function consumeForOrder(dataId: string, orderId: string, invoiceId: string, items: readonly LineItem[]): Promise<StockOp[]> {
+  return consumeForInvoice(dataId, invoiceId, items, { reservation: { kind: "order", id: orderId } });
+}
+
+/**
  * Consume stock for an invoice (goods shipped / job done). If the invoice came
- * from a quote with open reservations, those reservations are cleared as the
- * stock leaves. Idempotent per invoice.
+ * from a quote (or storefront order) with open reservations, those
+ * reservations are cleared as the stock leaves. Idempotent per invoice.
  */
 export async function consumeForInvoice(
   dataId: string,
   invoiceId: string,
   items: readonly LineItem[],
-  opts: { quoteId?: string | null } = {}
+  opts: { quoteId?: string | null; reservation?: { kind: ReservationRef; id: string } | null } = {}
 ): Promise<StockOp[]> {
   const prior = await query<StockMovementRow>(
     `SELECT product_id, kind, qty FROM stock_movements WHERE user_id = $1 AND ref_kind = 'invoice' AND ref_id = $2 AND kind = 'consume'`,
@@ -266,17 +298,18 @@ export async function consumeForInvoice(
   const ops = planStockOps(items, products).filter((op) => !alreadyConsumed.has(op.product_id));
   if (ops.length === 0) return consumed;
 
-  let reservedForQuote = new Map<string, number>();
-  if (opts.quoteId) {
+  const ref = opts.reservation ?? (opts.quoteId ? { kind: "quote" as const, id: opts.quoteId } : null);
+  let reserved = new Map<string, number>();
+  if (ref) {
     const rows = await query<StockMovementRow>(
-      `SELECT product_id, kind, qty FROM stock_movements WHERE user_id = $1 AND ref_kind = 'quote' AND ref_id = $2`,
-      [dataId, opts.quoteId]
+      `SELECT product_id, kind, qty FROM stock_movements WHERE user_id = $1 AND ref_kind = $2 AND ref_id = $3`,
+      [dataId, ref.kind, ref.id]
     );
-    reservedForQuote = outstandingReservations(rows);
+    reserved = outstandingReservations(rows);
   }
 
   for (const op of ops) {
-    const fromReservation = Math.min(reservedForQuote.get(op.product_id) ?? 0, op.qty);
+    const fromReservation = Math.min(reserved.get(op.product_id) ?? 0, op.qty);
     await withRetry(async () => {
       // Available after releasing this product's own reservation must cover the qty.
       const rows = await query<{ id: string }>(
@@ -296,9 +329,9 @@ export async function consumeForInvoice(
       }
     });
     await logMovement(dataId, { product_id: op.product_id, kind: "consume", qty: op.qty, ref_kind: "invoice", ref_id: invoiceId, note: "Invoice billed" });
-    if (fromReservation > 0 && opts.quoteId) {
-      // Record the reservation clearing against the quote so outstandingReservations() nets to zero.
-      await logMovement(dataId, { product_id: op.product_id, kind: "release", qty: fromReservation, ref_kind: "quote", ref_id: opts.quoteId, note: `Consumed by invoice ${invoiceId}` });
+    if (fromReservation > 0 && ref) {
+      // Record the reservation clearing against the ref so outstandingReservations() nets to zero.
+      await logMovement(dataId, { product_id: op.product_id, kind: "release", qty: fromReservation, ref_kind: ref.kind, ref_id: ref.id, note: `Consumed by invoice ${invoiceId}` });
     }
     consumed.push(op);
   }

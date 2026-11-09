@@ -5,6 +5,9 @@ export type EmailPayload = {
   subject: string;
   html: string;
   fromName?: string | null;
+  /** Extra SMTP headers (e.g. List-Unsubscribe). */
+  headers?: Record<string, string> | null;
+  replyTo?: string | null;
 };
 
 export type SendResult = {
@@ -18,6 +21,8 @@ export async function sendEmailUnified({
   subject,
   html,
   fromName,
+  headers,
+  replyTo,
 }: EmailPayload): Promise<SendResult> {
   const provider = process.env.EMAIL_PROVIDER || "resend";
 
@@ -50,6 +55,8 @@ export async function sendEmailUnified({
         to,
         subject,
         html,
+        ...(headers ? { headers } : {}),
+        ...(replyTo ? { replyTo } : {}),
       });
 
       console.log(`[Gmail SMTP] Email sent successfully to ${to}:`, info.messageId);
@@ -98,6 +105,8 @@ export async function sendEmailUnified({
         to: [to],
         subject,
         html,
+        ...(headers ? { headers } : {}),
+        ...(replyTo ? { reply_to: replyTo } : {}),
       }),
     });
     const data = (await res.json().catch(() => ({}))) as { id?: string; message?: string };

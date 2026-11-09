@@ -77,6 +77,9 @@ const ENTITY_TABLES: Record<string, string> = {
   credit_note: "credit_notes",
   marketplace_install: "marketplace_installs",
   marketplace: "marketplace_installs",
+  order: "orders",
+  orders: "orders",
+  cart: "carts",
 };
 
 export function entityTableFor(evt: Pick<RunEvent, "type" | "entity">): string | null {

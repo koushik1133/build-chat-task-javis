@@ -1,4 +1,8 @@
 import { parseTags, type TicketMessageRow, type TicketRow } from "@/lib/helpdesk/tickets";
+import type { CampaignRow as MarketingCampaignRow } from "@/lib/marketing/campaigns";
+import type { AudienceRow } from "@/lib/marketing/audiences";
+import type { TemplateRow } from "@/lib/marketing/templates";
+import { parseAudienceDefinition } from "@/lib/marketing/types";
 
 /** Public views of rows that carry internal columns. */
 
@@ -118,6 +122,22 @@ export function dsrView(r: DsrRow) {
     result: r.result,
     created_at: iso(r.created_at),
   };
+}
+
+export function marketingCampaignView(c: MarketingCampaignRow) {
+  return {
+    id: c.id, name: c.name, channel: c.channel, status: c.status, audience_id: c.audience_id, template_id: c.template_id, subject: c.subject, schedule_at: isoOrNull(c.schedule_at),
+    sent_count: Number(c.sent_count), delivered_count: Number(c.delivered_count), opened_count: Number(c.opened_count), clicked_count: Number(c.clicked_count), bounced_count: Number(c.bounced_count), unsubscribed_count: Number(c.unsubscribed_count), skipped_count: Number(c.skipped_count),
+    created_at: iso(c.created_at), started_at: isoOrNull(c.started_at), finished_at: isoOrNull(c.finished_at),
+  };
+}
+
+export function marketingAudienceView(a: AudienceRow) {
+  return { id: a.id, name: a.name, definition: parseAudienceDefinition(a.definition), is_dynamic: a.is_dynamic, size_cache: a.size_cache === null ? null : Number(a.size_cache), created_at: iso(a.created_at), updated_at: iso(a.updated_at) };
+}
+
+export function marketingTemplateView(t: TemplateRow) {
+  return { id: t.id, name: t.name, subject: t.subject, preheader: t.preheader, body_md: t.body_md, category: t.category, created_at: iso(t.created_at), updated_at: iso(t.updated_at) };
 }
 
 export function campaignView(c: CampaignRow) {

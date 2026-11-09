@@ -2843,3 +2843,340 @@ CREATE INDEX ASYNC IF NOT EXISTS idx_document_signers_doc ON document_signers (d
 
 CREATE INDEX ASYNC IF NOT EXISTS idx_document_signers_user ON document_signers (user_id, email);
 
+
+-- ==== PHASE 8 LANE A ====
+-- Phase 8 / Lane A: review-gap closures.
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- ── tasks: due date, assignee, priority (home overdue tile + API v1 + Projects) ──
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee_id TEXT;
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority TEXT;
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_tasks_user_done_due ON tasks (user_id, done, due_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_tasks_user_assignee ON tasks (user_id, assignee_id);
+
+-- ── shifts: idempotent upcoming-shift reminders ──
+ALTER TABLE shifts ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ;
+
+
+-- ==== PHASE 8 LANE B ====
+-- Phase 8 / Lane B: public storefront, carts, orders
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- ── storefronts: one per org (user_id = org owner / data id) ────────────────
+CREATE TABLE IF NOT EXISTS storefronts (
+  user_id             TEXT PRIMARY KEY,
+  enabled             BOOLEAN NOT NULL DEFAULT FALSE,
+  slug                TEXT NOT NULL,                  -- defaults to organizations.slug
+  title               TEXT,
+  intro_md            TEXT,
+  currency            TEXT NOT NULL DEFAULT 'USD',
+  collect_shipping    BOOLEAN NOT NULL DEFAULT FALSE,
+  shipping_flat_minor BIGINT NOT NULL DEFAULT 0,
+  pickup_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+  terms_md            TEXT,
+  settings            TEXT,                           -- JSON {max_qty_per_line, cart_ttl_hours, ...}
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_storefronts_slug ON storefronts (slug);
+
+-- ── storefront_products: which pricebook products are listed publicly ───────
+CREATE TABLE IF NOT EXISTS storefront_products (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  product_id      TEXT NOT NULL,
+  visible         BOOLEAN NOT NULL DEFAULT FALSE,
+  sort            INTEGER NOT NULL DEFAULT 0,
+  description_md  TEXT,
+  image_url       TEXT,                               -- absolute URL or attachments id (entity_kind product, visibility portal)
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_storefront_products_product ON storefront_products (user_id, product_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_storefront_products_visible ON storefront_products (user_id, visible, sort);
+
+-- ── carts: anonymous shopper carts (token hashed, cookie kh_cart_<slug>) ────
+CREATE TABLE IF NOT EXISTS carts (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  token_hash  TEXT NOT NULL,
+  items       TEXT NOT NULL DEFAULT '[]',             -- JSON [{product_id, qty}]
+  email       TEXT,
+  reminded_at TIMESTAMPTZ,                            -- abandoned-cart sweep marker (idempotency)
+  order_id    TEXT,                                   -- set once checked out
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ NOT NULL
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_carts_token ON carts (token_hash);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_carts_user_updated ON carts (user_id, updated_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_carts_abandoned ON carts (reminded_at, order_id, updated_at);
+
+-- ── orders ──────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS orders (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  number            TEXT NOT NULL,                    -- ORD-000001 via doc_counters kind order
+  status            TEXT NOT NULL DEFAULT 'pending_payment', -- pending_payment|paid|fulfilled|cancelled|refunded
+  customer_name     TEXT NOT NULL,
+  customer_email    TEXT NOT NULL,
+  customer_phone    TEXT,
+  shipping_address  TEXT,                             -- JSON {line1,line2,city,region,postal_code,country} or null (pickup)
+  items             TEXT NOT NULL DEFAULT '[]',       -- JSON LineItem[] (+ product_id, name)
+  subtotal_minor    BIGINT NOT NULL DEFAULT 0,
+  tax_minor         BIGINT NOT NULL DEFAULT 0,
+  shipping_minor    BIGINT NOT NULL DEFAULT 0,
+  total_minor       BIGINT NOT NULL DEFAULT 0,
+  currency          TEXT NOT NULL DEFAULT 'USD',
+  tax_breakdown     TEXT,                             -- JSON TaxBreakdownRow[]
+  contact_id        TEXT,
+  invoice_id        TEXT,
+  cart_id           TEXT,
+  payment_ref       TEXT,
+  consent_marketing BOOLEAN NOT NULL DEFAULT FALSE,
+  notes             TEXT,
+  paid_at           TIMESTAMPTZ,
+  fulfilled_at      TIMESTAMPTZ,
+  cancelled_at      TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_orders_user_created ON orders (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_orders_user_status ON orders (user_id, status, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_orders_invoice ON orders (invoice_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_orders_user_email ON orders (user_id, customer_email);
+
+
+-- ==== PHASE 8 LANE C ====
+-- Phase 8 / Lane C: projects (milestones, tasks with assignees/due dates, budgets vs actuals, timeline)
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+-- Lane A owns tasks.due_at / tasks.assignee_id / tasks.priority (not repeated here).
+
+-- ── projects ─────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS projects (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  name              TEXT NOT NULL,
+  code              TEXT,                           -- short label, e.g. PRJ-001
+  description_md    TEXT,
+  contact_id        TEXT,
+  quote_id          TEXT,
+  status            TEXT NOT NULL DEFAULT 'planning', -- planning|active|on_hold|done|cancelled
+  starts_on         DATE,
+  due_on            DATE,
+  budget_minor      BIGINT NOT NULL DEFAULT 0,
+  currency          TEXT NOT NULL DEFAULT 'USD',
+  billing_mode      TEXT NOT NULL DEFAULT 'none',   -- fixed|hourly|none
+  hourly_rate_minor BIGINT NOT NULL DEFAULT 0,
+  owner_member_id   TEXT,                           -- membership user id of the project owner
+  color             TEXT,
+  archived_at       TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_projects_user_status ON projects (user_id, status, archived_at, due_on);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_projects_user_created ON projects (user_id, created_at, id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_projects_quote ON projects (user_id, quote_id);
+
+-- ── project_milestones ───────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS project_milestones (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  project_id   TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  due_on       DATE,
+  status       TEXT NOT NULL DEFAULT 'open',        -- open|done
+  sort         INTEGER NOT NULL DEFAULT 0,
+  completed_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_project_milestones_project ON project_milestones (user_id, project_id, sort);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_project_milestones_due ON project_milestones (user_id, status, due_on);
+
+-- ── project_members ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS project_members (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  project_id     TEXT NOT NULL,
+  member_user_id TEXT,                              -- org membership user id (nullable)
+  staff_id       TEXT,                              -- workforce staff profile (nullable)
+  role           TEXT NOT NULL DEFAULT 'member',    -- lead|member|viewer
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_project_members_project ON project_members (user_id, project_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_project_members_member ON project_members (user_id, member_user_id);
+
+-- ── tasks: project linkage, planning fields, overdue bookkeeping ─────────────
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id TEXT;
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS milestone_id TEXT;
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS estimate_minutes INTEGER;
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sort INTEGER;
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS depends_on TEXT;
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS overdue_notified_at TIMESTAMPTZ;
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_tasks_project ON tasks (user_id, project_id, done);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_tasks_overdue_sweep ON tasks (done, due_at, overdue_notified_at);
+
+-- ── time_entries / expenses: direct project linkage (ref_kind='project' is kept too) ──
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS project_id TEXT;
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_time_entries_project ON time_entries (user_id, project_id);
+
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS project_id TEXT;
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_expenses_project ON expenses (user_id, project_id);
+
+
+-- ==== PHASE 8 LANE D ====
+-- Phase 8 / Lane D: marketing — audiences, templates, campaigns, recipients, sequences, link clicks.
+-- Aurora DSQL dialect: no FKs, no triggers, no sequences; JSON as TEXT; one statement per block.
+
+CREATE TABLE IF NOT EXISTS audiences (
+  id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id      TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  definition   TEXT NOT NULL DEFAULT '{}',   -- JSON {lifecycle[], tags[], q, consent_purpose, has_email, has_phone, last_activity_days, record_type, stage}
+  is_dynamic   BOOLEAN NOT NULL DEFAULT TRUE,
+  size_cache   INTEGER,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_audiences_user ON audiences (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS email_templates (
+  id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id      TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  subject      TEXT NOT NULL DEFAULT '',
+  preheader    TEXT,
+  body_md      TEXT NOT NULL DEFAULT '',      -- markdown + {{merge}} fields
+  category     TEXT NOT NULL DEFAULT 'general',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_email_templates_user ON email_templates (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS campaigns (
+  id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id            TEXT NOT NULL,
+  name               TEXT NOT NULL,
+  channel            TEXT NOT NULL DEFAULT 'email',   -- email | sms
+  audience_id        TEXT,
+  template_id        TEXT,
+  subject            TEXT,
+  preheader          TEXT,
+  body_md            TEXT NOT NULL DEFAULT '',
+  from_name          TEXT,
+  reply_to           TEXT,
+  status             TEXT NOT NULL DEFAULT 'draft',   -- draft | scheduled | sending | sent | paused | cancelled
+  schedule_at        TIMESTAMPTZ,
+  sent_count         INTEGER NOT NULL DEFAULT 0,
+  delivered_count    INTEGER NOT NULL DEFAULT 0,
+  opened_count       INTEGER NOT NULL DEFAULT 0,
+  clicked_count      INTEGER NOT NULL DEFAULT 0,
+  bounced_count      INTEGER NOT NULL DEFAULT 0,
+  unsubscribed_count INTEGER NOT NULL DEFAULT 0,
+  skipped_count      INTEGER NOT NULL DEFAULT 0,
+  created_by         TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_at         TIMESTAMPTZ,
+  finished_at        TIMESTAMPTZ
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_campaigns_user_status ON campaigns (user_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS campaign_recipients (
+  id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id      TEXT NOT NULL,
+  campaign_id  TEXT NOT NULL,
+  contact_id   TEXT NOT NULL,
+  email        TEXT,
+  phone        TEXT,
+  status       TEXT NOT NULL DEFAULT 'queued',  -- queued | skipped_no_consent | sent | delivered | bounced | failed | unsubscribed
+  outbox_id    TEXT,
+  sent_at      TIMESTAMPTZ,
+  opened_at    TIMESTAMPTZ,
+  clicked_at   TIMESTAMPTZ,
+  error        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (campaign_id, contact_id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_campaign_recipients_campaign_status ON campaign_recipients (campaign_id, status, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_campaign_recipients_user ON campaign_recipients (user_id, status);
+
+CREATE TABLE IF NOT EXISTS sequences (
+  id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id         TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  trigger         TEXT NOT NULL DEFAULT 'manual',   -- manual | audience_join | event
+  trigger_config  TEXT NOT NULL DEFAULT '{}',       -- JSON {audience_id?, event_type?}
+  steps           TEXT NOT NULL DEFAULT '[]',       -- JSON [{delay_hours, channel, template_id?, subject?, body_md?}]
+  status          TEXT NOT NULL DEFAULT 'active',   -- active | paused
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_sequences_user ON sequences (user_id, status);
+
+CREATE TABLE IF NOT EXISTS sequence_enrollments (
+  id             TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id        TEXT NOT NULL,
+  sequence_id    TEXT NOT NULL,
+  contact_id     TEXT NOT NULL,
+  step_index     INTEGER NOT NULL DEFAULT 0,
+  next_at        TIMESTAMPTZ,
+  status         TEXT NOT NULL DEFAULT 'active',    -- active | done | exited
+  exited_reason  TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (sequence_id, contact_id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_sequence_enrollments_due ON sequence_enrollments (status, next_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_sequence_enrollments_user_seq ON sequence_enrollments (user_id, sequence_id, created_at);
+
+CREATE TABLE IF NOT EXISTS link_clicks (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id       TEXT NOT NULL,
+  campaign_id   TEXT NOT NULL,
+  recipient_id  TEXT NOT NULL,
+  url           TEXT NOT NULL,
+  clicked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_link_clicks_campaign ON link_clicks (campaign_id, clicked_at);
+

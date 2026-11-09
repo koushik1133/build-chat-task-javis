@@ -115,6 +115,15 @@ export async function runCashflow(dataId: string, opts: CashflowOptions = {}): P
 
 export async function runCapacity(dataId: string, opts: CapacityOptions = {}): Promise<CapacityPlan> {
   const inputs = await loadCapacityInputs(dataId, opts.now, { weeks: opts.weeks, lookbackWeeks: opts.lookbackWeeks });
+  // Open project-task estimates count as future demand (Phase 8 projects module).
+  const taskEstimates = await query<{ id: string; estimate_minutes: number | string; due_at: string | Date | null; member_id: string | null }>(
+    `SELECT id::text AS id, estimate_minutes, due_at, assignee_id AS member_id FROM tasks
+      WHERE user_id = $1 AND done = FALSE AND deleted_at IS NULL AND estimate_minutes IS NOT NULL AND estimate_minutes > 0 AND project_id IS NOT NULL LIMIT 2000`,
+    [dataId]
+  ).catch(() => []);
+  if (taskEstimates.length > 0) {
+    inputs.taskEstimates = taskEstimates.map((t) => ({ id: t.id, estimate_minutes: Number(t.estimate_minutes) || 0, due_at: t.due_at instanceof Date ? t.due_at.toISOString() : t.due_at, member_id: t.member_id }));
+  }
   return capacityPlan(inputs, opts);
 }
 

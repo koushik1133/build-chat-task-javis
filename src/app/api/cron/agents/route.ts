@@ -21,6 +21,12 @@ import { runDueSchedules } from "@/lib/money/recurring";
 import { pruneVitals } from "@/lib/vitals";
 import { sendDueDigests, sendDueReportSchedules } from "@/lib/reports/digest";
 import { expireDocuments } from "@/lib/documents/documents";
+import { markOverdueTasks } from "@/lib/projects/overdue";
+import { abandonedCartSweep } from "@/lib/storefront/cart";
+import { sendBatch, syncDeliveryStatuses } from "@/lib/marketing/campaigns";
+import { enrollAudienceJoins, runDueEnrollments } from "@/lib/marketing/sequences";
+import { purgeDeletedAttachments } from "@/lib/attachments/store";
+import { remindUpcomingShifts } from "@/lib/workforce/shifts";
 import type { JobRow } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -114,7 +120,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, report_schedules: 0, digests: 0, documents_expired: 0, hourly_ran: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, report_schedules: 0, digests: 0, documents_expired: 0, tasks_overdue: 0, carts_abandoned: 0, marketing_sent: 0, marketing_delivery: 0, sequence_steps: 0, sequence_joins: 0, attachments_purged: 0, shift_reminders: 0, hourly_ran: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -181,9 +187,17 @@ async function handleTick(req: Request) {
     try { counts.privacy_reminders = (await remindDueSoon(200)).reminded; } catch (err) { console.error("[cron/agents] privacy reminders failed:", err); }
     try { const r = await applyRetention(500); counts.retention = Object.values(r.affected).reduce((a, b) => a + b, 0); } catch (err) { console.error("[cron/agents] retention failed:", err); }
     await pruneVitals(30).catch(() => 0);
+    try { counts.attachments_purged = (await purgeDeletedAttachments(30)).purged; } catch (err) { console.error("[cron/agents] attachment purge failed:", err); }
+    try { counts.shift_reminders = (await remindUpcomingShifts(200)).reminded; } catch (err) { console.error("[cron/agents] shift reminders failed:", err); }
     try { counts.digests = (await sendDueDigests(50)).sent; } catch (err) { console.error("[cron/agents] digests failed:", err); }
   }
   try { counts.report_schedules = (await sendDueReportSchedules(20)).sent; } catch (err) { console.error("[cron/agents] report schedules failed:", err); }
+  try { counts.tasks_overdue = (await markOverdueTasks(200)).notified; } catch (err) { console.error("[cron/agents] task overdue sweep failed:", err); }
+  try { counts.carts_abandoned = (await abandonedCartSweep(100)).emitted; } catch (err) { console.error("[cron/agents] abandoned cart sweep failed:", err); }
+  try { counts.marketing_sent = (await sendBatch(100)).sent; } catch (err) { console.error("[cron/agents] marketing send failed:", err); }
+  try { counts.sequence_steps = (await runDueEnrollments(100)).sent; } catch (err) { console.error("[cron/agents] sequence steps failed:", err); }
+  try { counts.sequence_joins = (await enrollAudienceJoins(200)).enrolled; } catch (err) { console.error("[cron/agents] sequence joins failed:", err); }
+  try { counts.marketing_delivery = (await syncDeliveryStatuses(500)).delivered; } catch (err) { console.error("[cron/agents] marketing delivery sync failed:", err); }
   try { counts.documents_expired = (await expireDocuments(200)).expired; } catch (err) { console.error("[cron/agents] document expiry failed:", err); }
   try { counts.invoices_overdue = (await markOverdue(200)).marked; } catch (err) { console.error("[cron/agents] overdue sweep failed:", err); }
   try { counts.invoice_reminders = (await sendReminders(100)).sent; } catch (err) { console.error("[cron/agents] reminder sweep failed:", err); }

@@ -35,9 +35,20 @@ async function sendEmail(msg: OutboundMessage): Promise<SendOutcome> {
     subject: msg.subject ?? "(no subject)",
     html: /<[a-z][\s\S]*>/i.test(html) ? html : `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(html)}</pre>`,
     fromName: typeof msg.data?.fromName === "string" ? msg.data.fromName : null,
+    headers: extraHeaders(msg.data),
+    replyTo: typeof msg.data?.replyTo === "string" ? msg.data.replyTo : null,
   });
   if (!result.success) throw new Error(result.detail ?? result.message);
   return { status: "sent" };
+}
+
+/** `data.headers`: string→string map of extra mail headers (List-Unsubscribe etc.). */
+function extraHeaders(data: Record<string, unknown> | null): Record<string, string> | null {
+  const h = data?.headers;
+  if (!h || typeof h !== "object" || Array.isArray(h)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(h as Record<string, unknown>)) if (typeof v === "string" && /^[A-Za-z0-9-]+$/.test(k)) out[k] = v.replace(/[\r\n]/g, " ").slice(0, 1000);
+  return Object.keys(out).length ? out : null;
 }
 
 function escapeHtml(s: string): string {

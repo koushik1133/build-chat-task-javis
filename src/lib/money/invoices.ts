@@ -292,6 +292,14 @@ export async function recomputeInvoiceStatus(id: string): Promise<InvoiceStatus 
     // per invoice inside consumeForInvoice; a failure (insufficient stock, missing
     // table) must never undo or block the payment itself.
     try {
+      // Storefront orders linked to this invoice: mark paid, consume against the order
+      // reservation, send the confirmation. Dynamic import keeps orders → invoices acyclic.
+      const { markOrderPaidForInvoice } = await import("@/lib/storefront/orders");
+      await markOrderPaidForInvoice(row.user_id, id);
+    } catch (err) {
+      console.error(`[invoices] order paid hook failed for ${id}:`, err);
+    }
+    try {
       await consumeForInvoice(row.user_id, id, parseItems(row.items), { quoteId: row.quote_id });
     } catch (err) {
       console.error(`[invoices] stock consumption failed for ${id}:`, err);

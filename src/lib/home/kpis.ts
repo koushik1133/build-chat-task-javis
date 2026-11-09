@@ -17,7 +17,7 @@ export interface KpiTile {
 }
 
 export interface NeedsYouItem {
-  kind: "approval" | "sla" | "invoice" | "deal";
+  kind: "approval" | "sla" | "invoice" | "deal" | "task" | "milestone";
   id: string;
   title: string;
   detail: string;

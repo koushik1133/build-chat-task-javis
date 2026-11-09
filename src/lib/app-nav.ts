@@ -56,6 +56,9 @@ import {
   Truck,
   CalendarClock,
   FileSignature,
+  FolderKanban,
+  ShoppingCart,
+  Send,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -104,6 +107,7 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
       { href: "/knowledge", label: "Knowledge Base", icon: BookOpen },
       { href: "/documents", label: "Documents", icon: FileSignature },
+      { href: "/marketing", label: "Marketing", icon: Send },
     ],
   },
   {
@@ -125,6 +129,8 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/inventory", label: "Inventory", icon: Package },
       { href: "/procurement", label: "Procurement", icon: Truck },
       { href: "/workforce", label: "Workforce", icon: CalendarClock },
+      { href: "/projects", label: "Projects", icon: FolderKanban },
+      { href: "/orders", label: "Orders & storefront", icon: ShoppingCart },
       { href: "/finance", label: "Finance", icon: Wallet },
       { href: "/reports", label: "Reports", icon: PieChart },
       { href: "/insights", label: "Insights", icon: TrendingUp },

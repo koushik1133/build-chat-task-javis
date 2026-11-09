@@ -781,6 +781,7 @@ function DetailDrawer({
       footer={
         <>
           <span className="text-xs text-muted-foreground">Created {fmtDate(rec.created_at)}</span>
+          {type.slug === "projects" && <ConvertToProjectButton rec={rec} />}
           {confirmDelete ? (
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Confirm delete">
               <span className="text-xs">Delete this record?</span>
@@ -953,5 +954,43 @@ function DetailDrawer({
         )}
       </section>
     </Drawer>
+  );
+}
+
+/** Records "projects" pack → first-class project (idempotent; shows "Open project" once converted). */
+function ConvertToProjectButton({ rec }: { rec: RecordItem }) {
+  const existing = typeof rec.data.project_id === "string" ? rec.data.project_id : null;
+  const [projectId, setProjectId] = useState<string | null>(existing);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => setProjectId(existing), [existing, rec.id]);
+  async function convert() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api<{ project: { id: string } }>("/api/projects/from-record", { method: "POST", body: JSON.stringify({ recordId: rec.id }) });
+      setProjectId(r.project.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not convert");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (projectId) {
+    return (
+      <Button asChild variant="outline" size="sm" touch>
+        <Link href={`/projects/${encodeURIComponent(projectId)}`}>
+          <ArrowRightLeft className="h-4 w-4" aria-hidden /> Open project
+        </Link>
+      </Button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Button variant="outline" size="sm" touch onClick={() => void convert()} disabled={busy}>
+        {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <ArrowRightLeft className="h-4 w-4" aria-hidden />} Convert to project
+      </Button>
+      {err && <span role="alert" className="text-xs text-destructive">{err}</span>}
+    </span>
   );
 }

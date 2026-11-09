@@ -60,6 +60,19 @@ export interface CapacityInputs {
    * so an unpublished future week does not read as zero capacity.
    */
   shifts?: CapacityShift[];
+  /**
+   * Optional: open project-task estimates as future demand. Each estimate is
+   * booked in the week of its due date (or spread evenly over the horizon when
+   * undated), per member when `member_id` matches.
+   */
+  taskEstimates?: CapacityTaskEstimate[];
+}
+
+export interface CapacityTaskEstimate {
+  id: string;
+  estimate_minutes: number;
+  due_at: string | null;
+  member_id: string | null;
 }
 
 export interface CapacityOptions {
@@ -198,6 +211,33 @@ export function capacityPlan(inputs: CapacityInputs, opts: CapacityOptions = {})
       if (m <= 0) continue;
       weeks[i].bookedMinutes += m;
       if (b.member_id && memberWeeks.has(b.member_id)) memberWeeks.get(b.member_id)![i].bookedMinutes += m;
+    }
+  }
+
+  // Project task estimates: future demand, booked in the due week (undated → spread over the horizon).
+  if (inputs.taskEstimates && inputs.taskEstimates.length > 0) {
+    const futureIdx = weeks.map((w, i) => (w.past ? -1 : i)).filter((i) => i >= 0);
+    for (const te of inputs.taskEstimates) {
+      const mins = Number(te.estimate_minutes) || 0;
+      if (mins <= 0) continue;
+      const add = (i: number, m: number) => {
+        weeks[i].bookedMinutes += m;
+        if (te.member_id && memberWeeks.has(te.member_id)) memberWeeks.get(te.member_id)![i].bookedMinutes += m;
+      };
+      if (te.due_at) {
+        const t = new Date(te.due_at).getTime();
+        if (Number.isNaN(t)) continue;
+        let i = idx(t);
+        if (i === null) {
+          if (t < first) i = futureIdx[0] ?? null; // already late: lands in the current week
+          else continue;
+        }
+        if (i !== null && !weeks[i].past) add(i, mins);
+        else if (i !== null && futureIdx[0] !== undefined) add(futureIdx[0], mins);
+      } else if (futureIdx.length > 0) {
+        const share = mins / futureIdx.length;
+        for (const i of futureIdx) add(i, share);
+      }
     }
   }
 

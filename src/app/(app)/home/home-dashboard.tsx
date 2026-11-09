@@ -46,6 +46,8 @@ const NEEDS: Record<NeedsYouItem["kind"], { label: string; cta: string; tone: To
   sla: { label: "Response due", cta: "Reply", tone: "danger" },
   invoice: { label: "Overdue invoice", cta: "Chase", tone: "warning" },
   deal: { label: "Stalled deal", cta: "Follow up", tone: "info" },
+  task: { label: "Overdue task", cta: "Update", tone: "warning" },
+  milestone: { label: "Milestone", cta: "Open project", tone: "accent" },
 };
 
 const AGENT_TONES: Record<string, Tone> = { done: "success", running: "info", queued: "neutral", awaiting_approval: "warning", failed: "danger", cancelled: "neutral" };

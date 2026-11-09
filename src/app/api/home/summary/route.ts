@@ -14,7 +14,7 @@ export async function GET() {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
-    const summary = await buildHomeSummary({ dataId: scope.dataId, can: (area, edit) => scope.can(area, edit) });
+    const summary = await buildHomeSummary({ dataId: scope.dataId, userId: scope.userId, can: (area, edit) => scope.can(area, edit) });
     return NextResponse.json(summary, { headers: { "Cache-Control": "private, no-store" } });
   } catch (err) {
     return dbUnavailableResponse(err, "home/summary");
