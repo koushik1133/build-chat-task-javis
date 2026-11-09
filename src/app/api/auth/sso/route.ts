@@ -1,3 +1,4 @@
+import { isSafeRelativePath } from "@/lib/safe-next";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
@@ -15,7 +16,7 @@ function ssoEnabled(): boolean {
 }
 
 function safeNext(raw?: string): string {
-  if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  if (raw && isSafeRelativePath(raw)) return raw;
   return "/home";
 }
 

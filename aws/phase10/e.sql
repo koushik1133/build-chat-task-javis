@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS recent_items (
   opened_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_recent_items_member_entity ON recent_items (member_user_id, kind, entity_id);
+-- Unique per org as well: page recents key on the href, which repeats across a member's orgs.
+DROP INDEX IF EXISTS idx_recent_items_member_entity;
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_recent_items_org_member_entity ON recent_items (user_id, member_user_id, kind, entity_id);
 
 CREATE INDEX ASYNC IF NOT EXISTS idx_recent_items_member_opened ON recent_items (user_id, member_user_id, opened_at);
 

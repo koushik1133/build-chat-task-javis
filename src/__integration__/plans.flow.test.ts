@@ -4,6 +4,7 @@
  * active + included credits once → renewal → cancel at period end → grace /
  * downgrade state machine → API v1 usage 401/403/200.
  */
+import { randomUUID } from "crypto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { api, call, cleanupDataIds, createTestOrg, describeDb, expectEvent, req, setScope, sql, sqlOne, type TestOrg } from "./setup";
 
@@ -183,5 +184,24 @@ describeDb("plans flow", () => {
     expect(ok.body.data.enforced).toBe(false);
     expect(ok.body.data.usage.seats).toBeGreaterThanOrEqual(1);
   });
-});
 
+  it("contacts usage ignores soft-deleted rows; client workspaces use the parent plan", async () => {
+    const { measure } = await import("@/lib/plans/usage");
+    const before = await measure(org.dataId, "contacts");
+    const [a, b] = [randomUUID(), randomUUID()];
+    await sql(`INSERT INTO crm_contacts (id, user_id, full_name) VALUES ($1, $3, 'live'), ($2, $3, 'gone')`, [a, b, org.dataId]);
+    await sql(`UPDATE crm_contacts SET deleted_at = NOW() WHERE id = $1`, [b]);
+    expect(await measure(org.dataId, "contacts")).toBe(before + 1);
+
+    const childId = randomUUID();
+    await sql(`INSERT INTO organizations (id, name, slug, owner_user_id, settings, parent_org_id, kind) VALUES ($1, 'child', $2, $1, NULL, $3, 'client')`, [childId, `c-${childId.slice(0, 8)}`, org.orgId]);
+    try {
+      await sql(`UPDATE subscriptions SET plan_key = 'scale', status = 'active', provider = 'simulated', current_period_end = NOW() + INTERVAL '10 days', trial_ends_at = NULL WHERE user_id = $1`, [org.dataId]);
+      const { getEntitlements } = await import("@/lib/plans/entitlements");
+      expect((await getEntitlements(childId)).plan).toBe("scale");
+      expect(await sql(`SELECT 1 FROM subscriptions WHERE user_id = $1`, [childId])).toHaveLength(0);
+    } finally {
+      await sql(`DELETE FROM organizations WHERE id = $1`, [childId]);
+    }
+  });
+});

@@ -43,4 +43,18 @@ describe("a11y scan", () => {
   it("ignores comparisons and generics", () => {
     expect(rules("const a = x <y && z > 1; const b: Array<string> = [];")).toEqual([]);
   });
+  it("requires htmlFor to point at the field's own id (not just any htmlFor in the file)", () => {
+    expect(rules('<label htmlFor="a">A</label><input id="b" />')).toEqual(["form-control-label"]);
+    expect(rules('<label htmlFor="a">A</label><input id="a" />')).toEqual([]);
+    expect(rules("<label htmlFor={fid}>A</label><input id={fid} />")).toEqual([]);
+  });
+  it("does not accept an empty aria-label / title as an accessible name", () => {
+    expect(rules('<button aria-label=""><X /></button>')).toEqual(["icon-only-button"]);
+    expect(rules('<input aria-label="" />')).toEqual(["form-control-label"]);
+    expect(rules('<button title="Close"><X /></button>')).toEqual([]);
+  });
+  it("flags a native select/textarea nested in a closed label and a hidden-by-aria focusable tabindex", () => {
+    expect(rules("<label>A</label><textarea value={v} />")).toEqual(["form-control-label"]);
+    expect(rules('<div tabIndex={0} aria-hidden="true">x</div>')).toEqual(["aria-hidden-focusable"]);
+  });
 });

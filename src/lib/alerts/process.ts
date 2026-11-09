@@ -18,13 +18,15 @@ import { ensureDefaultRules, ensurePlatformRules, parseChannels, type AlertRuleR
  * org's chat integrations / the email address stored on the rule.
  */
 
+let platformSeeded = false;
+
 export interface ProcessResult { evaluated: number; fired: number; resolved: number; notified: number }
 
 async function notify(rule: AlertRuleRow, ownerOrg: string | null, title: string, text: string): Promise<number> {
   let sent = 0;
   const dataId = rule.user_id ?? ownerOrg;
   if (!dataId) return 0;
-  for (const ch of parseChannels(rule.channel_ids)) {
+  for (const ch of new Set(parseChannels(rule.channel_ids).map((c) => (c.startsWith("email:") ? c.toLowerCase() : c)))) {
     try {
       if (ch.startsWith("email:")) {
         const to = ch.slice(6).trim();
@@ -52,7 +54,10 @@ export async function processAlerts(limit = 50, now: Date = new Date()): Promise
   // Lazy seeding: orgs that already show failures get their default rules without having to open the page.
   try {
     for (const id of await orgsWithoutRules(10)) await ensureDefaultRules(id);
-    if (operator) await ensurePlatformRules();
+    if (operator && !platformSeeded) {
+      await ensurePlatformRules();
+      platformSeeded = true; // deterministic ids + ON CONFLICT: once per process is enough
+    }
   } catch (err) {
     logger.warn("alert seeding failed", { err });
   }

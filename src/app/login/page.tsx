@@ -1,5 +1,6 @@
 "use client";
 
+import { isSafeRelativePath } from "@/lib/safe-next";
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Sparkles, Loader2, Mail, Eye, EyeOff, UserPlus, LogIn, ShieldCheck } from "lucide-react";
@@ -34,7 +35,7 @@ function safeNext(raw: string | null): string {
   if (!raw) return "/home";
   try {
     const decoded = decodeURIComponent(raw);
-    if (decoded.startsWith("/") && !decoded.startsWith("//") && !decoded.startsWith("/login")) {
+    if (isSafeRelativePath(decoded) && !decoded.startsWith("/login")) {
       return decoded;
     }
   } catch {

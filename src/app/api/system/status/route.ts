@@ -49,8 +49,8 @@ export async function GET() {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out")), DB_TIMEOUT_MS)),
     ]);
     database = { ok: true, latencyMs: Date.now() - started };
-  } catch (err) {
-    database = { ok: false, latencyMs: null, error: err instanceof Error ? err.message : "error" };
+  } catch {
+    database = { ok: false, latencyMs: null, error: "unreachable" };
   }
 
   const channels = channelStatus();

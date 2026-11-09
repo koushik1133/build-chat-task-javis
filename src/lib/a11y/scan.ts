@@ -73,6 +73,13 @@ function attrValue(attrs: string, attr: string): string | null {
   return m ? (m[1] ?? m[2] ?? m[3] ?? "") : null;
 }
 
+/** An accessible-name attribute that is present AND non-empty (`aria-label=""` names nothing). */
+function hasName(attrs: string, attr: string): boolean {
+  if (!hasAttr(attrs, attr)) return false;
+  const v = attrValue(attrs, attr);
+  return v === null || v.trim() !== "" && v.trim() !== '""' && v.trim() !== "''";
+}
+
 function lineOf(src: string, idx: number): number {
   let n = 1;
   for (let i = 0; i < idx; i++) if (src.charCodeAt(i) === 10) n++;
@@ -138,7 +145,7 @@ export function scanSource(src: string): A11yFinding[] {
     if (name === "img" && !spread && !hasAttr(attrs, "alt")) add("img-alt", "error", "<img> needs an alt attribute (use alt=\"\" when decorative).");
 
     if ((name === "button" || name === "Button") && !spread) {
-      const named = hasAttr(attrs, "aria-label") || hasAttr(attrs, "aria-labelledby") || hasAttr(attrs, "title");
+      const named = hasName(attrs, "aria-label") || hasName(attrs, "aria-labelledby") || hasName(attrs, "title");
       if (!named) {
         const kids = childrenOf(src, tag);
         if (kids !== null && isIconOnly(kids)) add("icon-only-button", "error", "Icon-only button needs aria-label, title or an sr-only label.");
@@ -150,8 +157,13 @@ export function scanSource(src: string): A11yFinding[] {
       const type = attrValue(attrs, "type");
       const visuallyHidden = type === "file" && (/(^|\s)hidden(\s|=|$)/.test(attrs) || /className\s*=\s*"[^"]*\bhidden\b/.test(attrs));
       const skip = (name === "input" && type !== null && NON_LABELLED_INPUT_TYPES.has(type)) || visuallyHidden;
+      // A quoted literal id must be the target of an htmlFor="<id>" in the file; a dynamic id keeps the file-level check.
+      const literalId = /(?:^|\s)id\s*=\s*"([^"]+)"/.exec(attrs)?.[1] ?? null;
+      const idLabelled = literalId !== null
+        ? new RegExp(`htmlFor\\s*=\\s*(?:"${literalId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"|\\{\\s*["'\`]${literalId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`]\\s*\\})`).test(src)
+        : hasAttr(attrs, "id") && hasHtmlFor;
       const labelled =
-        hasAttr(attrs, "aria-label") || hasAttr(attrs, "aria-labelledby") || hasAttr(attrs, "title") || (hasAttr(attrs, "id") && hasHtmlFor) || insideOpenLabel(src, tag.start);
+        hasName(attrs, "aria-label") || hasName(attrs, "aria-labelledby") || hasName(attrs, "title") || idLabelled || insideOpenLabel(src, tag.start);
       if (!skip && !labelled) add("form-control-label", "error", `<${name}> needs a label (id + htmlFor, aria-label, aria-labelledby or a wrapping <label>).`);
     }
 

@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { getPlanInvoiceByToken, isPlanInvoiceExpired, toPlanInvoiceDTO } from "@/lib/plans/checkout";
 import { handlePlanPaymentEvent } from "@/lib/plans/webhook";
-import { activeProviderId, getProvider } from "@/lib/payments";
+import { activeProviderId, getProvider, simulatedPaymentsAllowed } from "@/lib/payments";
 import { signSimulatedBody } from "@/lib/payments/simulated";
 import { paramToken, parseBody, publicRateLimit } from "@/lib/money/http";
 
@@ -30,7 +30,7 @@ const Body = z.object({ outcome: z.enum(["success", "failure"]) });
 export async function POST(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
   const limited = await publicRateLimit(req, "plan-sim", 20);
   if (limited) return limited;
-  if (activeProviderId() !== "simulated") return NextResponse.json({ error: "not_simulated" }, { status: 400 });
+  if (activeProviderId() !== "simulated" || !simulatedPaymentsAllowed()) return NextResponse.json({ error: "not_simulated" }, { status: 400 });
   try {
     const token = await paramToken(ctx);
     const inv = await getPlanInvoiceByToken(token);

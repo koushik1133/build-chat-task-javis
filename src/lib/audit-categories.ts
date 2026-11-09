@@ -14,10 +14,10 @@ export const AUDIT_CATEGORY_LABELS: Record<AuditCategory, string> = {
 };
 
 const ENTITIES: Record<Exclude<AuditCategory, "other">, string[]> = {
-  access: ["api_key", "scim_token", "sso_domain", "member_role", "member", "security_incident", "crew_link", "workspace", "client_workspace"],
-  data: ["snapshot", "dsr_request", "retention_policy", "privacy_notice", "import", "export", "attachment"],
+  access: ["api_key", "scim_token", "sso_domain", "member_role", "member", "security_incident", "crew_link", "workspace", "client_workspace", "organization"],
+  data: ["snapshot", "dsr_request", "retention_policy", "privacy_notice", "import", "export", "attachment", "crm_contacts", "crm_contact"],
   integrations: ["webhook", "chat_integration", "accounting_connection", "calendar_connection", "marketplace_install", "marketplace_listing"],
-  billing: ["refund", "order", "payroll", "invoice", "quote", "payment", "plan"],
+  billing: ["refund", "order", "payroll", "invoice", "quote", "payment", "plan", "subscription"],
   content: ["document", "document_template", "email_template", "campaign", "sequence", "audience", "site", "storefront", "project", "tasks", "saved_report", "report_schedule", "dashboard"],
   operations: ["alert_rule", "automation", "shift", "shift_swap", "leave_request", "leave_balance", "attendance", "staff_profile", "portal_message"],
 };

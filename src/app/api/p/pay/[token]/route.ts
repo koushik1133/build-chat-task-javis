@@ -5,7 +5,7 @@ import { queryOne } from "@/lib/dsql";
 import { resolveShareToken } from "@/lib/share-tokens";
 import { getInvoiceById } from "@/lib/money/invoices";
 import { toPublicInvoice } from "@/lib/money/public";
-import { activeProviderId } from "@/lib/payments";
+import { activeProviderId, simulatedPaymentsAllowed } from "@/lib/payments";
 import { signSimulatedBody } from "@/lib/payments/simulated";
 import { processWebhook } from "@/lib/payments/webhook";
 import { paramToken, parseBody, publicRateLimit } from "@/lib/money/http";
@@ -40,7 +40,7 @@ const Body = z.object({ outcome: z.enum(["success", "failure"]) });
 export async function POST(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
   const limited = await publicRateLimit(req, "pay-sim", 20);
   if (limited) return limited;
-  if (activeProviderId() !== "simulated") return NextResponse.json({ error: "not_simulated" }, { status: 400 });
+  if (activeProviderId() !== "simulated" || !simulatedPaymentsAllowed()) return NextResponse.json({ error: "not_simulated" }, { status: 400 });
   try {
     const token = await paramToken(ctx);
     const share = await resolveShareToken("pay", token);

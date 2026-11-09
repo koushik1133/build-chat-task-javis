@@ -93,7 +93,7 @@ const money = (minor: unknown, cur: unknown, locale: string) => formatMoney(Numb
 
 export const KIND_DEFS: KindDef[] = [
   make<{ id: string; full_name: string; email: string | null; company: string | null; updated_at: string }>({
-    kind: "contact", area: "crm", table: "crm_contacts", icon: "users",
+    kind: "contact", area: "crm", table: "crm_contacts", icon: "users", where: "deleted_at IS NULL",
     select: "id, full_name, email, company, updated_at", cols: ["full_name", "email", "company"], order: "updated_at DESC",
     map: (r) => ({ id: r.id, title: r.full_name, subtitle: join(r.company, r.email), href: `/crm?contact=${enc(r.id)}`, at: r.updated_at }),
   }),
@@ -108,7 +108,7 @@ export const KIND_DEFS: KindDef[] = [
     },
   }),
   make<{ id: string; title: string; done: boolean; created_at: string }>({
-    kind: "task", area: "tasks", table: "tasks", icon: "list-todo",
+    kind: "task", area: "tasks", table: "tasks", icon: "list-todo", where: "deleted_at IS NULL",
     select: "id::text AS id, title, done, created_at", cols: ["title"], order: "done ASC, created_at DESC",
     map: (r) => ({ id: s(r.id), title: r.title, subtitle: r.done ? "Done" : "Open", href: `/tasks?task=${enc(s(r.id))}`, at: r.created_at }),
   }),

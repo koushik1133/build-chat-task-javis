@@ -1,3 +1,4 @@
+import { isSafeRelativePath } from "@/lib/safe-next";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -16,7 +17,7 @@ function safeNext(raw: string | null): string {
   if (!raw) return "/home";
   try {
     const decoded = decodeURIComponent(raw);
-    if (decoded.startsWith("/") && !decoded.startsWith("//")) return decoded;
+    if (isSafeRelativePath(decoded)) return decoded;
   } catch {
     // ignore
   }

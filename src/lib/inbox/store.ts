@@ -38,7 +38,9 @@ export async function listInbox(dataId: string, member: string, f: InboxFilters 
   const values: unknown[] = [dataId];
   const where = [`user_id = $1`, `channel = 'in_app'`, `status IN ('sent','read')`, `(snoozed_until IS NULL OR snoozed_until <= NOW())`, memberClause(member, values)];
   if (f.unread) where.push(`read_at IS NULL`);
-  if (f.category) {
+  if (f.category === "general") {
+    where.push(`(data IS NULL OR data NOT LIKE '%"category":"%')`); // uncategorised rows
+  } else if (f.category) {
     values.push(`%"category":"${escapeLike(f.category.replace(/[^a-z_]/gi, ""))}"%`);
     where.push(`data LIKE $${values.length}`);
   }
@@ -80,7 +82,8 @@ export async function markRead(dataId: string, member: string, ids: string[] | "
     const clause = memberClause(member, values);
     const rows = await query<{ id: string }>(
       `UPDATE notification_outbox SET status = 'read', read_at = NOW()
-        WHERE user_id = $1 AND channel = 'in_app' AND read_at IS NULL AND ${clause} RETURNING id`,
+        WHERE user_id = $1 AND channel = 'in_app' AND read_at IS NULL
+          AND (snoozed_until IS NULL OR snoozed_until <= NOW()) AND ${clause} RETURNING id`,
       values
     );
     return rows.length;
@@ -112,7 +115,7 @@ export async function assignedDigest(dataId: string, member: string): Promise<{ 
   try {
     const row = await queryOne<{ open: string; overdue: string }>(
       `SELECT COUNT(*)::text AS open, COUNT(*) FILTER (WHERE due_at IS NOT NULL AND due_at < NOW())::text AS overdue
-         FROM tasks WHERE user_id = $1 AND assignee_id = $2 AND done = false`,
+         FROM tasks WHERE user_id = $1 AND assignee_id = $2 AND done = false AND deleted_at IS NULL`,
       [dataId, member]
     );
     return { open_tasks: parseInt(row?.open ?? "0", 10), overdue_tasks: parseInt(row?.overdue ?? "0", 10) };

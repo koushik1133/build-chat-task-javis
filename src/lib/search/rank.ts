@@ -46,7 +46,8 @@ export function parseSearchQuery(raw: string): ParsedQuery {
     if (m[1].toLowerCase() === "kind") kinds.push(...values.map(normaliseKind));
     else areas.push(...values.map((v) => v.toLowerCase()));
   }
-  return { text: rest.join(" "), kinds, areas };
+  // Quotes only group words for the user; the LIKE patterns match the words themselves.
+  return { text: rest.join(" ").replace(/"/g, "").trim(), kinds, areas };
 }
 
 /** Rank score: 4 exact, 3 prefix, 2 word-start, 1 substring, 0.5 typo-tolerant prefix, 0 none. */

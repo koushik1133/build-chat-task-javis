@@ -62,6 +62,7 @@
 
     { "name": "PAYMENTS_PROVIDER", "group": "flag", "enum": ["simulated", "stripe", "razorpay"], "default": "simulated", "description": "Active payments provider." },
     { "name": "PLANS_ENFORCED", "group": "flag", "enum": ["true", "false"], "default": "false", "description": "true = enforce KernelHub plan limits and feature gates (HTTP 402 plan_limit). false = everything allowed; usage is still measured and shown." },
+    { "name": "PAYMENTS_ALLOW_SIMULATED", "group": "flag", "enum": ["true", "false"], "default": "false", "description": "Production only: allow the simulated payment provider (self-service fake payments). Leave false unless this is a demo deployment; anyone who owns a workspace can mark their own plan and invoices as paid." },
     { "name": "PAYMENTS_SIMULATED_SECRET", "group": "provider", "secret": true, "description": "Signs simulated-provider webhook calls." },
     { "name": "STRIPE_SECRET_KEY", "group": "provider", "provider": "stripe", "secret": true, "description": "Stripe secret key." },
     { "name": "STRIPE_WEBHOOK_SECRET", "group": "provider", "provider": "stripe", "secret": true, "description": "Stripe webhook signing secret." },

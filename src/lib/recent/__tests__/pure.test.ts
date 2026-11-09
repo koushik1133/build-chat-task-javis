@@ -21,3 +21,12 @@ describe("recent pure helpers", () => {
     expect(safeHref(5)).toBeNull();
   });
 });
+
+describe("safeHref control characters", () => {
+  it("rejects tab/newline tricks that browsers normalise into //host", () => {
+    expect(safeHref("/\t/evil.com")).toBeNull();
+    expect(safeHref("/\n/evil.com")).toBeNull();
+    expect(safeHref("/\r/evil.com")).toBeNull();
+    expect(safeHref("/ok?q=1")).toBe("/ok?q=1");
+  });
+});

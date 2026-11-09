@@ -50,3 +50,11 @@ describe("data helpers", () => {
     expect(linkOf({ url: "https://x" })).toBeNull();
   });
 });
+
+describe("linkOf hardening", () => {
+  it("rejects backslash and control-char open redirects", () => {
+    expect(linkOf({ href: "/\\evil.com" })).toBeNull();
+    expect(linkOf({ href: "/\t/evil.com" })).toBeNull();
+    expect(linkOf({ href: "/tasks?task=1" })).toBe("/tasks?task=1");
+  });
+});

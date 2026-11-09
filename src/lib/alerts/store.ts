@@ -74,6 +74,21 @@ export async function ensurePlatformRules(): Promise<void> {
   await seed(null, PLATFORM_DEFAULT_RULES);
 }
 
+/**
+ * Alert emails may only go to the caller or an active member of the org; anything else would make
+ * the alert pipeline an open mail relay for arbitrary addresses.
+ */
+export async function isAllowedAlertEmail(scope: { orgId: string; email: string | null }, address: string): Promise<boolean> {
+  const a = address.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a) || a.length > 254) return false;
+  if (scope.email && scope.email.trim().toLowerCase() === a) return true;
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM memberships WHERE org_id = $1 AND status = 'active' AND LOWER(invited_email) = $2 LIMIT 1`,
+    [scope.orgId, a]
+  ).catch(() => null);
+  return Boolean(row);
+}
+
 export async function listRules(dataId: string | null): Promise<AlertRuleView[]> {
   const rows = dataId === null
     ? await query<AlertRuleRow>(`SELECT * FROM alert_rules WHERE user_id IS NULL ORDER BY created_at, key`)

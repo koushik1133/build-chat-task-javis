@@ -13,6 +13,10 @@ describe("parseSearchQuery", () => {
     expect(normaliseKind("bills")).toBe("bill");
     expect(normaliseKind("companies")).toBe("company");
   });
+  it("drops quote characters so quoted phrases still match", () => {
+    expect(parseSearchQuery('"john smith" kind:contacts').text).toBe("john smith");
+    expect(parseSearchQuery('kind:"orders"').kinds).toEqual(["order"]);
+  });
   it("handles plain text", () => {
     expect(parseSearchQuery("  hello  world ")).toEqual({ text: "hello world", kinds: [], areas: [] });
   });

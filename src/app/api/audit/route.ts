@@ -18,9 +18,14 @@ export async function GET(req: Request) {
     const catRaw = url.searchParams.get("category");
     if (catRaw && !isAuditCategory(catRaw)) return NextResponse.json({ error: "invalid category" }, { status: 400 });
     const category = catRaw && isAuditCategory(catRaw) ? catRaw : null;
+    // `from` is inclusive; `to` is exclusive in SQL, so a date-only `to` (YYYY-MM-DD, UTC) is bumped
+    // by a day to include that whole day. Full timestamps are used as given.
     const dateOrNull = (k: string) => {
       const v = url.searchParams.get(k);
-      return v && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : null;
+      if (!v || !Number.isFinite(Date.parse(v))) return null;
+      const d = new Date(v);
+      if (k === "to" && /^\d{4}-\d{2}-\d{2}$/.test(v)) d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString();
     };
     const from = dateOrNull("from");
     const to = dateOrNull("to");

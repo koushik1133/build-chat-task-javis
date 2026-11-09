@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query } from "@/lib/dsql";
 import { recordAudit } from "@/lib/audit";
-import { getRule, toView } from "@/lib/alerts/store";
+import { getRule, isAllowedAlertEmail, toView } from "@/lib/alerts/store";
 import { getIntegrationRow } from "@/lib/chatops/subscriptions";
 
 export const runtime = "nodejs";
@@ -34,8 +34,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     channels = [];
     for (const c of b.channel_ids) {
       if (c.startsWith("email:")) {
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.slice(6))) return NextResponse.json({ error: "Invalid email channel" }, { status: 400 });
-        channels.push(c);
+        if (!(await isAllowedAlertEmail(scope, c.slice(6)))) return NextResponse.json({ error: "Alert emails can only go to you or an active member of this workspace." }, { status: 400 });
+        channels.push(`email:${c.slice(6).trim().toLowerCase()}`);
       } else if (await getIntegrationRow(scope.dataId, c)) channels.push(c);
       else return NextResponse.json({ error: "Unknown chat integration" }, { status: 400 });
     }

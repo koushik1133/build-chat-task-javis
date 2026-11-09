@@ -7,7 +7,8 @@ export const FAVORITES_CAP = 50;
 export function safeHref(href: unknown): string | null {
   if (typeof href !== "string") return null;
   const h = href.trim();
-  if (!h.startsWith("/") || h.startsWith("//") || h.includes("\\") || h.length > 500) return null;
+  // Browsers drop tabs/newlines inside URLs ("/\t/evil.com" becomes "//evil.com"), so control chars are rejected outright.
+  if (!h.startsWith("/") || h.startsWith("//") || h.includes("\\") || /[\u0000-\u001f\u007f]/.test(h) || h.length > 500) return null;
   return h;
 }
 

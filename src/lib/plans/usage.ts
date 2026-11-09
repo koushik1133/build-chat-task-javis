@@ -18,7 +18,7 @@ async function count(sql: string, params: unknown[]): Promise<number> {
 export async function measure(dataId: string, metric: Metric, now = new Date()): Promise<number> {
   switch (metric) {
     case "contacts":
-      return count(`SELECT COUNT(*) AS c FROM crm_contacts WHERE user_id = $1`, [dataId]);
+      return count(`SELECT COUNT(*) AS c FROM crm_contacts WHERE user_id = $1 AND deleted_at IS NULL`, [dataId]);
     case "seats":
       return count(
         `SELECT COUNT(*) AS c FROM memberships m JOIN organizations o ON o.id = m.org_id

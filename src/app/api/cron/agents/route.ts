@@ -33,6 +33,7 @@ import { processAlerts } from "@/lib/alerts/process";
 import { grantMonthlyCredits, renewDue } from "@/lib/plans/cron";
 import { withRequestContext } from "@/lib/log/context";
 import { logger } from "@/lib/log/logger";
+import { recordCronMetrics } from "@/lib/metrics/registry";
 import type { JobRow } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -219,6 +220,7 @@ async function handleTick(req: Request) {
 
   counts.ms = Date.now() - tickStart;
   await recordCronTick(counts).catch(() => undefined);
+  try { recordCronMetrics(counts.ms, counts); } catch { /* metrics are best-effort */ }
   return NextResponse.json({ ok: true, worker: workerId, ...counts, server_time: new Date().toISOString() });
 }
 

@@ -61,5 +61,5 @@ export function categoryOf(data: Record<string, unknown> | null): string {
 /** Same-origin link carried in notification data (`href`/`url`), else null. */
 export function linkOf(data: Record<string, unknown> | null): string | null {
   const v = data?.href ?? data?.url ?? data?.link;
-  return typeof v === "string" && v.startsWith("/") && !v.startsWith("//") ? v : null;
+  return typeof v === "string" && v.startsWith("/") && !v.startsWith("//") && !v.includes("\\") && !/[\u0000-\u001f\u007f]/.test(v) ? v : null;
 }

@@ -22,7 +22,7 @@ export interface LogFields {
 export function configuredLevel(env: Record<string, string | undefined> = process.env): number {
   const raw = (env.LOG_LEVEL ?? "").trim().toLowerCase();
   if (raw === "silent" || raw === "off") return Infinity;
-  if (raw in ORDER) return ORDER[raw as LogLevel];
+  if (Object.prototype.hasOwnProperty.call(ORDER, raw)) return ORDER[raw as LogLevel];
   return env.NODE_ENV === "test" ? ORDER.warn : ORDER.info;
 }
 
@@ -30,7 +30,11 @@ const SENSITIVE_KEY = /pass(word)?|secret|token|authorization|cookie|api[_-]?key
 
 function scrub(value: unknown, depth = 0): unknown {
   if (typeof value === "string") return redactForLog(value.length > 1000 ? `${value.slice(0, 1000)}…` : value);
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "function" || typeof value === "symbol") return `[${typeof value}]`;
   if (value === null || typeof value !== "object") return value;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  if (value instanceof Error) return errString(value);
   if (depth >= 3) return "[object]";
   if (Array.isArray(value)) return value.slice(0, 20).map((v) => scrub(v, depth + 1));
   const out: Record<string, unknown> = {};
@@ -71,7 +75,12 @@ export function formatRecord(rec: Record<string, unknown>, pretty: boolean): str
 
 function emit(level: LogLevel, msg: string, fields?: LogFields): void {
   if (ORDER[level] < configuredLevel()) return;
-  const line = formatRecord(buildRecord(level, msg, fields), process.env.NODE_ENV !== "production" && process.env.LOG_FORMAT !== "json");
+  let line: string;
+  try {
+    line = formatRecord(buildRecord(level, msg, fields), process.env.NODE_ENV !== "production" && process.env.LOG_FORMAT !== "json");
+  } catch {
+    return; // logging must never throw into the request path
+  }
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
   else console.log(line);

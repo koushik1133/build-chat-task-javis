@@ -17,6 +17,20 @@ describe("logger", () => {
     expect(JSON.parse(formatRecord(rec, false)).level).toBe("error");
   });
 
+  it("serialises BigInt, Date, Error and circular values without throwing", () => {
+    const circ: Record<string, unknown> = { a: 1 };
+    circ.self = circ;
+    const rec = buildRecord("info", "x", { big: BigInt(5), when: new Date("2026-01-02T03:04:05Z"), nested: { e: new Error("bad") }, circ, fn: () => 1 });
+    expect(() => JSON.stringify(rec)).not.toThrow();
+    expect(rec.big).toBe("5");
+    expect(rec.when).toBe("2026-01-02T03:04:05.000Z");
+    expect(String((rec.nested as { e: unknown }).e)).toContain("Error: bad");
+  });
+
+  it("ignores prototype keys as LOG_LEVEL", () => {
+    expect(configuredLevel({ LOG_LEVEL: "toString", NODE_ENV: "production" })).toBe(configuredLevel({ NODE_ENV: "production" }));
+  });
+
   it("honours LOG_LEVEL", () => {
     expect(configuredLevel({ LOG_LEVEL: "debug" })).toBeLessThan(configuredLevel({ LOG_LEVEL: "error" }));
     expect(configuredLevel({ LOG_LEVEL: "silent" })).toBe(Infinity);

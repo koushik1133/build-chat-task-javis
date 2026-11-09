@@ -26,7 +26,8 @@ export interface PlanPaymentResult {
 async function findInvoice(providerId: string, evt: PaymentEvent): Promise<PlanInvoiceRow | null> {
   if (evt.invoiceId && evt.invoiceId.startsWith(PLAN_REF_PREFIX)) {
     const row = await queryOne<PlanInvoiceRow>(`SELECT * FROM plan_invoices WHERE id = $1`, [evt.invoiceId.slice(PLAN_REF_PREFIX.length)]);
-    if (row) return row;
+    // An event from provider X can only settle invoices that were opened with provider X.
+    if (row) return row.provider === providerId ? row : null;
   }
   if (evt.providerRef) {
     return queryOne<PlanInvoiceRow>(`SELECT * FROM plan_invoices WHERE provider = $1 AND provider_ref = $2 ORDER BY created_at DESC LIMIT 1`, [providerId, evt.providerRef]);
@@ -46,10 +47,22 @@ export async function grantCreditsFor(sub: SubscriptionRow, now = new Date()): P
   return { granted: posted.duplicate ? 0 : credits, duplicate: posted.duplicate };
 }
 
+/** A prorated invoice is only valid for the exact period it was priced against, on an active paid subscription. */
+export function invoiceMatchesPeriod(inv: Pick<PlanInvoiceRow, "period_end">, sub: Pick<SubscriptionRow, "status" | "current_period_end">): boolean {
+  if (sub.status !== "active" && sub.status !== "past_due") return false;
+  if (!inv.period_end || !sub.current_period_end) return false;
+  return Math.abs(new Date(inv.period_end).getTime() - new Date(sub.current_period_end).getTime()) < 1000;
+}
+
 /** Apply a paid invoice to the subscription. Called once, by whoever flipped the invoice to paid. */
 export async function applyPaidInvoice(inv: PlanInvoiceRow, providerId: string, now = new Date()): Promise<SubscriptionRow | null> {
   const before = await findSubscription(inv.user_id);
   if (!before) return null;
+  if ((inv.kind === "upgrade" || inv.kind === "seats") && !invoiceMatchesPeriod(inv, before)) {
+    // Prorated for a period that has since ended (or a subscription that is no longer paid): never apply.
+    console.warn(`[plans] stale ${inv.kind} invoice ${inv.id} paid outside its billing period; not applied`);
+    return null;
+  }
   const interval: BillingInterval = isBillingInterval(inv.billing_interval) ? inv.billing_interval : "month";
   const planKey = isPlanKey(inv.plan_key) ? inv.plan_key : before.plan_key;
   let after: SubscriptionRow | null = null;

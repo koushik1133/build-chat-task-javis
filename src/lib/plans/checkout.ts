@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
-import { getProvider } from "@/lib/payments";
+import { getProvider, simulatedPaymentsAllowed } from "@/lib/payments";
 import { appOrigin, hashToken } from "@/lib/share-tokens";
 import { getOrgSettings } from "@/lib/org-settings";
 import {
@@ -117,6 +117,9 @@ async function createInvoiceAndCheckout(
   inv: { kind: PlanInvoiceKind; planKey: PlanKey; interval: BillingInterval; seats: number; amountMinor: number; currency: string; description: string; periodStart: Date | null; periodEnd: Date | null }
 ): Promise<Extract<CheckoutOutcome, { scheduled: false }>> {
   const provider = getProvider();
+  if (provider.id === "simulated" && !simulatedPaymentsAllowed()) {
+    throw new PlanError("payments_unavailable", "Online payments are not configured for this deployment.", 503);
+  }
   const id = randomUUID();
   const token = randomBytes(24).toString("base64url");
   const origin = appOrigin();
@@ -130,6 +133,8 @@ async function createInvoiceAndCheckout(
     cancelUrl: `${returnUrl}?outcome=cancel`,
     token,
   });
+  // One live checkout per org: a stale cheap proration invoice must not be payable after the period moved on.
+  await query(`UPDATE plan_invoices SET status = 'void' WHERE user_id = $1 AND status = 'open'`, [dataId]);
   await query(
     `INSERT INTO plan_invoices (id, user_id, subscription_id, kind, plan_key, billing_interval, seats, period_start, period_end, amount_minor, currency, status, provider, provider_ref, token_hash)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open',$12,$13,$14)`,

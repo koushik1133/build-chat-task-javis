@@ -23,8 +23,22 @@ async function loadOverride(dataId: string) {
   return parseOverride(row?.entitlements);
 }
 
+/**
+ * Client workspaces (agency children) have a synthetic data id and no plan of their own: they are
+ * covered by the parent workspace's subscription. Without this every child would start its own
+ * trial and fall to Free (250 contacts, 2 seats) two weeks later.
+ */
+async function billingDataId(dataId: string): Promise<string> {
+  const row = await queryOne<{ parent_owner: string | null }>(
+    `SELECT p.owner_user_id AS parent_owner FROM organizations c JOIN organizations p ON p.id = c.parent_org_id WHERE c.owner_user_id = $1 LIMIT 1`,
+    [dataId]
+  ).catch(() => null);
+  return row?.parent_owner || dataId;
+}
+
 async function loadEntitlements(dataId: string): Promise<ResolvedEntitlements> {
-  const [sub, override] = await Promise.all([getSubscription(dataId), loadOverride(dataId)]);
+  const billing = await billingDataId(dataId);
+  const [sub, override] = await Promise.all([getSubscription(billing), loadOverride(billing)]);
   return resolveEntitlements(sub, override);
 }
 

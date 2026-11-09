@@ -1,3 +1,4 @@
+import { isSafeRelativePath } from "@/lib/safe-next";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { publicRedirect } from "@/lib/supabase/callback";
@@ -97,7 +98,7 @@ async function updateSessionInner(request: NextRequest) {
     if (user && path === "/login") {
       const next = request.nextUrl.searchParams.get("next");
       const dest =
-        next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login")
+        next && isSafeRelativePath(next) && !next.startsWith("/login")
           ? next
           : "/home";
       return NextResponse.redirect(publicRedirect(dest, request));

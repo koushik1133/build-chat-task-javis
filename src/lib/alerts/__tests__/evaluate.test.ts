@@ -60,3 +60,11 @@ describe("audit categories + CSV", () => {
     expect(row).toContain(",'+cmd,");
   });
 });
+
+describe("audit category coverage for audited entities", () => {
+  it("maps plan/subscription, organization and crm_contacts entities", () => {
+    expect(categoryOf("subscription")).toBe("billing");
+    expect(categoryOf("organization")).toBe("access");
+    expect(categoryOf("crm_contacts")).toBe("data");
+  });
+});

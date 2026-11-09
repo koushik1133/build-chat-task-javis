@@ -209,7 +209,8 @@ export async function markInAppRead(dataId: string, ids: string[] | "all"): Prom
   if (ids === "all") {
     await query(
       `UPDATE notification_outbox SET status = 'read', read_at = NOW()
-        WHERE user_id = $1 AND channel = 'in_app' AND read_at IS NULL`,
+        WHERE user_id = $1 AND channel = 'in_app' AND read_at IS NULL
+          AND (snoozed_until IS NULL OR snoozed_until <= NOW())`,
       [dataId]
     );
     return;
