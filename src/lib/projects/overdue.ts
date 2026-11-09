@@ -25,7 +25,7 @@ export async function markOverdueTasks(limit = 200, now = new Date()): Promise<O
   for (const row of due) {
     const flipped = await query<{ id: string; title: string; project_id: string | null; assignee_id: string | null; due_at: string | Date; priority: string | null }>(
       `UPDATE tasks SET overdue_notified_at = $2
-        WHERE id::text = $1 AND done = FALSE AND overdue_notified_at IS NULL
+        WHERE id::text = $1 AND done = FALSE AND deleted_at IS NULL AND due_at IS NOT NULL AND due_at < $2 AND overdue_notified_at IS NULL
         RETURNING id::text AS id, title, project_id, assignee_id, due_at, priority`,
       [row.id, nowIso]
     );

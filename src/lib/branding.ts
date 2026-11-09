@@ -226,6 +226,9 @@ export async function resolvePublicBranding(pathname: string | null | undefined)
       return org ? getBranding(org.owner_user_id) : DEFAULT_BRANDING;
     }
     if (parts[0] === "shop" && parts[1]) {
+      // A storefront may carry its own slug (storefronts.slug); fall back to the org slug like resolveStorefrontBySlug.
+      const sf = await queryOne<{ user_id: string }>(`SELECT user_id FROM storefronts WHERE slug = $1`, [parts[1]]).catch(() => null);
+      if (sf) return getBranding(sf.user_id);
       const org = await queryOne<{ owner_user_id: string }>(`SELECT owner_user_id FROM organizations WHERE slug = $1`, [parts[1]]);
       return org ? getBranding(org.owner_user_id) : DEFAULT_BRANDING;
     }

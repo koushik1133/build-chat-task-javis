@@ -22,6 +22,22 @@ const engineDef: AutomationDefinition = {
 };
 
 describe("v2 automation listings", () => {
+  it("scrubs arrays inside tool inputs: endpoint lists and unportable strings go, templates stay", () => {
+    const def: AutomationDefinition = {
+      ...engineDef,
+      steps: [{ id: "t1", kind: "tool", config: { tool: "tasks.create", input: { urls: ["https://hooks.slack.com/services/T/B/X"], recipients: ["ceo@example.com", "Hello {{name}}"], nested: [{ token: "sk-live-abcdefghijklmnopqrstuvwxyz0123456789", text: "ok" }], counts: [1, 2] } } }],
+    };
+    const { definition, removed } = scrubAutomationV2(def);
+    const json = JSON.stringify(definition);
+    expect(json).not.toContain("hooks.slack.com");
+    expect(json).not.toContain("ceo@example.com");
+    expect(json).toContain("Hello {{name}}");
+    expect(json).toContain('"counts":[1,2]');
+    expect(removed).toContain("steps.t1.input.urls");
+    expect(removed).toContain("steps.t1.input.recipients[0]");
+    expect(removed).toContain("steps.t1.input.nested[0].token");
+  });
+
   it("exports the v2 definition scrubbed of ids, secrets, recipients and webhook URLs via the allow-list", () => {
     const { definition, removed } = scrubAutomationV2(engineDef);
     expect(definition.schema).toBe(2);

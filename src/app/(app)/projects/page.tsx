@@ -17,7 +17,7 @@ import { useDebouncedValue } from "@/components/ui/hooks";
 import { fmtMoney } from "@/lib/money/format";
 import { PROJECT_STATUSES, PROJECT_STATUS_LABEL, type ProjectBudget, type ProjectDTO, type ProjectProgress, type ProjectStatus } from "@/lib/projects/pure";
 import { cn } from "@/lib/utils";
-import { PROJECT_TONE, fmtDay, jsonFetch, loadMemberOptions, memberLabel, type MemberOption } from "@/components/projects/shared";
+import { PROJECT_TONE, cap, fmtDay, jsonFetch, loadMemberOptions, memberLabel, type MemberOption } from "@/components/projects/shared";
 
 type Row = ProjectDTO & { progress: ProjectProgress | null; budget: ProjectBudget | null };
 type Filter = ProjectStatus | "all" | "open";
@@ -105,7 +105,7 @@ function ProjectsInner() {
               onClick={() => setFilter(f)}
               aria-pressed={filter === f}
               className={cn(
-                "min-h-9 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "min-h-11 touch-manipulation rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9",
                 filter === f ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-secondary/60"
               )}
             >
@@ -168,18 +168,20 @@ function ProjectCard({ p, members }: { p: Row; members: MemberOption[] }) {
   return (
     <Link
       href={`/projects/${encodeURIComponent(p.id)}`}
-      className="block h-full rounded-xl border border-border bg-card p-4 transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="block h-full rounded-xl border border-border bg-card p-4 transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
       style={p.color ? { borderLeftColor: p.color, borderLeftWidth: 4 } : undefined}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate font-semibold">{p.name}</p>
+          <p className="break-words font-semibold leading-snug">{p.name}</p>
           <p className="truncate text-xs text-muted-foreground">
             {p.code ?? "—"}
             {p.contact_name ? ` · ${p.contact_name}` : ""}
           </p>
         </div>
-        <Pill tone={PROJECT_TONE[p.status]}>{PROJECT_STATUS_LABEL[p.status]}</Pill>
+        <Pill tone={PROJECT_TONE[p.status]} className="shrink-0">
+          {PROJECT_STATUS_LABEL[p.status]}
+        </Pill>
       </div>
       <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
         <span>
@@ -189,7 +191,7 @@ function ProjectCard({ p, members }: { p: Row; members: MemberOption[] }) {
         <span className="tabular-nums">{pct}%</span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Tasks done">
-        <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
+        <div className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${pct}%` }} />
       </div>
       <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
         <div>
@@ -301,7 +303,10 @@ function NewProjectDialog({ members, onClose, onCreated }: { members: MemberOpti
               type="button"
               onClick={() => setMode(m)}
               aria-pressed={mode === m}
-              className={cn("min-h-9 rounded-md border px-3 text-sm font-medium", mode === m ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-secondary/60")}
+              className={cn(
+                "min-h-11 touch-manipulation rounded-md border px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9",
+                mode === m ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-secondary/60"
+              )}
             >
               {m === "scratch" ? "From scratch" : "From a quote"}
             </button>
@@ -314,7 +319,7 @@ function NewProjectDialog({ members, onClose, onCreated }: { members: MemberOpti
                 <option value="">{quotes === null ? "Loading quotes…" : quotes.length === 0 ? "No quotes yet" : "Choose a quote"}</option>
                 {(quotes ?? []).map((q) => (
                   <option key={q.id} value={q.id}>
-                    {q.number} · {q.contact_name ?? "No contact"} · {fmtMoney(q.total_minor, q.currency)} · {q.status}
+                    {q.number} · {q.contact_name ?? "No contact"} · {fmtMoney(q.total_minor, q.currency)} · {cap(q.status)}
                   </option>
                 ))}
               </Select>
@@ -379,8 +384,8 @@ function NewProjectDialog({ members, onClose, onCreated }: { members: MemberOpti
             <Field label="Description">
               <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} maxLength={20_000} />
             </Field>
-            <Field label="Colour">
-              <Input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-10 w-20 p-1" />
+            <Field label="Colour" hint="Shown on the project card and in lists.">
+              <Input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-11 w-20 p-1 sm:h-10" />
             </Field>
           </>
         )}

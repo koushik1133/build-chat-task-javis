@@ -7,7 +7,7 @@ import { resolveDocumentTotals } from "@/lib/money/tax-rates";
 import type { LineItem } from "@/lib/money/items";
 import { isInsufficientStock, reserveForOrder, releaseForOrder } from "@/lib/inventory/stock";
 import { recordConsent, type ConsentEvidence } from "@/lib/privacy/consent";
-import { cartToLineItems, markCartOrdered, setCartEmail, type CartRow } from "./cart";
+import { cartToLineItems, claimCartForOrder, releaseCartClaim, setCartEmail, type CartRow } from "./cart";
 import { visibleProductsByIds } from "./catalog";
 import { deleteUnfinishedOrder, getOrder, insertOrder, issueOrderLink, linkOrderInvoice, type OrderDTO } from "./orders";
 import { combineOrderTotals, parseCartItems, shippingCharge, ShippingAddressSchema } from "./pure";
@@ -31,7 +31,7 @@ export const CheckoutSchema = z
 export type CheckoutInput = z.infer<typeof CheckoutSchema>;
 
 export class CheckoutError extends Error {
-  constructor(public readonly code: "empty_cart" | "unavailable" | "insufficient_stock" | "shipping_required" | "pickup_disabled", message: string, public readonly detail: Record<string, unknown> = {}) {
+  constructor(public readonly code: "empty_cart" | "unavailable" | "insufficient_stock" | "shipping_required" | "pickup_disabled" | "already_ordered", message: string, public readonly detail: Record<string, unknown> = {}) {
     super(message);
     this.name = "CheckoutError";
   }
@@ -109,9 +109,16 @@ export async function createOrderFromCart(pub: PublicStorefront, cart: CartRow, 
     notes: input.notes ?? null,
   });
 
+  // Claim the cart before anything else moves: a second concurrent checkout with the same cookie sees the claim and stops.
+  if (!(await claimCartForOrder(cart.id, order.id))) {
+    await deleteUnfinishedOrder(pub.dataId, order.id).catch(() => undefined);
+    throw new CheckoutError("already_ordered", "This cart has already been checked out");
+  }
+
   try {
     await reserveForOrder(pub.dataId, order.id, goodsLines);
   } catch (err) {
+    await releaseCartClaim(cart.id, order.id).catch(() => undefined);
     await deleteUnfinishedOrder(pub.dataId, order.id).catch(() => undefined);
     if (isInsufficientStock(err)) throw new CheckoutError("insufficient_stock", err.message, { product_id: err.productId, available: err.available });
     throw err;
@@ -125,6 +132,7 @@ export async function createOrderFromCart(pub: PublicStorefront, cart: CartRow, 
     invoiceId = inv.id;
   } catch (err) {
     await releaseForOrder(pub.dataId, order.id, "Rolled back: invoice failed").catch(() => undefined);
+    await releaseCartClaim(cart.id, order.id).catch(() => undefined);
     await deleteUnfinishedOrder(pub.dataId, order.id).catch(() => undefined);
     throw err;
   }
@@ -137,7 +145,6 @@ export async function createOrderFromCart(pub: PublicStorefront, cart: CartRow, 
     void recordConsent(pub.dataId, { kind: "contact", id: contact.id }, "marketing_email", consent ? "granted" : "withdrawn", "form", { ...evidence, text: "Storefront checkout" }).catch(() => undefined);
   }
 
-  await markCartOrdered(cart.id, order.id).catch(() => undefined);
   await setCartEmail(cart.id, input.email).catch(() => undefined);
 
   const fresh = (await getOrder(pub.dataId, order.id)) ?? order;

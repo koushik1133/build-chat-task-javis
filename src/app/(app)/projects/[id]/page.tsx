@@ -7,7 +7,7 @@ import { ArrowLeft, Archive, FolderKanban, Pencil } from "lucide-react";
 import { PageContainer } from "@/components/page-container";
 import { AttachmentPanel } from "@/components/attachments/attachment-panel";
 import { Button } from "@/components/ui/button";
-import { Banner, ErrorState, Loading } from "@/components/ui/feedback";
+import { Banner, ErrorState, Loading, SkeletonList } from "@/components/ui/feedback";
 import { Pill } from "@/components/ui/pill";
 import { TabPanel, Tabs } from "@/components/ui/tabs";
 import { Gantt } from "@/components/projects/gantt";
@@ -114,7 +114,7 @@ function ProjectInner() {
     <PageContainer
       wide
       eyebrow={
-        <Link href="/projects" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <Link href="/projects" className="inline-flex min-h-11 items-center gap-1 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">
           <ArrowLeft className="h-4 w-4" aria-hidden /> Projects
         </Link>
       }
@@ -123,16 +123,16 @@ function ProjectInner() {
       icon={<FolderKanban className="h-6 w-6 text-primary" aria-hidden />}
       actions={
         p ? (
-          <div className="flex gap-2">
+          <>
             <Button variant="outline" touch onClick={() => setEditing(true)}>
-              <Pencil className="h-4 w-4" aria-hidden /> Edit
+              <Pencil className="h-4 w-4" aria-hidden /> Edit project
             </Button>
             {!p.archived_at && (
-              <Button variant="ghost" touch onClick={archive} aria-label="Archive project">
+              <Button variant="ghost" touch onClick={archive}>
                 <Archive className="h-4 w-4" aria-hidden /> Archive
               </Button>
             )}
-          </div>
+          </>
         ) : undefined
       }
     >
@@ -140,7 +140,7 @@ function ProjectInner() {
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <Pill tone={PROJECT_TONE[p.status]}>{PROJECT_STATUS_LABEL[p.status]}</Pill>
           {p.archived_at && <Pill tone="warning">Archived</Pill>}
-          {p.color && <span className="inline-block h-3 w-3 rounded-full" style={{ background: p.color }} aria-hidden />}
+          {p.color && <span className="inline-block h-3 w-3 rounded-full ring-1 ring-border" style={{ background: p.color }} aria-hidden />}
         </div>
       )}
       {notice && (
@@ -162,7 +162,8 @@ function ProjectInner() {
             {tab === "tasks" && <TasksTab project={detail.project} milestones={detail.milestones} members={members} reloadProject={load} notify={notify} />}
           </TabPanel>
           <TabPanel id="project" value="timeline">
-            {tab === "timeline" && (timelineErr ? <ErrorState message={timelineErr} onRetry={loadTimeline} /> : !timeline ? <Loading label="Loading timeline…" /> : <Gantt data={timeline} />)}
+            {tab === "timeline" &&
+              (timelineErr ? <ErrorState message={timelineErr} onRetry={loadTimeline} /> : !timeline ? <SkeletonList count={6} itemClassName="h-10" label="Loading timeline…" /> : <Gantt data={timeline} />)}
           </TabPanel>
           <TabPanel id="project" value="costs">
             {tab === "costs" && <CostsTab project={detail.project} budget={detail.budget} reloadProject={load} notify={notify} />}

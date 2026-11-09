@@ -10,14 +10,19 @@ import { createHash, createHmac, timingSafeEqual } from "crypto";
  *   open:        o|<recipientId>
  *   click:       c|<recipientId>|<sha256(url)[0..16]>   (url itself travels in ?u=; must match the hash)
  *   unsubscribe: u|<recipientId>            (campaign recipient)
- *                v|<dataId>|<contactId>     (sequence / direct sends without a recipient row)
+ *                v|<dataId>|<contactId>|<e|s>  (sequence / direct sends without a recipient row;
+ *                                            the channel letter is signed so an SMS opt-out can
+ *                                            never be downgraded to an email one; legacy 3-part
+ *                                            tokens mean email)
  */
 
 export type TrackingPayload =
   | { kind: "open"; recipientId: string }
   | { kind: "click"; recipientId: string; urlHash: string }
   | { kind: "unsub"; recipientId: string }
-  | { kind: "unsub_contact"; dataId: string; contactId: string };
+  | { kind: "unsub_contact"; dataId: string; contactId: string; channel: TrackingChannel };
+
+export type TrackingChannel = "email" | "sms";
 
 function key(): Buffer {
   const secret = process.env.CRON_SECRET?.trim();
@@ -47,8 +52,8 @@ export function clickToken(recipientId: string, url: string): string {
 export function unsubscribeToken(recipientId: string): string {
   return sign(`u|${recipientId}`);
 }
-export function unsubscribeContactToken(dataId: string, contactId: string): string {
-  return sign(`v|${dataId}|${contactId}`);
+export function unsubscribeContactToken(dataId: string, contactId: string, channel: TrackingChannel = "email"): string {
+  return sign(`v|${dataId}|${contactId}|${channel === "sms" ? "s" : "e"}`);
 }
 
 const ID_RE = /^[A-Za-z0-9_.:-]{1,120}$/;
@@ -80,8 +85,12 @@ export function verifyToken(token: string | null | undefined): TrackingPayload |
       return parts.length === 3 && ID_RE.test(parts[1]) && /^[0-9a-f]{16}$/.test(parts[2]) ? { kind: "click", recipientId: parts[1], urlHash: parts[2] } : null;
     case "u":
       return parts.length === 2 && ID_RE.test(parts[1]) ? { kind: "unsub", recipientId: parts[1] } : null;
-    case "v":
-      return parts.length === 3 && ID_RE.test(parts[1]) && ID_RE.test(parts[2]) ? { kind: "unsub_contact", dataId: parts[1], contactId: parts[2] } : null;
+    case "v": {
+      if ((parts.length !== 3 && parts.length !== 4) || !ID_RE.test(parts[1]) || !ID_RE.test(parts[2])) return null;
+      const ch = parts.length === 4 ? parts[3] : "e";
+      if (ch !== "e" && ch !== "s") return null;
+      return { kind: "unsub_contact", dataId: parts[1], contactId: parts[2], channel: ch === "s" ? "sms" : "email" };
+    }
     default:
       return null;
   }
@@ -108,8 +117,17 @@ export function clickUrl(recipientId: string, url: string): string {
 export function unsubscribeUrl(recipientId: string): string {
   return `${trackingOrigin()}/u/${unsubscribeToken(recipientId)}`;
 }
-export function unsubscribeContactUrl(dataId: string, contactId: string): string {
-  return `${trackingOrigin()}/u/${unsubscribeContactToken(dataId, contactId)}`;
+export function unsubscribeContactUrl(dataId: string, contactId: string, channel: TrackingChannel = "email"): string {
+  return `${trackingOrigin()}/u/${unsubscribeContactToken(dataId, contactId, channel)}`;
+}
+
+/**
+ * RFC 8058 one-click target for the List-Unsubscribe header. Mail providers
+ * POST here without a user agent; it must be the API route, not the /u page
+ * (a POST to the page would render HTML and withdraw nothing).
+ */
+export function unsubscribeOneClickUrl(unsubscribePageUrl: string): string {
+  return unsubscribePageUrl.replace(/\/u\//, "/api/t/u/");
 }
 
 /** 1×1 transparent GIF. */

@@ -267,9 +267,11 @@ describeDb("marketing flow", () => {
   it("test-send goes to the operator without touching recipients or consent", async (ctx) => {
     if (!ready) return ctx.skip();
     const ts = await import("@/app/api/marketing/campaigns/[id]/test-send/route");
-    const r = await api<{ ok: boolean; to: string }>(ts.POST, `/api/marketing/campaigns/${campaignId}/test-send`, { json: { email: "operator@example.test" }, params: { id: campaignId }, expect: 200 });
-    expect(r.body.to).toBe("operator@example.test");
-    const row = await sqlOne<{ subject: string }>(`SELECT subject FROM notification_outbox WHERE user_id = $1 AND recipient = 'operator@example.test' ORDER BY created_at DESC LIMIT 1`, [org.dataId]);
+    // SEC: test sends only go to the operator or another workspace member, never an arbitrary address.
+    await api(ts.POST, `/api/marketing/campaigns/${campaignId}/test-send`, { json: { email: "stranger@example.test" }, params: { id: campaignId }, expect: 400 });
+    const r = await api<{ ok: boolean; to: string }>(ts.POST, `/api/marketing/campaigns/${campaignId}/test-send`, { json: { email: org.email }, params: { id: campaignId }, expect: 200 });
+    expect(r.body.to).toBe(org.email);
+    const row = await sqlOne<{ subject: string }>(`SELECT subject FROM notification_outbox WHERE user_id = $1 AND recipient = $2 ORDER BY created_at DESC LIMIT 1`, [org.dataId, org.email]);
     expect(row?.subject).toMatch(/^\[Test\] Hi Test from/);
     expect(await sql(`SELECT id FROM campaign_recipients WHERE campaign_id = $1`, [campaignId])).toHaveLength(3);
   });

@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ShoppingBag, ShoppingCart } from "lucide-react";
+import { Lock, Mail, ShoppingBag, ShoppingCart, Store, Truck } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/feedback";
+import { Pill } from "@/components/ui/pill";
 import { cn } from "@/lib/utils";
 import { fmtMoney } from "@/lib/money/format";
 
@@ -143,28 +146,89 @@ export function money(minor: number, currency: string): string {
   return fmtMoney(minor, currency);
 }
 
+/** Shared page width for every storefront surface (header, nav, content, footer). */
+export const SHOP_WIDTH = "mx-auto w-full max-w-5xl px-4 sm:px-6";
+
 /** Sticky sub-header: shop name, catalog link and cart badge. */
 export function ShopNav({ org, title, units, current }: { org: string; title: string; units: number | null; current: "shop" | "cart" | "checkout" | "order" }) {
   const base = `/shop/${encodeURIComponent(org)}`;
-  const link = "inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-3 text-sm font-medium hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const link =
+    "inline-flex min-h-11 touch-manipulation items-center gap-1.5 rounded-md px-3 text-sm font-medium hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
   return (
-    <nav aria-label="Shop" className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
-        <Link href={base} className={cn(link, "-ml-3 truncate")} aria-current={current === "shop" ? "page" : undefined}>
+    <nav aria-label="Shop" className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
+      <div className={cn(SHOP_WIDTH, "flex items-center justify-between gap-3")}>
+        <Link href={base} className={cn(link, "-ml-3 min-w-0")} aria-current={current === "shop" ? "page" : undefined}>
           <ShoppingBag className="h-4 w-4 shrink-0" aria-hidden />
           <span className="truncate">{title}</span>
         </Link>
-        <Link href={`${base}/cart`} className={cn(link, "-mr-3", current === "cart" && "bg-secondary/60")} aria-current={current === "cart" ? "page" : undefined}>
+        <Link href={`${base}/cart`} className={cn(link, "-mr-3 shrink-0", current === "cart" && "bg-secondary/60")} aria-current={current === "cart" ? "page" : undefined}>
           <ShoppingCart className="h-4 w-4" aria-hidden />
           <span>Cart</span>
           {units !== null && units > 0 && (
-            <span className="ml-0.5 inline-flex min-w-[20px] items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground" aria-label={`${units} items`}>
+            <span className="ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground">
               {units}
+              <span className="sr-only"> {units === 1 ? "item" : "items"} in cart</span>
             </span>
           )}
         </Link>
       </div>
     </nav>
+  );
+}
+
+/**
+ * Trust strip under the catalog header: the three things a first-time buyer
+ * wants to know before adding anything — payment, delivery and who to contact.
+ */
+export function TrustStrip({ shop, className }: { shop: ShopInfo; className?: string }) {
+  const delivery = shop.collect_shipping
+    ? shop.pickup_enabled
+      ? "Delivery or collection"
+      : shop.shipping_flat_minor > 0
+        ? `Delivery ${money(shop.shipping_flat_minor, shop.currency)}`
+        : "Free delivery"
+    : "Collect in person";
+  const item = "flex min-w-0 items-center gap-2 text-sm text-muted-foreground";
+  return (
+    <ul className={cn("flex flex-wrap gap-x-6 gap-y-2", className)} aria-label="Shop information">
+      <li className={item}>
+        <Lock className="h-4 w-4 shrink-0" aria-hidden />
+        Secure card payment
+      </li>
+      <li className={item}>
+        {shop.collect_shipping ? <Truck className="h-4 w-4 shrink-0" aria-hidden /> : <Store className="h-4 w-4 shrink-0" aria-hidden />}
+        {delivery}
+      </li>
+      {shop.support_email && (
+        <li className={item}>
+          <Mail className="h-4 w-4 shrink-0" aria-hidden />
+          <a
+            href={`mailto:${shop.support_email}`}
+            className="truncate rounded underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {shop.support_email}
+          </a>
+        </li>
+      )}
+    </ul>
+  );
+}
+
+/**
+ * Phone-only sticky bar pinned above the home indicator. Used for the cart
+ * total + primary action so the next step is always one thumb away.
+ */
+export function StickyBar({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        "fixed inset-x-0 bottom-0 z-20 border-t border-border bg-card/95 backdrop-blur lg:hidden",
+        "px-4 pt-3 [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))]",
+        className
+      )}
+    >
+      <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">{children}</div>
+    </div>
   );
 }
 
@@ -176,13 +240,13 @@ export function ProductImage({ src, alt, className }: { src: string | null; alt:
       </div>
     );
   }
-  return <img src={src} alt={alt} loading="lazy" className={cn("object-cover", className)} />;
+  return <img src={src} alt={alt} loading="lazy" decoding="async" className={cn("bg-secondary/50 object-cover", className)} />;
 }
 
 export function StockBadge({ item }: { item: Pick<ShopItem, "in_stock" | "low_stock" | "stock_available"> }) {
-  if (!item.in_stock) return <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">Sold out</span>;
-  if (item.low_stock && item.stock_available !== null) return <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">Only {item.stock_available} left</span>;
-  return <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">In stock</span>;
+  if (!item.in_stock) return <Pill tone="danger">Sold out</Pill>;
+  if (item.low_stock && item.stock_available !== null) return <Pill tone="warning">Only {item.stock_available} left</Pill>;
+  return <Pill tone="success">In stock</Pill>;
 }
 
 export function TaxNote({ inclusive, className }: { inclusive: boolean; className?: string }) {
@@ -215,6 +279,70 @@ export function Totals({ cart, showShipping = true }: { cart: Pick<CartData, "su
   );
 }
 
+/** Centred error / fallback container for a storefront page. */
 export function PageState({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto w-full max-w-5xl px-4 py-12 text-center text-sm text-muted-foreground sm:px-6">{children}</div>;
+  return <div className={cn(SHOP_WIDTH, "py-12 text-center text-sm text-muted-foreground")}>{children}</div>;
+}
+
+/** Loading skeleton shaped like the catalog (header, trust strip, 3-up card grid) so the real page lands without a jump. */
+export function CatalogSkeleton() {
+  return (
+    <div role="status" aria-live="polite" aria-busy="true" className={cn(SHOP_WIDTH, "py-6 sm:py-8")}>
+      <div className="h-11" aria-hidden />
+      <Skeleton className="h-8 w-56 max-w-full" />
+      <Skeleton className="mt-3 h-4 w-80 max-w-full" />
+      <Skeleton className="mt-4 h-4 w-64 max-w-full" />
+      <ul className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden>
+        {Array.from({ length: 6 }, (_, i) => (
+          <li key={i} className="overflow-hidden rounded-xl border border-border bg-card">
+            <Skeleton className="aspect-[4/3] w-full rounded-none" />
+            <div className="space-y-2 p-4">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-4 w-full" />
+              <div className="flex items-center justify-between pt-2">
+                <Skeleton className="h-6 w-20" />
+                <Skeleton className="h-11 w-24 sm:h-9" />
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <span className="sr-only">Loading shop…</span>
+    </div>
+  );
+}
+
+/** Loading skeleton shaped like the cart / checkout two-column layout. */
+export function CartSkeleton({ label = "Loading cart…" }: { label?: string }) {
+  return (
+    <div role="status" aria-live="polite" aria-busy="true" className={cn(SHOP_WIDTH, "py-6 sm:py-8")}>
+      <div className="h-11" aria-hidden />
+      <Skeleton className="h-8 w-40" />
+      <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_320px]" aria-hidden>
+        <div className="space-y-2">
+          {Array.from({ length: 3 }, (_, i) => (
+            <Skeleton key={i} className="h-28 w-full rounded-xl" />
+          ))}
+        </div>
+        <Skeleton className="h-56 w-full rounded-xl" />
+      </div>
+      <span className="sr-only">{label}</span>
+    </div>
+  );
+}
+
+/** Primary call to action that is either a real link or a disabled button — never a disabled-looking anchor. */
+export function CtaLink({ href, disabled, children, className }: { href: string; disabled?: boolean; children: React.ReactNode; className?: string }) {
+  if (disabled) {
+    return (
+      <Button type="button" size="lg" disabled className={className}>
+        {children}
+      </Button>
+    );
+  }
+  return (
+    <Button asChild size="lg" className={className}>
+      <Link href={href}>{children}</Link>
+    </Button>
+  );
 }

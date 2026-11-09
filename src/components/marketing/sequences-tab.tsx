@@ -64,9 +64,9 @@ export function SequencesTab({ notify }: { notify: (tone: Notice["tone"], text: 
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">Timed drips. Each step is consent-checked when it is due; contacts exit when they reply or unsubscribe.</p>
-        <Button type="button" touch onClick={() => setShowNew(true)}>
+        <Button type="button" touch className="self-start sm:self-auto" onClick={() => setShowNew(true)}>
           <Plus className="h-4 w-4" aria-hidden /> New sequence
         </Button>
       </div>
@@ -83,7 +83,7 @@ export function SequencesTab({ notify }: { notify: (tone: Notice["tone"], text: 
             return (
               <li key={s.id} className="rounded-lg border border-border bg-card p-3 sm:p-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <button type="button" onClick={() => setOpen(s)} className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <button type="button" onClick={() => setOpen(s)} aria-label={`Open sequence ${s.name}`} className="min-w-0 touch-manipulation rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <p className="truncate font-medium underline-offset-2 hover:underline">{s.name}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {steps.length} step{steps.length === 1 ? "" : "s"} · {TRIGGER_LABEL[s.trigger]}
@@ -94,7 +94,7 @@ export function SequencesTab({ notify }: { notify: (tone: Notice["tone"], text: 
                     <Button type="button" variant="ghost" size="icon-sm" touch aria-label={s.status === "active" ? "Pause sequence" : "Resume sequence"} onClick={() => toggle(s)}>
                       {s.status === "active" ? <Pause className="h-3.5 w-3.5" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
                     </Button>
-                    <Button type="button" variant="ghost" size="icon-sm" touch aria-label="Delete sequence" onClick={() => remove(s)} className="text-red-600">
+                    <Button type="button" variant="ghost" size="icon-sm" touch aria-label="Delete sequence" onClick={() => remove(s)} className="text-destructive hover:text-destructive">
                       <Trash2 className="h-3.5 w-3.5" aria-hidden />
                     </Button>
                   </div>
@@ -272,11 +272,11 @@ function SequenceDialog({ onClose, onSaved }: { onClose: () => void; onSaved: ()
             </li>
           ))}
         </ol>
-        <Button type="button" variant="outline" size="sm" disabled={steps.length >= 20} onClick={() => setSteps((s) => [...s, { ...EMPTY_STEP, delay_hours: 48 }])}>
+        <Button type="button" variant="outline" size="sm" touch disabled={steps.length >= 20} onClick={() => setSteps((s) => [...s, { ...EMPTY_STEP, delay_hours: 48 }])}>
           <Plus className="h-3.5 w-3.5" aria-hidden /> Add step
         </Button>
         {err && (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-destructive">
             {err}
           </p>
         )}
@@ -285,7 +285,7 @@ function SequenceDialog({ onClose, onSaved }: { onClose: () => void; onSaved: ()
             Cancel
           </Button>
           <Button type="submit" touch disabled={busy}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />} Create sequence
+            {busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} Create sequence
           </Button>
         </DialogFooter>
       </form>
@@ -356,7 +356,7 @@ function SequenceDrawer({ sequence: s, onClose, notify, onChanged }: { sequence:
                 <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-medium">{i + 1}</span>
                 <span className="min-w-0">
                   <span className="block text-xs text-muted-foreground">
-                    {st.delay_hours === 0 ? "Immediately" : `After ${st.delay_hours}h`} · {st.channel.toUpperCase()}
+                    {st.delay_hours === 0 ? "Immediately" : `After ${st.delay_hours}h`} · {st.channel === "sms" ? "SMS" : "Email"}
                   </span>
                   <span className="block truncate">{st.template_id ? "Template" : st.subject || st.body_md?.slice(0, 80) || "—"}</span>
                 </span>
@@ -369,19 +369,19 @@ function SequenceDrawer({ sequence: s, onClose, notify, onChanged }: { sequence:
             Enroll contacts
           </h3>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <Input value={ids} onChange={(e) => setIds(e.target.value)} placeholder="Contact ids, comma or space separated" aria-label="Contact ids" />
+            <Input value={ids} onChange={(e) => setIds(e.target.value)} placeholder="Contact IDs, comma or space separated" aria-label="Contact IDs to enroll" autoComplete="off" spellCheck={false} />
             <Button type="button" touch disabled={busy || !ids.trim() || s.status !== "active"} onClick={enrollNow}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <UserPlus className="h-4 w-4" aria-hidden />} Enroll
+              {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <UserPlus className="h-4 w-4" aria-hidden />} Enroll
             </Button>
           </div>
-          {s.status !== "active" && <p className="mt-1 text-xs text-amber-700">Resume the sequence to enroll contacts.</p>}
+          {s.status !== "active" && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">Resume the sequence to enroll contacts.</p>}
         </section>
         <section aria-labelledby="enrollments-h">
           <h3 id="enrollments-h" className="mb-2 text-sm font-medium">
             Enrollments
           </h3>
           {enrollments === null ? (
-            <SkeletonList count={3} itemClassName="h-8" />
+            <SkeletonList count={3} itemClassName="h-8" label="Loading enrollments…" />
           ) : enrollments.length === 0 ? (
             <p className="text-xs text-muted-foreground">Nobody is enrolled yet.</p>
           ) : (
@@ -389,10 +389,18 @@ function SequenceDrawer({ sequence: s, onClose, notify, onChanged }: { sequence:
               <table className="w-full text-xs">
                 <thead className={THEAD}>
                   <tr>
-                    <th className={TH}>Contact</th>
-                    <th className={TH}>Step</th>
-                    <th className={TH}>Status</th>
-                    <th className={TH}>Next</th>
+                    <th scope="col" className={TH}>
+                      Contact
+                    </th>
+                    <th scope="col" className={TH}>
+                      Step
+                    </th>
+                    <th scope="col" className={TH}>
+                      Status
+                    </th>
+                    <th scope="col" className={TH}>
+                      Next send
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

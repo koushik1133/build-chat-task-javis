@@ -124,7 +124,7 @@ export function EditProjectDialog({ project, members, onClose, onSaved }: { proj
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} maxLength={20_000} />
         </Field>
         <Field label="Colour">
-          <Input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-10 w-20 p-1" />
+          <Input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-11 w-20 p-1 sm:h-10" />
         </Field>
         <DialogFooter>
           <Button type="button" variant="outline" touch onClick={onClose} disabled={busy}>

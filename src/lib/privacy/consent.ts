@@ -141,10 +141,11 @@ export async function writeTombstones(dataId: string, hashes: string[], purposes
 
 export async function isTombstoned(dataId: string, identifier: string | null | undefined, purpose: ConsentPurpose): Promise<boolean> {
   if (!identifier) return false;
+  // Fails closed: a DB error reads as "tombstoned" so an erased person is never marketed to by accident.
   const row = await queryOne<{ id: string }>(
     `SELECT id FROM consent_records WHERE user_id = $1 AND subject_kind = 'tombstone' AND subject_id = $2 AND purpose = $3 LIMIT 1`,
     [dataId, tombstoneHash(identifier), purpose]
-  ).catch(() => null);
+  ).catch(() => ({ id: "error" }));
   return Boolean(row);
 }
 
@@ -169,11 +170,17 @@ export async function canSendMarketing(dataId: string, contactId: string, channe
   if (!contact) return { allowed: false, reason: "unknown_contact" };
 
   const optChannel = channel === "sms" ? ["sms", "all"] : channel === "voice" ? ["voice", "all"] : ["email", "all"];
-  const opt = await queryOne<{ id: string }>(
-    `SELECT id FROM contact_optouts WHERE user_id = $1 AND channel = ANY($2)
-        AND (contact_id = $3 OR ($4::text IS NOT NULL AND lower(email) = lower($4)) OR ($5::text IS NOT NULL AND phone = $5)) LIMIT 1`,
-    [dataId, optChannel, contactId, contact.email, contact.phone]
-  ).catch(() => null);
+  let opt: { id: string } | null;
+  try {
+    opt = await queryOne<{ id: string }>(
+      `SELECT id FROM contact_optouts WHERE user_id = $1 AND channel = ANY($2)
+          AND (contact_id = $3 OR ($4::text IS NOT NULL AND lower(email) = lower($4)) OR ($5::text IS NOT NULL AND phone = $5)) LIMIT 1`,
+      [dataId, optChannel, contactId, contact.email, contact.phone]
+    );
+  } catch {
+    // Fail closed: when the suppression list cannot be read, nothing goes out.
+    return { allowed: false, reason: "opted_out" };
+  }
   if (opt) return { allowed: false, reason: "opted_out" };
 
   const identifier = channel === "email" ? contact.email : contact.phone;

@@ -123,7 +123,8 @@ describe("tracking tokens", () => {
     expect(verifyToken(o)).toEqual({ kind: "open", recipientId: "rec-1" });
     expect(Buffer.from(o.split(".")[0], "base64url").toString()).toBe("o|rec-1");
     expect(verifyToken(unsubscribeToken("rec-2"))).toEqual({ kind: "unsub", recipientId: "rec-2" });
-    expect(verifyToken(unsubscribeContactToken("org", "c-9"))).toEqual({ kind: "unsub_contact", dataId: "org", contactId: "c-9" });
+    expect(verifyToken(unsubscribeContactToken("org", "c-9"))).toEqual({ kind: "unsub_contact", dataId: "org", contactId: "c-9", channel: "email" });
+    expect(verifyToken(unsubscribeContactToken("org", "c-9", "sms"))).toEqual({ kind: "unsub_contact", dataId: "org", contactId: "c-9", channel: "sms" });
     const c = verifyToken(clickToken("rec-1", "https://a.test/p"));
     expect(c).toEqual({ kind: "click", recipientId: "rec-1", urlHash: urlHash("https://a.test/p") });
   });

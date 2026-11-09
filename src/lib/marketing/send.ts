@@ -3,7 +3,7 @@ import { getBranding } from "@/lib/branding";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { canSendMarketing, type MarketingDecision } from "@/lib/privacy/consent";
 import { firstNameOf, renderEmail, renderSms, rewriteLinks, type MergeVars } from "./render";
-import { clickUrl, openPixelUrl, unsubscribeContactUrl, unsubscribeUrl } from "./tracking";
+import { clickUrl, openPixelUrl, unsubscribeContactUrl, unsubscribeOneClickUrl, unsubscribeUrl } from "./tracking";
 import type { MarketingSendChannel } from "./types";
 
 /**
@@ -72,7 +72,7 @@ export async function sendMarketingMessage(dataId: string, input: SendInput): Pr
   const to = (input.to ?? (input.channel === "email" ? input.contact.email : input.contact.phone))?.trim();
   if (!to) return { ok: false, reason: "no_address" };
 
-  const unsubscribe = input.recipientId ? unsubscribeUrl(input.recipientId) : unsubscribeContactUrl(dataId, input.contact.id);
+  const unsubscribe = input.recipientId ? unsubscribeUrl(input.recipientId) : unsubscribeContactUrl(dataId, input.contact.id, input.channel);
   const vars = await mergeVarsFor(dataId, input.contact, unsubscribe);
   const data: Record<string, unknown> = { category: "marketing", campaign_id: input.campaignId ?? null, recipient_id: input.recipientId ?? null, sequence_id: input.sequenceId ?? null, contact_id: input.contact.id };
 
@@ -82,7 +82,7 @@ export async function sendMarketingMessage(dataId: string, input: SendInput): Pr
     const rid = input.recipientId;
     const html = rid ? rewriteLinks(rendered.html, (url) => (url.startsWith(unsubscribe) || url.includes("/api/t/") ? null : clickUrl(rid, url))) : rendered.html;
     if (input.from_name) data.fromName = input.from_name;
-    data.headers = { "List-Unsubscribe": `<${unsubscribe}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" };
+    data.headers = { "List-Unsubscribe": `<${unsubscribeOneClickUrl(unsubscribe)}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" };
     if (input.reply_to) data.replyTo = input.reply_to;
     outboxId = await enqueueNotification(dataId, { channel: "email", recipient: to, subject: rendered.subject || "(no subject)", body: html, data });
   } else {

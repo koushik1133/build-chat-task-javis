@@ -63,9 +63,15 @@ export interface AttachmentDTO {
  */
 export function resolveAttachmentType(declared: string | null | undefined, fileName: string): { mime: string; ext: string } | null {
   const d = (declared ?? "").split(";")[0].trim().toLowerCase();
-  if (d && ALLOWED_ATTACHMENT_TYPES[d]) return ALLOWED_ATTACHMENT_TYPES[d];
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
   const byExt = EXT_TO_MIME[ext];
+  if (d && ALLOWED_ATTACHMENT_TYPES[d]) {
+    // The extension must agree with the declared type: "payload.html" declared as text/plain
+    // (or "evil.html" declared as application/pdf) is refused rather than stored under a
+    // name that opens as something else. Names without an extension follow the declared type.
+    if (fileName.includes(".") && byExt !== ALLOWED_ATTACHMENT_TYPES[d].mime) return null;
+    return ALLOWED_ATTACHMENT_TYPES[d];
+  }
   if (byExt && (!d || d === "application/octet-stream" || d === "application/vnd.ms-excel" || d === "text/plain")) return ALLOWED_ATTACHMENT_TYPES[byExt];
   return null;
 }

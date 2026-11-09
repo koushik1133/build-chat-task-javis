@@ -1,9 +1,11 @@
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
+import { isWorkspaceMember } from "@/lib/auth/members";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import {
   ProjectError,
+  normaliseTaskPriority,
   parseDependsOn,
   type MilestoneDTO,
   type MilestoneInput,
@@ -17,7 +19,6 @@ import {
   type ProjectTaskDTO,
   type ProjectTaskInput,
   type ProjectTaskPatch,
-  type TaskPriority,
 } from "./pure";
 
 /**
@@ -93,7 +94,7 @@ const num = (v: string | number | null | undefined): number => Number(v) || 0;
 
 export const PROJECT_COLS = `p.id, p.name, p.code, p.description_md, p.contact_id, c.full_name AS contact_name, p.quote_id, p.status, p.starts_on::text AS starts_on, p.due_on::text AS due_on,
   p.budget_minor, p.currency, p.billing_mode, p.hourly_rate_minor, p.owner_member_id, p.color, p.archived_at, p.created_at, p.updated_at`;
-const PROJECT_FROM = `FROM projects p LEFT JOIN crm_contacts c ON c.id = p.contact_id`;
+export const PROJECT_FROM = `FROM projects p LEFT JOIN crm_contacts c ON c.id = p.contact_id AND c.user_id = p.user_id`;
 
 export const TASK_COLS = `t.id::text AS id, t.title, t.done, t.project_id, t.milestone_id, t.assignee_id, t.due_at, t.priority, t.estimate_minutes, t.sort, t.depends_on, t.created_at`;
 
@@ -138,7 +139,7 @@ export function toProjectTaskDTO(r: TaskRow): ProjectTaskDTO {
     milestone_id: r.milestone_id,
     assignee_id: r.assignee_id,
     due_at: iso(r.due_at),
-    priority: (r.priority as TaskPriority | null) ?? null,
+    priority: normaliseTaskPriority(r.priority),
     estimate_minutes: r.estimate_minutes == null ? null : Number(r.estimate_minutes),
     sort: r.sort == null ? null : Number(r.sort),
     depends_on: parseDependsOn(r.depends_on),
@@ -192,12 +193,22 @@ async function nextCode(dataId: string): Promise<string> {
   return `PRJ-${String(num(r?.n) + 1).padStart(3, "0")}`;
 }
 
+async function assertContact(dataId: string, contactId: string | null | undefined): Promise<void> {
+  if (!contactId) return;
+  const c = await queryOne<{ id: string }>(`SELECT id FROM crm_contacts WHERE id = $1 AND user_id = $2`, [contactId, dataId]);
+  if (!c) throw new ProjectError("contact_id does not exist");
+}
+
+/** A member/assignee id must be the org owner or an active member of this workspace; anything else is refused. */
+export async function assertWorkspaceMember(dataId: string, userId: string | null | undefined, field = "assignee_id"): Promise<void> {
+  if (!userId) return;
+  if (!(await isWorkspaceMember(dataId, userId))) throw new ProjectError(`${field} is not a member of this workspace`);
+}
+
 export async function createProject(dataId: string, input: ProjectInput, actorId?: string | null): Promise<ProjectDTO> {
   if (input.starts_on && input.due_on && input.due_on < input.starts_on) throw new ProjectError("due_on must be on or after starts_on");
-  if (input.contact_id) {
-    const c = await queryOne<{ id: string }>(`SELECT id FROM crm_contacts WHERE id = $1 AND user_id = $2`, [input.contact_id, dataId]);
-    if (!c) throw new ProjectError("contact_id does not exist");
-  }
+  await assertContact(dataId, input.contact_id);
+  await assertWorkspaceMember(dataId, input.owner_member_id, "owner_member_id");
   const id = randomUUID();
   const code = input.code?.trim() || (await nextCode(dataId));
   await query(
@@ -229,6 +240,8 @@ export async function updateProject(dataId: string, id: string, patch: ProjectPa
   const starts = patch.starts_on === undefined ? before.starts_on : patch.starts_on;
   const due = patch.due_on === undefined ? before.due_on : patch.due_on;
   if (starts && due && due < starts) throw new ProjectError("due_on must be on or after starts_on");
+  await assertContact(dataId, patch.contact_id);
+  await assertWorkspaceMember(dataId, patch.owner_member_id, "owner_member_id");
   if (sets.length === 0) return before;
   sets.push(`updated_at = NOW()`);
   await query(`UPDATE projects SET ${sets.join(", ")} WHERE id = $1 AND user_id = $2`, params);
@@ -326,6 +339,7 @@ export async function addMember(dataId: string, projectId: string, input: Projec
     const s = await queryOne<{ id: string }>(`SELECT id FROM staff_profiles WHERE id = $1 AND user_id = $2`, [input.staff_id, dataId]).catch(() => null);
     if (!s) throw new ProjectError("staff_id does not exist");
   }
+  await assertWorkspaceMember(dataId, input.member_user_id, "member_user_id");
   const dup = await queryOne<{ id: string }>(
     `SELECT id FROM project_members WHERE user_id = $1 AND project_id = $2 AND ((member_user_id IS NOT NULL AND member_user_id = $3) OR (staff_id IS NOT NULL AND staff_id = $4)) LIMIT 1`,
     [dataId, projectId, input.member_user_id ?? null, input.staff_id ?? null]
@@ -386,6 +400,7 @@ async function assertMilestone(dataId: string, projectId: string, milestoneId: s
 export async function createProjectTask(dataId: string, projectId: string, input: ProjectTaskInput, opts: { source?: string } = {}): Promise<ProjectTaskDTO> {
   await requireProject(dataId, projectId);
   await assertMilestone(dataId, projectId, input.milestone_id);
+  await assertWorkspaceMember(dataId, input.assignee_id);
   const row = await queryOne<TaskRow>(
     `INSERT INTO tasks (user_id, title, project_id, milestone_id, assignee_id, due_at, priority, estimate_minutes, sort, depends_on)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -401,7 +416,10 @@ export async function updateProjectTask(dataId: string, id: string, patch: Proje
   const before = await getProjectTask(dataId, id);
   if (!before) throw new ProjectError("Task not found", 404);
   const projectId = patch.project_id === undefined ? before.project_id : patch.project_id;
+  // Moving a task into a project: the target must belong to this org.
+  if (patch.project_id && patch.project_id !== before.project_id) await requireProject(dataId, patch.project_id);
   if (patch.milestone_id && projectId) await assertMilestone(dataId, projectId, patch.milestone_id);
+  await assertWorkspaceMember(dataId, patch.assignee_id);
   const sets: string[] = [];
   const params: unknown[] = [id, dataId];
   const set = (col: string, v: unknown) => {
@@ -431,10 +449,10 @@ export async function updateProjectTask(dataId: string, id: string, patch: Proje
 export async function tasksForMember(dataId: string, memberUserId: string, opts: { includeDone?: boolean; limit?: number } = {}): Promise<ProjectTaskDTO[]> {
   const params: unknown[] = [dataId, memberUserId];
   let sql = `SELECT ${TASK_COLS}, p.name AS project_name, p.color AS project_color
-      FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+      FROM tasks t LEFT JOIN projects p ON p.id = t.project_id AND p.user_id = t.user_id
      WHERE t.user_id = $1 AND t.assignee_id = $2 AND t.deleted_at IS NULL`;
   if (!opts.includeDone) sql += ` AND t.done = FALSE`;
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 500));
-  sql += ` ORDER BY t.done ASC, t.due_at ASC NULLS LAST, CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at ASC LIMIT $${params.length}`;
+  sql += ` ORDER BY t.done ASC, t.due_at ASC NULLS LAST, CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'normal' THEN 2 ELSE 3 END, t.created_at ASC LIMIT $${params.length}`;
   return (await query<TaskRow>(sql, params)).map(toProjectTaskDTO);
 }

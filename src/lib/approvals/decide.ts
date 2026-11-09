@@ -161,6 +161,7 @@ export async function decideApproval(dataId: string, id: string, input: DecideIn
   if (edited_input && decision === "approved" && original) {
     const v = validateEditedInput(original.tool_name, edited_input);
     if (!v.ok) throw new ApprovalError(v.error, 400);
+    assertEditKeepsRecipient(original.tool_name, original.input, v.input);
     editedJson = JSON.stringify(v.input);
     if (editedJson === (original.input ?? "")) editedJson = null;
   }
@@ -218,4 +219,34 @@ export async function decideApproval(dataId: string, id: string, input: DecideIn
     ? await queryOne<{ name: string }>(`SELECT name FROM agents WHERE id::text = $1 AND user_id = $2`, [updated.agent_id, dataId]).catch(() => null)
     : null;
   return { approval: { ...updated, agent_name: agent?.name ?? null }, outcome };
+}
+
+/** Fields an approver may never change by editing a draft: where it goes. */
+const PINNED_FIELDS: Record<string, readonly string[]> = {
+  "messaging.reply": ["to", "channel"],
+  "comms.send_email": ["to"],
+  "comms.send_sms": ["to"],
+};
+
+/**
+ * An edited approval keeps its recipient: the receptionist's reply draft (and
+ * any send tool) can have its text corrected, but approving it must never turn
+ * into sending to a different address or channel than the one that was reviewed.
+ */
+export function assertEditKeepsRecipient(toolName: string, originalInput: string | null, edited: unknown): void {
+  const pinned = PINNED_FIELDS[toolName];
+  if (!pinned) return;
+  let orig: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(originalInput ?? "{}");
+    orig = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    orig = {};
+  }
+  const next = edited && typeof edited === "object" ? (edited as Record<string, unknown>) : {};
+  for (const f of pinned) {
+    if (orig[f] !== undefined && JSON.stringify(orig[f]) !== JSON.stringify(next[f])) {
+      throw new ApprovalError(`Only the message text can be edited; "${f}" is fixed to what was reviewed`, 400);
+    }
+  }
 }

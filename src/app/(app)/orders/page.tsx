@@ -108,10 +108,11 @@ function OrdersTab({ selectedId, onSelect, notify }: { selectedId: string | null
   }, [reload]);
 
   const total = counts ? Object.values(counts).reduce((s, n) => s + n, 0) : null;
-  const filters: Array<{ id: Filter; label: string; n: number | null }> = [
-    { id: "all", label: "All", n: total },
-    ...ORDER_STATUSES.map((s) => ({ id: s as Filter, label: ORDER_STATUS_LABEL[s], n: counts?.[s] ?? null })),
+  const filters: Array<{ id: Filter; label: string; count?: number }> = [
+    { id: "all", label: "All", count: total ?? undefined },
+    ...ORDER_STATUSES.map((s) => ({ id: s as Filter, label: ORDER_STATUS_LABEL[s], count: counts?.[s] })),
   ];
+  const filtered = filter !== "all" || Boolean(query);
 
   const onChanged = (o: OrderDTO) => {
     list.setRows((rows) => rows.map((r) => (r.id === o.id ? o : r)));
@@ -120,33 +121,46 @@ function OrdersTab({ selectedId, onSelect, notify }: { selectedId: string | null
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div role="group" aria-label="Filter by status" className="flex flex-wrap gap-1.5">
-          {filters.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setFilter(f.id)}
-              aria-pressed={filter === f.id}
-              className={cn("inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", filter === f.id ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-secondary/60")}
-            >
-              {f.label}
-              {f.n !== null && <span className="tabular-nums opacity-70">{f.n}</span>}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <Tabs id="order-status" label="Order status" tabs={filters} value={filter} onChange={setFilter} />
         <div className="flex items-center gap-2">
-          <SearchField value={q} onChange={setQ} label="Search orders" placeholder="Order #, name or email" className="w-full sm:w-64" />
-          <Button type="button" variant="outline" size="icon" aria-label="Refresh" onClick={() => void reload()}><RefreshCw className="h-4 w-4" aria-hidden /></Button>
+          <SearchField value={q} onChange={setQ} label="Search orders" placeholder="Order number, name or email" className="min-w-0 flex-1 lg:w-72 lg:flex-none" />
+          <Button type="button" variant="outline" size="icon" touch aria-label="Refresh orders" onClick={() => void reload()} disabled={list.loading}>
+            {list.loading ? spinner : <RefreshCw className="h-4 w-4" aria-hidden />}
+          </Button>
         </div>
       </div>
 
+      <TabPanel id="order-status" value={filter}>
+      <div aria-busy={list.loading || undefined}>
       {list.loading ? (
         <Loading label="Loading orders…" />
       ) : list.error ? (
         <ErrorState message={list.error} onRetry={() => void reload()} />
       ) : list.rows.length === 0 ? (
-        <Empty icon={<ShoppingCart className="h-6 w-6" aria-hidden />} title={total === 0 ? "No orders yet" : "No orders match"} text={total === 0 ? "Enable your storefront and share the link to start taking orders." : "Try another status or search."} />
+        <Empty
+          icon={<ShoppingCart className="h-5 w-5" aria-hidden />}
+          title={filtered ? "No orders match" : "No orders yet"}
+          text={filtered ? "Try another status or clear the search." : "Switch on your storefront and share the link to start taking orders."}
+          action={
+            filtered ? (
+              <Button
+                variant="outline"
+                touch
+                onClick={() => {
+                  setFilter("all");
+                  setQ("");
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : (
+              <Button asChild variant="outline" touch>
+                <Link href="/orders?tab=storefront">Set up the storefront</Link>
+              </Button>
+            )
+          }
+        />
       ) : (
         <>
           <TableScroller label="Orders">
@@ -165,19 +179,19 @@ function OrdersTab({ selectedId, onSelect, notify }: { selectedId: string | null
                 {list.rows.map((o) => (
                   <tr key={o.id} className={cn("cursor-pointer hover:bg-secondary/40", selectedId === o.id && "bg-secondary/50")} onClick={() => onSelect(o.id)}>
                     <td className="px-3 py-2">
-                      <button type="button" className="font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(e) => { e.stopPropagation(); onSelect(o.id); }}>
+                      <button type="button" className="inline-flex min-h-11 items-center rounded font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0" aria-label={`Open order ${o.number}`} onClick={(e) => { e.stopPropagation(); onSelect(o.id); }}>
                         {o.number}
                       </button>
                       <p className="text-xs text-muted-foreground">{o.items.length} line{o.items.length === 1 ? "" : "s"}</p>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="max-w-[16rem] px-3 py-2">
                       <p className="truncate">{o.customer_name}</p>
-                      <p className="truncate text-xs text-muted-foreground">{o.customer_email}</p>
+                      <p className="truncate text-xs text-muted-foreground" title={o.customer_email}>{o.customer_email}</p>
                     </td>
                     <td className="px-3 py-2"><StatusPill status={o.status} map={STATUS_TONE} label={ORDER_STATUS_LABEL[o.status]} /></td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(o.total_minor, o.currency)}</td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">{o.shipping_address ? "Ship" : "Pickup"}</td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">{fmtDate(o.created_at)}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{o.shipping_address ? "Shipping" : "Collection"}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{fmtDate(o.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -186,6 +200,8 @@ function OrdersTab({ selectedId, onSelect, notify }: { selectedId: string | null
           <LoadMore hasMore={Boolean(list.cursor)} loading={list.loadingMore} count={list.rows.length} onMore={() => void list.more()} noun="orders" />
         </>
       )}
+      </div>
+      </TabPanel>
 
       {selectedId && <OrderDrawer id={selectedId} onClose={() => onSelect(null)} onChanged={onChanged} notify={notify} />}
     </div>
@@ -232,7 +248,7 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
     <Drawer labelledBy="order-drawer-title" onClose={onClose} header={
       <div className="flex items-center gap-3">
         <div className="min-w-0">
-          <h2 id="order-drawer-title" className="truncate text-base font-semibold">{o ? `Order ${o.number}` : "Order"}</h2>
+          <h2 id="order-drawer-title" className="break-words text-base font-semibold">{o ? `Order ${o.number}` : "Order"}</h2>
           {o && <p className="text-xs text-muted-foreground">Placed {fmtDate(o.created_at)}</p>}
         </div>
         {o && <StatusPill status={o.status} map={STATUS_TONE} label={ORDER_STATUS_LABEL[o.status]} className="ml-auto" />}
@@ -241,13 +257,13 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
     footer={o && (
       <div className="flex flex-wrap items-center justify-end gap-2">
         {(o.status === "pending_payment" || o.status === "paid" || o.status === "fulfilled") && (
-          <Button type="button" variant="outline" onClick={() => setCancelOpen(true)} disabled={busy !== null}><XCircle className="mr-1.5 h-4 w-4" aria-hidden />{o.status === "pending_payment" ? "Cancel" : "Cancel & refund"}</Button>
+          <Button type="button" variant="outline" touch onClick={() => setCancelOpen(true)} disabled={busy !== null}><XCircle className="mr-1.5 h-4 w-4" aria-hidden />{o.status === "pending_payment" ? "Cancel" : "Cancel & refund"}</Button>
         )}
         {(o.status === "paid" || o.status === "fulfilled") && refundable > 0 && (
-          <Button type="button" variant="outline" onClick={() => setRefundOpen(true)} disabled={busy !== null}><Undo2 className="mr-1.5 h-4 w-4" aria-hidden />Refund</Button>
+          <Button type="button" variant="outline" touch onClick={() => setRefundOpen(true)} disabled={busy !== null}><Undo2 className="mr-1.5 h-4 w-4" aria-hidden />Refund</Button>
         )}
         {o.status === "paid" && (
-          <Button type="button" onClick={() => void fulfil()} disabled={busy !== null}>{busy === "fulfil" ? spinner : <PackageCheck className="mr-1.5 h-4 w-4" aria-hidden />}Mark fulfilled</Button>
+          <Button type="button" touch onClick={() => void fulfil()} disabled={busy !== null} aria-busy={busy === "fulfil" || undefined}>{busy === "fulfil" ? spinner : <PackageCheck className="mr-1.5 h-4 w-4" aria-hidden />}Mark fulfilled</Button>
         )}
       </div>
     )}>
@@ -262,8 +278,8 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
             <ul className="divide-y divide-border rounded-lg border border-border">
               {o.items.map((it, i) => (
                 <li key={i} className="flex justify-between gap-3 px-3 py-2">
-                  <span>{it.qty} × {it.description}</span>
-                  <span className="tabular-nums">{fmtMoney(Math.round(it.qty * it.unit_minor), o.currency)}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{it.qty} × {it.description}</span>
+                  <span className="shrink-0 tabular-nums">{fmtMoney(Math.round(it.qty * it.unit_minor), o.currency)}</span>
                 </li>
               ))}
             </ul>
@@ -278,9 +294,9 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
             <div>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Customer</h3>
               <p className="font-medium">{o.customer_name}</p>
-              <p><a href={`mailto:${o.customer_email}`} className="text-primary underline-offset-4 hover:underline">{o.customer_email}</a></p>
+              <p className="[overflow-wrap:anywhere]"><a href={`mailto:${o.customer_email}`} className="rounded text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{o.customer_email}</a></p>
               {o.customer_phone && <p className="text-muted-foreground">{o.customer_phone}</p>}
-              {o.contact_id && <Link href={`/crm?contact=${o.contact_id}`} className="mt-1 inline-block text-xs text-primary underline-offset-4 hover:underline">Open contact</Link>}
+              {o.contact_id && <Link href={`/crm?contact=${o.contact_id}`} className="mt-1 inline-flex min-h-11 items-center rounded text-xs text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">Open contact</Link>}
               <p className="mt-2 text-xs text-muted-foreground">Marketing consent: {o.consent_marketing ? "yes" : "no"}</p>
             </div>
             <div>
@@ -293,7 +309,7 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payment</h3>
             {detail.invoice ? (
               <p>
-                Invoice <Link href="/billing" className="font-medium text-primary underline-offset-4 hover:underline">{detail.invoice.number}</Link> · <StatusPill status={detail.invoice.status} /> · paid {fmtMoney(detail.invoice.paid_minor, o.currency)} of {fmtMoney(detail.invoice.total_minor, o.currency)}
+                Invoice <Link href="/billing" className="rounded font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{detail.invoice.number}</Link> · <StatusPill status={detail.invoice.status} /> · paid {fmtMoney(detail.invoice.paid_minor, o.currency)} of {fmtMoney(detail.invoice.total_minor, o.currency)}
               </p>
             ) : (
               <p className="text-muted-foreground">No invoice linked.</p>
@@ -305,7 +321,7 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
                 ))}
               </ul>
             )}
-            {o.payment_ref && <p className="mt-1 text-xs text-muted-foreground">Ref {o.payment_ref}</p>}
+            {o.payment_ref && <p className="mt-1 break-all text-xs text-muted-foreground">Payment reference {o.payment_ref}</p>}
           </section>
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Files</h3>
@@ -351,8 +367,8 @@ function CancelDialog({ order, onClose, onDone, notify }: { order: OrderDTO; onC
         {paid && <Checkbox checked={restock} onChange={(e) => setRestock(e.target.checked)} label="Return the goods to stock" />}
       </div>
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose} disabled={busy}>Keep order</Button>
-        <Button type="button" variant="destructive" onClick={() => void go()} disabled={busy}>{busy ? spinner : null}{paid ? "Cancel & refund" : "Cancel order"}</Button>
+        <Button type="button" variant="outline" touch onClick={onClose} disabled={busy}>Keep order</Button>
+        <Button type="button" variant="destructive" touch onClick={() => void go()} disabled={busy} aria-busy={busy || undefined}>{busy ? spinner : null}{paid ? "Cancel & refund" : "Cancel order"}</Button>
       </DialogFooter>
     </Dialog>
   );
@@ -375,14 +391,14 @@ function RefundDialog({ order, refundable, onClose, onDone, notify }: { order: O
     }
   }
   return (
-    <Dialog title={`Refund ${order.number}`} description={`Up to ${fmtMoney(refundable, order.currency)} can be refunded through the payment provider.`} onClose={onClose}>
+    <Dialog title={`Refund ${order.number}`} description="The refund goes back through the original payment provider." onClose={onClose}>
       <div className="space-y-3">
-        <Field label={`Amount (${order.currency})`} required><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+        <Field label={`Amount (${order.currency})`} required hint={`Up to ${fmtMoney(refundable, order.currency)}.`} error={toMinor(amount) > refundable ? "That is more than was paid." : null}><Input inputMode="decimal" autoComplete="off" value={amount} onChange={(e) => setAmount(e.target.value)} required /></Field>
         <Field label="Reason (optional)"><Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={500} /></Field>
       </div>
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose} disabled={busy}>Close</Button>
-        <Button type="button" onClick={() => void go()} disabled={busy || toMinor(amount) <= 0}>{busy ? spinner : null}Refund</Button>
+        <Button type="button" variant="outline" touch onClick={onClose} disabled={busy}>Close</Button>
+        <Button type="button" touch onClick={() => void go()} disabled={busy || toMinor(amount) <= 0 || toMinor(amount) > refundable} aria-busy={busy || undefined}>{busy ? spinner : null}Refund</Button>
       </DialogFooter>
     </Dialog>
   );
@@ -482,17 +498,21 @@ function StorefrontTab({ notify }: { notify: (n: Notice) => void }) {
   return (
     <div className="space-y-6">
       <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <Store className="mt-0.5 h-5 w-5 text-muted-foreground" aria-hidden />
-          <div>
+        <div className="flex min-w-0 items-start gap-3">
+          <Store className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+          <div className="min-w-0">
             <p className="font-medium">Public shop {sf.enabled ? <Pill tone="success" className="ml-1">Live</Pill> : <Pill tone="neutral" className="ml-1">Off</Pill>}</p>
-            <p className="text-xs text-muted-foreground">{visibleCount} product{visibleCount === 1 ? "" : "s"} listed · <a href={publicUrl} target="_blank" rel="noreferrer" className="text-primary underline-offset-4 hover:underline">{publicUrl}</a></p>
+            <p className="text-xs text-muted-foreground">
+              {visibleCount} product{visibleCount === 1 ? "" : "s"} listed ·{" "}
+              <a href={publicUrl} target="_blank" rel="noreferrer" className="break-all rounded text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{publicUrl}</a>
+            </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void copy()} aria-live="polite">{copied ? <Check className="mr-1.5 h-4 w-4" aria-hidden /> : <Copy className="mr-1.5 h-4 w-4" aria-hidden />}{copied ? "Copied" : "Copy link"}</Button>
-          <Button asChild variant="outline" size="sm"><a href={publicUrl} target="_blank" rel="noreferrer"><ExternalLink className="mr-1.5 h-4 w-4" aria-hidden />Open</a></Button>
-          <Button type="button" size="sm" variant={sf.enabled ? "secondary" : "default"} disabled={saving} onClick={() => void patch({ enabled: !sf.enabled }, sf.enabled ? "Storefront switched off." : "Storefront is live.")}>{sf.enabled ? "Switch off" : "Enable shop"}</Button>
+          <Button type="button" variant="outline" size="sm" touch onClick={() => void copy()}>{copied ? <Check className="mr-1.5 h-4 w-4" aria-hidden /> : <Copy className="mr-1.5 h-4 w-4" aria-hidden />}{copied ? "Copied" : "Copy link"}</Button>
+          <span className="sr-only" aria-live="polite">{copied ? "Shop link copied" : ""}</span>
+          <Button asChild variant="outline" size="sm" touch><a href={publicUrl} target="_blank" rel="noreferrer"><ExternalLink className="mr-1.5 h-4 w-4" aria-hidden />Open shop</a></Button>
+          <Button type="button" size="sm" touch variant={sf.enabled ? "secondary" : "default"} disabled={saving} aria-busy={saving || undefined} onClick={() => void patch({ enabled: !sf.enabled }, sf.enabled ? "Storefront switched off." : "Storefront is live.")}>{sf.enabled ? "Switch off" : "Enable shop"}</Button>
         </div>
       </section>
 
@@ -501,7 +521,7 @@ function StorefrontTab({ notify }: { notify: (n: Notice) => void }) {
         <Field label="Shop title" hint="Defaults to your organisation name."><Input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} maxLength={120} /></Field>
         <Field label="URL slug" hint="/shop/<slug>"><Input value={draft.slug} onChange={(e) => setDraft({ ...draft, slug: e.target.value.toLowerCase() })} pattern="[a-z0-9-]+" maxLength={64} required /></Field>
         <Field label="Currency" hint="ISO code; product prices are shown as stored."><Input value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase() })} maxLength={3} className="uppercase" required /></Field>
-        <Field label="Max quantity per product"><Input inputMode="numeric" value={draft.max_qty} onChange={(e) => setDraft({ ...draft, max_qty: e.target.value })} /></Field>
+        <Field label="Max quantity per product" hint="Per order line."><Input inputMode="numeric" min={1} value={draft.max_qty} onChange={(e) => setDraft({ ...draft, max_qty: e.target.value })} /></Field>
         <Field label="Intro (markdown)" className="sm:col-span-2"><Textarea value={draft.intro_md} onChange={(e) => setDraft({ ...draft, intro_md: e.target.value })} rows={3} /></Field>
         <Field label="Terms & conditions (markdown)" hint="Shoppers must accept these at checkout when set." className="sm:col-span-2"><Textarea value={draft.terms_md} onChange={(e) => setDraft({ ...draft, terms_md: e.target.value })} rows={4} /></Field>
         <div className="space-y-2 sm:col-span-2">
@@ -513,18 +533,18 @@ function StorefrontTab({ notify }: { notify: (n: Notice) => void }) {
             </div>
           )}
         </div>
-        <div className="flex justify-end sm:col-span-2"><Button type="submit" disabled={saving}>{saving ? spinner : null}Save settings</Button></div>
+        <div className="flex justify-end sm:col-span-2"><Button type="submit" touch disabled={saving} aria-busy={saving || undefined}>{saving ? spinner : null}Save settings</Button></div>
       </form>
 
       <section className="rounded-xl border border-border bg-card">
         <div className="flex items-center justify-between gap-3 border-b border-border p-4">
           <div>
             <h2 className="text-sm font-semibold">Products</h2>
-            <p className="text-xs text-muted-foreground">Tick what shoppers can buy. Prices, tax and stock come from <Link href="/inventory" className="text-primary underline-offset-4 hover:underline">Inventory</Link>.</p>
+            <p className="text-xs text-muted-foreground">Tick what shoppers can buy. Prices, tax and stock come from <Link href="/inventory" className="rounded text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Inventory</Link>.</p>
           </div>
         </div>
         {products.length === 0 ? (
-          <Empty title="No products yet" text="Add products to your pricebook first." action={<Button asChild variant="outline"><Link href="/inventory">Open inventory</Link></Button>} className="m-4" />
+          <Empty title="No products yet" text="Add products to your pricebook first, then list them here." action={<Button asChild variant="outline" touch><Link href="/inventory">Open inventory</Link></Button>} className="m-4" />
         ) : (
           <TableScroller label="Storefront products">
             <table className="w-full min-w-[720px] text-sm">
@@ -542,14 +562,14 @@ function StorefrontTab({ notify }: { notify: (n: Notice) => void }) {
                 {products.map((p) => (
                   <tr key={p.id}>
                     <td className="px-3 py-2"><Checkbox checked={p.visible} onChange={(e) => void setProduct(p, { visible: e.target.checked })} label={<span className="sr-only">List {p.name}</span>} /></td>
-                    <td className="px-3 py-2">
-                      <p className="font-medium">{p.name}</p>
+                    <td className="max-w-[18rem] px-3 py-2">
+                      <p className="break-words font-medium">{p.name}</p>
                       <p className="text-xs text-muted-foreground">{p.sku ?? "no SKU"} · {p.kind}</p>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(p.unit_price_minor, p.currency)}</td>
-                    <td className="px-3 py-2 text-xs">{p.track_stock ? <span className={cn(p.stock_available <= 0 && "text-destructive")}>{p.stock_available} available</span> : <span className="text-muted-foreground">untracked</span>}</td>
-                    <td className="px-3 py-2"><Input type="number" aria-label={`Sort order for ${p.name}`} defaultValue={p.sort} className="h-8 w-20" onBlur={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n !== p.sort) void setProduct(p, { sort: n }); }} /></td>
-                    <td className="px-3 py-2"><Button type="button" variant="outline" size="sm" onClick={() => setImageFor(p)}>{p.image_url ? "Change image" : "Add image"}</Button></td>
+                    <td className="px-3 py-2 text-xs">{p.track_stock ? <span className={cn(p.stock_available <= 0 && "text-destructive")}>{p.stock_available} available</span> : <span className="text-muted-foreground">Not tracked</span>}</td>
+                    <td className="px-3 py-2"><Input type="number" aria-label={`Sort order for ${p.name}`} defaultValue={p.sort} className="w-20 sm:h-8" onBlur={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n !== p.sort) void setProduct(p, { sort: n }); }} /></td>
+                    <td className="px-3 py-2"><Button type="button" variant="outline" size="sm" touch onClick={() => setImageFor(p)} aria-label={`${p.image_url ? "Change" : "Add"} image for ${p.name}`}>{p.image_url ? "Change image" : "Add image"}</Button></td>
                   </tr>
                 ))}
               </tbody>
@@ -576,13 +596,13 @@ function ImageDialog({ product, onClose, onSave }: { product: StorefrontProductD
     setBusy(false);
   }
   return (
-    <Dialog title={`Image & description — ${product.name}`} description="Upload an image to the product (set it visible in the portal) or paste an image URL." onClose={onClose} size="lg">
+    <Dialog title={`Image and description: ${product.name}`} description="Upload an image and mark it visible in the portal, or paste an image URL." onClose={onClose} size="lg">
       <div className="space-y-4">
         <AttachmentPanel entityKind="product" entityId={product.id} allowPortal compact onChange={(files) => setAttachments(files)} />
         {images.length > 0 && (
           <Field label="Use an uploaded image" hint="Only images marked visible in the client portal can be shown publicly.">
             <Select value={picked} onChange={(e) => setPicked(e.target.value)}>
-              <option value="">— none —</option>
+              <option value="">No uploaded image</option>
               {images.map((a) => (
                 <option key={a.id} value={a.id} disabled={a.visibility !== "portal"}>{a.file_name}{a.visibility !== "portal" ? " (not public)" : ""}</option>
               ))}
@@ -593,8 +613,8 @@ function ImageDialog({ product, onClose, onSave }: { product: StorefrontProductD
         <Field label="Shop description (markdown)" hint="Falls back to the pricebook description."><Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} maxLength={10_000} /></Field>
       </div>
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button type="button" onClick={() => void save()} disabled={busy}>{busy ? spinner : null}Save</Button>
+        <Button type="button" variant="outline" touch onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button type="button" touch onClick={() => void save()} disabled={busy} aria-busy={busy || undefined}>{busy ? spinner : null}Save</Button>
       </DialogFooter>
     </Dialog>
   );

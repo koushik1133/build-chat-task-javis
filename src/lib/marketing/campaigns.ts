@@ -1,8 +1,7 @@
 import { randomUUID } from "crypto";
 import { query, queryOne, withRetry } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
-import { recordConsent } from "@/lib/privacy/consent";
-import { grantedSubset } from "@/lib/privacy/consent";
+import { currentConsent, grantedSubset, recordConsent } from "@/lib/privacy/consent";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import { getAudience, resolveAudience, type AudienceContact } from "./audiences";
 import { loadContact, sendMarketingMessage } from "./send";
@@ -430,7 +429,8 @@ export async function recordClick(recipientId: string, url: string): Promise<boo
       await query(`UPDATE campaigns SET clicked_count = clicked_count + 1, opened_count = opened_count + CASE WHEN $2 THEN 1 ELSE 0 END, updated_at = NOW() WHERE id = $1`, [rec.campaign_id, !rec.opened_at]).catch(() => undefined);
     }
   }
-  await emitEvent(rec.user_id, { type: "campaign.recipient_clicked", entity: "campaign", entityId: rec.campaign_id, data: { recipient_id: rec.id, url: url.slice(0, 500) } });
+  // Only the first click per recipient fans out (webhooks/automations); replays just log the row.
+  if (!rec.clicked_at) await emitEvent(rec.user_id, { type: "campaign.recipient_clicked", entity: "campaign", entityId: rec.campaign_id, data: { recipient_id: rec.id, url: url.slice(0, 500) } });
   return true;
 }
 
@@ -457,10 +457,32 @@ export async function resolveUnsubscribeRecipient(recipientId: string): Promise<
  */
 export async function unsubscribe(target: UnsubscribeTarget, opts: { all?: boolean; ip?: string | null; ua?: string | null } = {}): Promise<{ withdrawn: string[] }> {
   const purposes = opts.all ? (["marketing_email", "marketing_sms"] as const) : ([CONSENT_PURPOSE_FOR_CHANNEL[target.channel]] as const);
+  const subject = { kind: "contact", id: target.contactId } as const;
+  const current = await currentConsent(target.dataId, subject);
   const withdrawn: string[] = [];
+  let changed = false;
   for (const purpose of purposes) {
-    await recordConsent(target.dataId, { kind: "contact", id: target.contactId }, purpose, "withdrawn", "form", { ip: opts.ip ?? null, ua: opts.ua ?? null, text: target.campaignId ? `unsubscribe link (campaign ${target.campaignId})` : "unsubscribe link" }).catch((err) => console.error("[marketing] consent withdraw failed:", err));
+    // Idempotent: a replayed one-click POST appends nothing when already withdrawn.
+    if (current[purpose]?.status !== "withdrawn") {
+      // Errors propagate: the route must never report success when the ledger write failed.
+      await recordConsent(target.dataId, subject, purpose, "withdrawn", "form", { ip: opts.ip ?? null, ua: opts.ua ?? null, text: target.campaignId ? `unsubscribe link (campaign ${target.campaignId})` : "unsubscribe link" });
+      changed = true;
+    }
     withdrawn.push(purpose);
+  }
+  // Suppress the address too, so a duplicate/re-imported contact with the same email or phone is also blocked (canSendMarketing matches opt-outs by address).
+  const contact = await queryOne<{ email: string | null; phone: string | null }>(`SELECT email, phone FROM crm_contacts WHERE user_id = $1 AND id = $2`, [target.dataId, target.contactId]);
+  const optChannel = opts.all ? "all" : target.channel;
+  const existingOptout = await queryOne<{ id: string }>(`SELECT id FROM contact_optouts WHERE user_id = $1 AND contact_id = $2 AND channel IN ($3, 'all') LIMIT 1`, [target.dataId, target.contactId, optChannel]);
+  if (!existingOptout) {
+    await query(`INSERT INTO contact_optouts (user_id, contact_id, phone, email, channel, reason, created_at) VALUES ($1, $2, $3, $4, $5, 'unsubscribe link', NOW())`, [
+      target.dataId,
+      target.contactId,
+      optChannel === "email" ? null : (contact?.phone ?? null),
+      optChannel === "sms" ? null : (contact?.email?.toLowerCase() ?? null),
+      optChannel,
+    ]);
+    changed = true;
   }
   if (target.recipientId) {
     const r = await queryOne<{ id: string }>(`UPDATE campaign_recipients SET status = 'unsubscribed' WHERE id = $1 AND status <> 'unsubscribed' RETURNING id`, [target.recipientId]).catch(() => null);
@@ -468,7 +490,7 @@ export async function unsubscribe(target: UnsubscribeTarget, opts: { all?: boole
   }
   // Exit any active sequence enrollments for this contact.
   await query(`UPDATE sequence_enrollments SET status = 'exited', exited_reason = 'unsubscribed', updated_at = NOW() WHERE user_id = $1 AND contact_id = $2 AND status = 'active'`, [target.dataId, target.contactId]).catch(() => undefined);
-  await emitEvent(target.dataId, { type: "contact.unsubscribed", entity: "contact", entityId: target.contactId, data: { campaign_id: target.campaignId, channel: target.channel, purposes: withdrawn } });
+  if (changed) await emitEvent(target.dataId, { type: "contact.unsubscribed", entity: "contact", entityId: target.contactId, data: { campaign_id: target.campaignId, channel: target.channel, purposes: withdrawn } });
   return { withdrawn };
 }
 

@@ -5,14 +5,14 @@ import { Plus, Trash2, UserPlus } from "lucide-react";
 import type { Notice, ProjectDetail } from "./types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
-import { Empty } from "@/components/ui/feedback";
+import { Banner, Empty } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { Checkbox, Input, Select } from "@/components/ui/input";
 import { Pill } from "@/components/ui/pill";
 import { fmtMoney } from "@/lib/money/format";
 import { PROJECT_MEMBER_ROLES, type MilestoneDTO, type ProjectMemberDTO, type ProjectMemberRole } from "@/lib/projects/pure";
 import { cn } from "@/lib/utils";
-import { fmtDay, hours, jsonFetch, memberLabel, type MemberOption } from "./shared";
+import { cap, fmtDay, hours, jsonFetch, memberLabel, type MemberOption } from "./shared";
 
 export function OverviewTab({ detail, members, reload, notify }: { detail: ProjectDetail; members: MemberOption[]; reload: () => Promise<void>; notify: (tone: Notice["tone"], text: string) => void }) {
   const { project, progress, budget, milestones } = detail;
@@ -70,7 +70,7 @@ export function OverviewTab({ detail, members, reload, notify }: { detail: Proje
             <span className="tabular-nums">{progress.percent}%</span>
           </div>
           <div className="h-2.5 w-full overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100} aria-label="Tasks done">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${progress.percent}%` }} />
+            <div className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${progress.percent}%` }} />
           </div>
           {progress.estimate_minutes_total > 0 && (
             <p className="mt-2 text-xs text-muted-foreground">
@@ -121,13 +121,23 @@ export function OverviewTab({ detail, members, reload, notify }: { detail: Proje
             Milestones
           </h2>
           {!readOnly && (
-            <Button size="sm" variant="outline" onClick={() => setNewMilestone(true)}>
-              <Plus className="h-4 w-4" aria-hidden /> Add
+            <Button size="sm" variant="outline" touch onClick={() => setNewMilestone(true)}>
+              <Plus className="h-4 w-4" aria-hidden /> Add milestone
             </Button>
           )}
         </div>
         {milestones.length === 0 ? (
-          <Empty title="No milestones" text="Break the project into a few checkpoints with due dates." />
+          <Empty
+            title="No milestones"
+            text="Break the project into a few checkpoints with due dates."
+            action={
+              !readOnly ? (
+                <Button size="sm" variant="outline" touch onClick={() => setNewMilestone(true)}>
+                  <Plus className="h-4 w-4" aria-hidden /> Add milestone
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
             {milestones.map((m) => {
@@ -135,10 +145,10 @@ export function OverviewTab({ detail, members, reload, notify }: { detail: Proje
               return (
                 <li key={m.id} className="flex items-center gap-3 px-3 py-2">
                   <Checkbox label={<span className="sr-only">Mark {m.name} {m.status === "done" ? "open" : "done"}</span>} checked={m.status === "done"} onChange={() => void toggleMilestone(m)} disabled={readOnly} />
-                  <span className={cn("min-w-0 flex-1 truncate text-sm", m.status === "done" && "text-muted-foreground line-through")}>{m.name}</span>
+                  <span className={cn("min-w-0 flex-1 break-words text-sm", m.status === "done" && "text-muted-foreground line-through")}>{m.name}</span>
                   <span className={cn("shrink-0 text-xs tabular-nums", late ? "font-medium text-red-600 dark:text-red-400" : "text-muted-foreground")}>{m.due_on ? fmtDay(m.due_on) : "No date"}</span>
                   {!readOnly && (
-                    <Button size="icon-sm" variant="ghost" onClick={() => void removeMilestone(m)} aria-label={`Delete ${m.name}`}>
+                    <Button size="icon-sm" variant="ghost" touch onClick={() => void removeMilestone(m)} aria-label={`Delete ${m.name}`}>
                       <Trash2 className="h-4 w-4" aria-hidden />
                     </Button>
                   )}
@@ -156,8 +166,8 @@ export function OverviewTab({ detail, members, reload, notify }: { detail: Proje
             Team
           </h2>
           {!readOnly && (
-            <Button size="sm" variant="outline" onClick={() => setAddMember(true)}>
-              <UserPlus className="h-4 w-4" aria-hidden /> Add
+            <Button size="sm" variant="outline" touch onClick={() => setAddMember(true)}>
+              <UserPlus className="h-4 w-4" aria-hidden /> Add member
             </Button>
           )}
         </div>
@@ -169,9 +179,9 @@ export function OverviewTab({ detail, members, reload, notify }: { detail: Proje
             {detail.members.map((mem) => (
               <li key={mem.id} className="flex items-center gap-2 px-3 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate">{mem.member_user_id ? memberLabel(members, mem.member_user_id) : `Staff ${mem.staff_id?.slice(0, 8)}…`}</span>
-                <Pill>{mem.role}</Pill>
+                <Pill>{cap(mem.role)}</Pill>
                 {!readOnly && (
-                  <Button size="icon-sm" variant="ghost" onClick={() => void removeMember(mem)} aria-label="Remove member">
+                  <Button size="icon-sm" variant="ghost" touch onClick={() => void removeMember(mem)} aria-label={`Remove ${mem.member_user_id ? memberLabel(members, mem.member_user_id) : "member"}`}>
                     <Trash2 className="h-4 w-4" aria-hidden />
                   </Button>
                 )}
@@ -252,7 +262,11 @@ function MilestoneDialog({ projectId, onClose, onSaved }: { projectId: string; o
   return (
     <Dialog title="Add milestone" onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
-        {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
+        {err && (
+          <Banner tone="error" onDismiss={() => setErr(null)}>
+            {err}
+          </Banner>
+        )}
         <Field label="Name" required>
           <Input value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} autoFocus />
         </Field>
@@ -293,7 +307,11 @@ function MemberDialog({ projectId, members, onClose, onSaved }: { projectId: str
   return (
     <Dialog title="Add team member" onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
-        {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
+        {err && (
+          <Banner tone="error" onDismiss={() => setErr(null)}>
+            {err}
+          </Banner>
+        )}
         <Field label="Member" required hint={members.length === 0 ? "No team members visible — invite people under Settings → Team." : undefined}>
           <Select value={memberId} onChange={(e) => setMemberId(e.target.value)} required>
             {members.map((m) => (
@@ -307,7 +325,7 @@ function MemberDialog({ projectId, members, onClose, onSaved }: { projectId: str
           <Select value={role} onChange={(e) => setRole(e.target.value as ProjectMemberRole)}>
             {PROJECT_MEMBER_ROLES.map((r) => (
               <option key={r} value={r}>
-                {r}
+                {cap(r)}
               </option>
             ))}
           </Select>

@@ -47,9 +47,9 @@ export function AudiencesTab({ notify }: { notify: (tone: Notice["tone"], text: 
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">Saved filters over your CRM contacts. Counts are live; consent is always re-checked when a campaign launches.</p>
-        <Button type="button" touch onClick={() => setEditing("new")}>
+        <Button type="button" touch className="self-start sm:self-auto" onClick={() => setEditing("new")}>
           <Plus className="h-4 w-4" aria-hidden /> New audience
         </Button>
       </div>
@@ -78,7 +78,7 @@ export function AudiencesTab({ notify }: { notify: (tone: Notice["tone"], text: 
                   <Button type="button" variant="ghost" size="icon-sm" touch aria-label={`Edit ${a.name}`} onClick={() => setEditing(a)}>
                     <Pencil className="h-3.5 w-3.5" aria-hidden />
                   </Button>
-                  <Button type="button" variant="ghost" size="icon-sm" touch aria-label={`Delete ${a.name}`} onClick={() => remove(a)} className="text-red-600">
+                  <Button type="button" variant="ghost" size="icon-sm" touch aria-label={`Delete ${a.name}`} onClick={() => remove(a)} className="text-destructive hover:text-destructive">
                     <Trash2 className="h-3.5 w-3.5" aria-hidden />
                   </Button>
                 </span>
@@ -148,7 +148,7 @@ function AudienceDialog({ audience, onClose, onSaved }: { audience: AudienceRow 
         <AudienceBuilder value={def} onChange={setDef} channel={channel} />
         <div className="rounded-lg border border-border p-3">
           <EligibilitySummary preview={preview.data} loading={preview.loading} channel={channel} />
-          {preview.error && <p className="mt-1 text-xs text-red-600">{preview.error}</p>}
+          {preview.error && <p className="mt-1 text-xs text-destructive">{preview.error}</p>}
           {preview.data && preview.data.sample.length > 0 && (
             <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Sample contacts">
               {preview.data.sample.map((c) => (
@@ -162,7 +162,7 @@ function AudienceDialog({ audience, onClose, onSaved }: { audience: AudienceRow 
           )}
         </div>
         {err && (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-destructive">
             {err}
           </p>
         )}
@@ -171,7 +171,7 @@ function AudienceDialog({ audience, onClose, onSaved }: { audience: AudienceRow 
             Cancel
           </Button>
           <Button type="submit" touch disabled={busy}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />} Save audience
+            {busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} Save audience
           </Button>
         </DialogFooter>
       </form>

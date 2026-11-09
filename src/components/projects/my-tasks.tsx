@@ -9,7 +9,7 @@ import { Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Pill } from "@/components/ui/pill";
 import type { ProjectTaskDTO } from "@/lib/projects/pure";
 import { cn } from "@/lib/utils";
-import { PRIORITY_TONE, fmtDue, isPast, jsonFetch } from "./shared";
+import { PRIORITY_TONE, cap, fmtDue, isPast, jsonFetch } from "./shared";
 
 /**
  * "My tasks" section for /tasks: open tasks assigned to the caller across
@@ -66,7 +66,7 @@ export function MyTasksPanel({ className }: { className?: string }) {
         </h2>
         <div className="flex items-center gap-3">
           <Checkbox label="Show done" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="outline" size="sm" touch>
             <Link href="/projects">
               <FolderKanban className="h-4 w-4" aria-hidden /> Projects
             </Link>
@@ -78,7 +78,15 @@ export function MyTasksPanel({ className }: { className?: string }) {
       ) : tasks === null ? (
         <SkeletonList count={3} itemClassName="h-10" label="Loading your tasks…" />
       ) : tasks.length === 0 ? (
-        <Empty title="Nothing assigned to you" text="Tasks assigned to you inside projects show up here, soonest due first." />
+        <Empty
+          title="Nothing assigned to you"
+          text="Tasks assigned to you inside projects show up here, soonest due first."
+          action={
+            <Button asChild variant="outline" touch>
+              <Link href="/projects">Open projects</Link>
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-4">
           {groups.map((g) => (
@@ -86,13 +94,13 @@ export function MyTasksPanel({ className }: { className?: string }) {
               <div className="mb-1.5 flex items-center gap-2 text-sm font-medium">
                 <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: g.color ?? "hsl(var(--primary))" }} aria-hidden />
                 {g.id ? (
-                  <Link href={`/projects/${encodeURIComponent(g.id)}?tab=tasks`} className="hover:underline">
+                  <Link href={`/projects/${encodeURIComponent(g.id)}?tab=tasks`} className="rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     {g.name}
                   </Link>
                 ) : (
                   g.name
                 )}
-                <span className="text-xs text-muted-foreground">{g.tasks.length}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{g.tasks.length}</span>
               </div>
               <ul className="divide-y divide-border rounded-lg border border-border">
                 {g.tasks.map((t) => {
@@ -100,8 +108,8 @@ export function MyTasksPanel({ className }: { className?: string }) {
                   return (
                     <li key={t.id} className="flex items-center gap-3 px-3 py-2">
                       <Checkbox label={<span className="sr-only">Mark {t.title} {t.done ? "open" : "done"}</span>} checked={t.done} onChange={() => void toggle(t)} />
-                      <span className={cn("min-w-0 flex-1 truncate text-sm", t.done && "text-muted-foreground line-through")}>{t.title}</span>
-                      {t.priority && <Pill tone={PRIORITY_TONE[t.priority]}>{t.priority}</Pill>}
+                      <span className={cn("min-w-0 flex-1 break-words text-sm", t.done && "text-muted-foreground line-through")}>{t.title}</span>
+                      {t.priority && <Pill tone={PRIORITY_TONE[t.priority]}>{cap(t.priority)}</Pill>}
                       <span className={cn("shrink-0 text-xs tabular-nums", late ? "font-medium text-red-600 dark:text-red-400" : "text-muted-foreground")}>{fmtDue(t.due_at)}</span>
                     </li>
                   );

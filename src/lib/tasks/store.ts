@@ -1,3 +1,4 @@
+import { isWorkspaceMember } from "@/lib/auth/members";
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
@@ -13,6 +14,16 @@ export const TASK_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export function isTaskPriority(v: unknown): v is TaskPriority {
   return typeof v === "string" && (TASK_PRIORITIES as readonly string[]).includes(v);
+}
+
+/**
+ * Stored → canonical priority. The projects module writes `medium` for the
+ * same tier this module calls `normal`; both spellings live in `tasks.priority`,
+ * so readers map rather than fall back to the default.
+ */
+export function normaliseTaskPriority(v: unknown): TaskPriority {
+  if (v === "medium") return "normal";
+  return isTaskPriority(v) ? v : "normal";
 }
 
 export interface TaskRow {
@@ -66,7 +77,7 @@ export function toTaskDTO(r: TaskRow, now: Date = new Date()): TaskDTO {
     chat_id: r.chat_id,
     due_at: iso(r.due_at),
     assignee_id: r.assignee_id ?? null,
-    priority: isTaskPriority(r.priority) ? r.priority : "normal",
+    priority: normaliseTaskPriority(r.priority),
     overdue: isOverdue(r, now),
     created_at: iso(r.created_at) ?? String(r.created_at),
   };
@@ -111,7 +122,21 @@ export interface TaskCreateInput {
   chat_id?: string | null;
 }
 
+export class TaskInputError extends Error {
+  readonly status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "TaskInputError";
+  }
+}
+
+async function assertAssignee(dataId: string, assigneeId: string | null | undefined): Promise<void> {
+  if (!assigneeId) return;
+  if (!(await isWorkspaceMember(dataId, assigneeId))) throw new TaskInputError("assignee_id is not a member of this workspace");
+}
+
 export async function createTask(dataId: string, input: TaskCreateInput, source: string = "api"): Promise<TaskDTO> {
+  await assertAssignee(dataId, input.assignee_id);
   const row = await queryOne<TaskRow>(
     `INSERT INTO tasks (user_id, title, due_at, assignee_id, priority, chat_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLS}`,
     [dataId, input.title.trim(), input.due_at ?? null, input.assignee_id ?? null, input.priority ?? "normal", input.chat_id ?? null]
@@ -135,6 +160,7 @@ export interface TaskPatchInput {
 }
 
 export async function updateTask(dataId: string, id: string, patch: TaskPatchInput): Promise<TaskDTO> {
+  await assertAssignee(dataId, patch.assignee_id);
   const sets: string[] = [];
   const params: unknown[] = [id, dataId];
   const set = (col: string, v: unknown) => {
@@ -143,7 +169,11 @@ export async function updateTask(dataId: string, id: string, patch: TaskPatchInp
   };
   if (patch.title !== undefined) set("title", patch.title.trim());
   if (patch.done !== undefined) set("done", patch.done);
-  if (patch.due_at !== undefined) set("due_at", patch.due_at);
+  if (patch.due_at !== undefined) {
+    set("due_at", patch.due_at);
+    // A new deadline gets a fresh overdue notice (markOverdueTasks emits once per overdue_notified_at IS NULL).
+    sets.push(`overdue_notified_at = NULL`);
+  }
   if (patch.assignee_id !== undefined) set("assignee_id", patch.assignee_id);
   if (patch.priority !== undefined) set("priority", patch.priority);
   if (sets.length === 0) {

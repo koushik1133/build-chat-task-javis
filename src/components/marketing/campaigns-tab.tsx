@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Mail, MessageSquareText, Pause, Play, Plus, RefreshCw, Send, Square, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter, Drawer } from "@/components/ui/dialog";
-import { Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { Input, Select } from "@/components/ui/input";
 import { Pill, StatusPill } from "@/components/ui/pill";
@@ -14,8 +14,11 @@ import { cn, timeAgo } from "@/lib/utils";
 import type { CampaignRow, RecipientWithContact } from "@/lib/marketing/campaigns";
 import type { AudienceRow } from "@/lib/marketing/audiences";
 import type { TemplateRow } from "@/lib/marketing/templates";
-import { RECIPIENT_STATUSES, type AudienceDefinition, type CampaignStats, type MarketingSendChannel, type RecipientStatus, parseAudienceDefinition, describeAudience } from "@/lib/marketing/types";
-import { AudienceBuilder, CAMPAIGN_TONE, ContentEditor, ContentPreview, EligibilitySummary, FunnelBar, RECIPIENT_TONE, jsonFetch, useAudiencePreview, type ContentValue, type Notice } from "./shared";
+import { CAMPAIGN_STATUSES, RECIPIENT_STATUSES, type AudienceDefinition, type CampaignStats, type MarketingSendChannel, type RecipientStatus, parseAudienceDefinition, describeAudience } from "@/lib/marketing/types";
+import { AudienceBuilder, CAMPAIGN_TONE, CHANNEL_LABEL, ContentEditor, ContentPreview, EligibilitySummary, Funnel, RECIPIENT_TONE, jsonFetch, useAudiencePreview, type ContentValue, type FunnelStage, type Notice } from "./shared";
+
+const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export type CampaignListRow = CampaignRow & { stats?: CampaignStats };
 type Channels = Record<string, "live" | "simulated">;
@@ -81,24 +84,24 @@ export function CampaignsTab({ notify, selectedId, onSelect }: { notify: (tone: 
           <label htmlFor="campaign-status" className="sr-only">
             Filter by status
           </label>
-          <Select id="campaign-status" value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 w-auto">
+          <Select id="campaign-status" value={status} onChange={(e) => setStatus(e.target.value)} className="w-full sm:w-auto">
             <option value="">All statuses</option>
-            {["draft", "scheduled", "sending", "sent", "paused", "cancelled"].map((s) => (
+            {CAMPAIGN_STATUSES.map((s) => (
               <option key={s} value={s}>
-                {s[0].toUpperCase() + s.slice(1)}
+                {cap(s)}
               </option>
             ))}
           </Select>
-          <Pill tone={channels.email === "live" ? "success" : "neutral"} title="Email provider status">
-            <Mail className="h-3 w-3" aria-hidden /> email {channels.email ?? "…"}
+          <Pill tone={channels.email === "live" ? "success" : "neutral"} title={channels.email === "live" ? "Email provider connected" : "Email sends are simulated until a provider is connected"}>
+            <Mail className="h-3 w-3" aria-hidden /> Email {channels.email ?? "…"}
           </Pill>
-          <Pill tone={channels.sms === "live" ? "success" : "neutral"} title="SMS provider status">
-            <MessageSquareText className="h-3 w-3" aria-hidden /> sms {channels.sms ?? "…"}
+          <Pill tone={channels.sms === "live" ? "success" : "neutral"} title={channels.sms === "live" ? "SMS provider connected" : "SMS sends are simulated until a provider is connected"}>
+            <MessageSquareText className="h-3 w-3" aria-hidden /> SMS {channels.sms ?? "…"}
           </Pill>
         </div>
         <div className="flex gap-2">
-          <Button type="button" variant="ghost" size="icon" touch onClick={load} aria-label="Refresh campaigns">
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} aria-hidden />
+          <Button type="button" variant="ghost" size="icon" touch onClick={load} disabled={loading} aria-label="Refresh campaigns">
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin motion-reduce:animate-none")} aria-hidden />
           </Button>
           <Button type="button" touch onClick={() => setShowNew(true)}>
             <Plus className="h-4 w-4" aria-hidden /> New campaign
@@ -122,7 +125,7 @@ export function CampaignsTab({ notify, selectedId, onSelect }: { notify: (tone: 
           }
         />
       ) : (
-        <ul className="space-y-2" aria-label="Campaigns">
+        <ul className="space-y-2" aria-label="Campaigns" aria-busy={loading || undefined}>
           {rows.map((c) => (
             <li key={c.id}>
               <CampaignCard campaign={c} onOpen={() => onSelect(c.id)} />
@@ -130,7 +133,7 @@ export function CampaignsTab({ notify, selectedId, onSelect }: { notify: (tone: 
           ))}
         </ul>
       )}
-      <LoadMore hasMore={Boolean(cursor)} loading={more} count={rows.length} onMore={loadMore} noun="campaigns" />
+      {rows.length > 0 && <LoadMore hasMore={Boolean(cursor)} loading={more} count={rows.length} onMore={loadMore} noun="campaigns" />}
 
       {showNew && (
         <CampaignWizard
@@ -162,14 +165,14 @@ function CampaignCard({ campaign: c, onOpen }: { campaign: CampaignListRow; onOp
   const s = c.stats;
   const handed = s ? s.sent + s.delivered + s.bounced + s.unsubscribed : c.sent_count;
   return (
-    <button type="button" onClick={onOpen} className="w-full rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-4">
+    <button type="button" onClick={onOpen} aria-label={`Open campaign ${c.name}`} className="w-full touch-manipulation rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate font-medium">{c.name}</p>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="uppercase">{c.channel}</span>
+            <span>{CHANNEL_LABEL[c.channel]}</span>
             <span aria-hidden>·</span>
-            <span>{c.status === "scheduled" && c.schedule_at ? `scheduled ${new Date(c.schedule_at).toLocaleString()}` : `updated ${timeAgo(c.updated_at)}`}</span>
+            <span>{c.status === "scheduled" && c.schedule_at ? `Scheduled ${new Date(c.schedule_at).toLocaleString()}` : `Updated ${timeAgo(c.updated_at)}`}</span>
           </p>
         </div>
         <StatusPill status={c.status} map={CAMPAIGN_TONE} />
@@ -191,7 +194,7 @@ function Stat({ label, value, pct, warn }: { label: string; value: number; pct?:
   return (
     <div className="text-xs">
       <p className="text-muted-foreground">{label}</p>
-      <p className={cn("tabular-nums font-medium", warn && "text-amber-600")}>
+      <p className={cn("tabular-nums font-medium", warn && "text-amber-700 dark:text-amber-300")}>
         {value}
         {pct !== undefined && <span className="ml-1 font-normal text-muted-foreground">{pct}%</span>}
       </p>
@@ -299,10 +302,20 @@ function CampaignWizard({ onClose, onDone }: { onClose: () => void; onDone: (c: 
 
   return (
     <Dialog title="New campaign" description={`Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`} onClose={onClose} size="lg">
-      <ol className="mb-4 flex flex-wrap gap-1 text-xs" aria-label="Steps">
+      {/* Announces step changes; the visible indicator below is decorative on phones (the dialog description carries the text). */}
+      <p className="sr-only" aria-live="polite">
+        Step {step + 1} of {STEPS.length}: {STEPS[step]}
+      </p>
+      <ol className="mb-4 flex gap-1 sm:flex-wrap sm:text-xs" aria-label="Steps">
         {STEPS.map((s, i) => (
-          <li key={s} aria-current={i === step ? "step" : undefined} className={cn("rounded-full px-2 py-0.5", i === step ? "bg-primary text-primary-foreground" : i < step ? "bg-secondary text-foreground" : "text-muted-foreground")}>
-            {i + 1}. {s}
+          <li
+            key={s}
+            aria-current={i === step ? "step" : undefined}
+            className={cn("h-1.5 flex-1 rounded-full sm:h-auto sm:flex-none sm:px-2 sm:py-0.5", i === step ? "bg-primary text-primary-foreground" : i < step ? "bg-primary/40 text-foreground sm:bg-secondary" : "bg-secondary text-muted-foreground")}
+          >
+            <span className="sr-only sm:not-sr-only">
+              {i + 1}. {s}
+            </span>
           </li>
         ))}
       </ol>
@@ -327,11 +340,11 @@ function CampaignWizard({ onClose, onDone }: { onClose: () => void; onDone: (c: 
                     type="button"
                     aria-pressed={channel === ch}
                     onClick={() => setChannel(ch)}
-                    className={cn("flex min-h-16 items-center gap-3 rounded-lg border p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", channel === ch ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/40")}
+                    className={cn("flex min-h-16 touch-manipulation items-center gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none", channel === ch ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/40")}
                   >
-                    {ch === "email" ? <Mail className="h-5 w-5" aria-hidden /> : <MessageSquareText className="h-5 w-5" aria-hidden />}
-                    <span>
-                      <span className="block text-sm font-medium">{ch === "email" ? "Email" : "SMS"}</span>
+                    {ch === "email" ? <Mail className="h-5 w-5 shrink-0" aria-hidden /> : <MessageSquareText className="h-5 w-5 shrink-0" aria-hidden />}
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium">{CHANNEL_LABEL[ch]}</span>
                       <span className="block text-xs text-muted-foreground">{ch === "email" ? "Markdown body, open & click tracking, one-click unsubscribe." : "Short text with an opt-out link; needs marketing SMS consent."}</span>
                     </span>
                   </button>
@@ -355,25 +368,29 @@ function CampaignWizard({ onClose, onDone }: { onClose: () => void; onDone: (c: 
                     ))}
                   </Select>
                 </Field>
-                <Button type="button" variant="outline" size="sm" onClick={() => setNewAudience({ name: "", definition: channel === "email" ? { has_email: true } : { has_phone: true } })}>
+                <Button type="button" variant="outline" size="sm" touch onClick={() => setNewAudience({ name: "", definition: channel === "email" ? { has_email: true } : { has_phone: true } })}>
                   <Plus className="h-3.5 w-3.5" aria-hidden /> Create a new audience instead
                 </Button>
               </>
             ) : (
               <div className="space-y-3 rounded-lg border border-border p-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                   <Field label="New audience name" required className="flex-1">
                     <Input value={newAudience.name} onChange={(e) => setNewAudience({ ...newAudience, name: e.target.value.slice(0, 120) })} />
                   </Field>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setNewAudience(null)}>
-                    Use existing
+                  <Button type="button" variant="ghost" size="sm" touch className="self-start sm:self-auto" onClick={() => setNewAudience(null)}>
+                    Use an existing audience
                   </Button>
                 </div>
                 <AudienceBuilder value={newAudience.definition} onChange={(definition) => setNewAudience({ ...newAudience, definition })} channel={channel} />
               </div>
             )}
             <EligibilitySummary preview={preview.data} loading={preview.loading} channel={channel} className="rounded-lg border border-border px-3 py-2" />
-            {preview.data && preview.data.count > 0 && eligible === 0 && <p className="text-xs text-amber-700">Nobody in this audience has consented to marketing by {channel}. Launching will be blocked — record consent under CRM → Privacy first.</p>}
+            {preview.data && preview.data.count > 0 && eligible === 0 && (
+              <Banner tone="warn" className="mb-0">
+                Nobody in this audience has consented to marketing by {CHANNEL_LABEL[channel]}. Launching will be blocked — record consent under CRM → Privacy first.
+              </Banner>
+            )}
           </>
         )}
         {step === 2 && (
@@ -402,7 +419,7 @@ function CampaignWizard({ onClose, onDone }: { onClose: () => void; onDone: (c: 
               </div>
             )}
             <details className="rounded-lg border border-border">
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Preview with a sample contact</summary>
+              <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9">Preview with a sample contact</summary>
               <div className="p-3">
                 <ContentPreview value={content} channel={channel} />
               </div>
@@ -412,12 +429,12 @@ function CampaignWizard({ onClose, onDone }: { onClose: () => void; onDone: (c: 
         {step === 3 && (
           <fieldset className="space-y-3">
             <legend className="mb-1 block text-xs font-medium">When should it go out?</legend>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="radio" name="when" checked={when === "now"} onChange={() => setWhen("now")} /> Send as soon as I launch
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="radio" name="when" checked={when === "later"} onChange={() => setWhen("later")} /> Schedule for later
-            </label>
+            {(["now", "later"] as const).map((w) => (
+              <label key={w} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-0">
+                <input type="radio" name="when" checked={when === w} onChange={() => setWhen(w)} className="h-4 w-4 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card" />
+                {w === "now" ? "Send as soon as I launch" : "Schedule for later"}
+              </label>
+            ))}
             {when === "later" && (
               <Field label="Date and time" required>
                 <Input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} />
@@ -429,16 +446,20 @@ function CampaignWizard({ onClose, onDone }: { onClose: () => void; onDone: (c: 
         {step === 4 && (
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <Row k="Name" v={name} />
-            <Row k="Channel" v={channel.toUpperCase()} />
+            <Row k="Channel" v={CHANNEL_LABEL[channel]} />
             <Row k="Audience" v={newAudience ? `${newAudience.name} (new) — ${describeAudience(newAudience.definition)}` : pickedAudience ? pickedAudience.name : "—"} />
             <Row k="Eligible" v={preview.data ? `${eligible} of ${preview.data.count} contacts` : "…"} />
             {channel === "email" && <Row k="Subject" v={content.subject} />}
             <Row k="Schedule" v={when === "later" && scheduleAt ? new Date(scheduleAt).toLocaleString() : "Immediately"} />
           </dl>
         )}
-        {step === 4 && eligible === 0 && <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">No eligible recipients — you can save a draft, but launching is blocked until at least one contact has consented to marketing by {channel}.</p>}
+        {step === 4 && eligible === 0 && (
+          <Banner tone="warn" className="mb-0">
+            No eligible recipients — you can save a draft, but launching is blocked until at least one contact has consented to marketing by {CHANNEL_LABEL[channel]}.
+          </Banner>
+        )}
         {err && (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-destructive">
             {err}
           </p>
         )}
@@ -458,7 +479,7 @@ function CampaignWizard({ onClose, onDone }: { onClose: () => void; onDone: (c: 
                 Save draft
               </Button>
               <Button type="button" touch disabled={busy || eligible === 0} onClick={() => submit(true)} title={eligible === 0 ? "No consent-eligible recipients" : undefined}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+                {busy ? spinner : <Send className="h-4 w-4" aria-hidden />}
                 {when === "later" ? "Schedule" : "Launch"}
               </Button>
             </>
@@ -557,8 +578,20 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
     }
   }
 
-  const handed = s ? s.sent + s.delivered + s.bounced + s.unsubscribed : 0;
-  const funnelMax = useMemo(() => Math.max(1, s ? s.total : 1), [s]);
+  const funnel = useMemo<FunnelStage[]>(() => {
+    if (!s) return [];
+    const handed = s.sent + s.delivered + s.bounced + s.unsubscribed;
+    return [
+      { label: "Recipients", value: s.total },
+      { label: "Sent", value: handed },
+      { label: "Delivered", value: s.delivered + s.unsubscribed },
+      { label: "Opened", value: s.opened, note: `${s.open_rate}% of delivered` },
+      { label: "Clicked", value: s.clicked, note: `${s.click_rate}% of delivered` },
+      { label: "Unsubscribed", value: s.unsubscribed, kind: "outcome" },
+      { label: "Bounced", value: s.bounced, kind: "outcome" },
+      { label: "No consent", value: s.skipped_no_consent, kind: "outcome" },
+    ];
+  }, [s]);
 
   return (
     <Drawer
@@ -574,7 +607,7 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
           </div>
           {c && (
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {c.channel.toUpperCase()} · created {timeAgo(c.created_at)}
+              {CHANNEL_LABEL[c.channel]} · created {timeAgo(c.created_at)}
               {c.finished_at ? ` · finished ${timeAgo(c.finished_at)}` : c.started_at ? ` · started ${timeAgo(c.started_at)}` : ""}
             </p>
           )}
@@ -585,7 +618,7 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
           <div className="flex flex-wrap gap-2">
             {(c.status === "draft" || c.status === "paused" || c.status === "scheduled") && (
               <Button type="button" touch size="sm" disabled={busy !== null} onClick={() => act("launch")}>
-                {busy === "launch" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />} {c.status === "paused" ? "Resume" : "Launch now"}
+                {busy === "launch" ? spinner : <Play className="h-4 w-4" aria-hidden />} {c.status === "paused" ? "Resume" : "Launch now"}
               </Button>
             )}
             {(c.status === "sending" || c.status === "scheduled") && (
@@ -599,7 +632,7 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
               </Button>
             )}
             {c.status !== "sending" && (
-              <Button type="button" variant="ghost" touch size="sm" disabled={busy !== null} onClick={() => act("delete")} className="text-red-600">
+              <Button type="button" variant="ghost" touch size="sm" disabled={busy !== null} onClick={() => act("delete")} className="text-destructive hover:text-destructive">
                 <Trash2 className="h-4 w-4" aria-hidden /> Delete
               </Button>
             )}
@@ -616,27 +649,28 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
               Funnel
             </h3>
             {s ? (
-              <div className="space-y-1.5">
-                <FunnelBar label="Recipients" value={s.total} max={funnelMax} tone="bg-secondary-foreground/40" />
-                <FunnelBar label="Sent" value={handed} max={funnelMax} />
-                <FunnelBar label="Delivered" value={s.delivered + s.unsubscribed} max={funnelMax} tone="bg-emerald-500" />
-                <FunnelBar label={`Opened (${s.open_rate}%)`} value={s.opened} max={funnelMax} tone="bg-sky-500" />
-                <FunnelBar label={`Clicked (${s.click_rate}%)`} value={s.clicked} max={funnelMax} tone="bg-violet-500" />
-                <FunnelBar label="Unsubscribed" value={s.unsubscribed} max={funnelMax} tone="bg-rose-400" />
-                <FunnelBar label="Bounced" value={s.bounced} max={funnelMax} tone="bg-amber-500" />
-                <FunnelBar label="No consent" value={s.skipped_no_consent} max={funnelMax} tone="bg-amber-300" />
-                {s.queued > 0 && <p className="text-xs text-muted-foreground">{s.queued} still queued — the background sender picks them up every tick.</p>}
-              </div>
+              s.total === 0 ? (
+                <p className="text-xs text-muted-foreground">{c.status === "draft" ? "Launch the campaign to start the funnel." : "No recipients were queued for this campaign."}</p>
+              ) : (
+                <>
+                  <Funnel title={`${c.name} funnel`} stages={funnel} />
+                  {s.queued > 0 && (
+                    <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
+                      {s.queued} still queued — the background sender picks them up every tick.
+                    </p>
+                  )}
+                </>
+              )
             ) : (
-              <SkeletonList count={3} itemClassName="h-3" />
+              <SkeletonList count={5} itemClassName="h-3" label="Loading funnel…" />
             )}
             {detail && detail.links.length > 0 && (
               <div className="mt-3">
-                <p className="mb-1 text-xs font-medium">Top links</p>
-                <ul className="space-y-1 text-xs">
+                <h4 className="mb-1 text-xs font-medium">Top links</h4>
+                <ul className="space-y-1 text-xs" aria-label="Most clicked links">
                   {detail.links.map((l) => (
                     <li key={l.url} className="flex items-center justify-between gap-2">
-                      <span className="truncate text-muted-foreground" title={l.url}>
+                      <span className="min-w-0 truncate text-muted-foreground" title={l.url}>
                         {l.url}
                       </span>
                       <span className="shrink-0 tabular-nums">
@@ -655,9 +689,16 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
             </h3>
             <ContentPreview value={{ subject: c.subject ?? "", preheader: c.preheader ?? "", body_md: c.body_md }} channel={c.channel} />
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <Input type={c.channel === "email" ? "email" : "tel"} value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder={c.channel === "email" ? "Send a test to… (defaults to you)" : "Phone for a test SMS"} aria-label="Test recipient" />
+              <Input
+                type={c.channel === "email" ? "email" : "tel"}
+                value={testTo}
+                onChange={(e) => setTestTo(e.target.value)}
+                placeholder={c.channel === "email" ? "Send a test to… (defaults to you)" : "Phone number for a test SMS"}
+                aria-label={c.channel === "email" ? "Test recipient email" : "Test recipient phone number"}
+                autoComplete={c.channel === "email" ? "email" : "tel"}
+              />
               <Button type="button" variant="secondary" touch disabled={busy !== null || (c.channel === "sms" && !testTo)} onClick={() => act("test")}>
-                {busy === "test" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />} Test send
+                {busy === "test" ? spinner : <Send className="h-4 w-4" aria-hidden />} Send a test
               </Button>
             </div>
           </section>
@@ -670,26 +711,36 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
               <label className="sr-only" htmlFor="recipient-status">
                 Filter recipients by status
               </label>
-              <Select id="recipient-status" value={rStatus} onChange={(e) => setRStatus(e.target.value as RecipientStatus | "")} className="h-8 w-auto text-xs">
-                <option value="">All</option>
+              <Select id="recipient-status" value={rStatus} onChange={(e) => setRStatus(e.target.value as RecipientStatus | "")} className="w-auto sm:h-8 sm:text-xs">
+                <option value="">All statuses</option>
                 {RECIPIENT_STATUSES.map((st) => (
                   <option key={st} value={st}>
-                    {st.replace(/_/g, " ")}
+                    {cap(st.replace(/_/g, " "))}
                   </option>
                 ))}
               </Select>
             </div>
-            {recipients.length === 0 && !rLoading ? (
-              <p className="text-xs text-muted-foreground">{c.status === "draft" ? "Recipients are materialised when you launch." : "No recipients match."}</p>
+            {recipients.length === 0 && rLoading ? (
+              <SkeletonList count={3} itemClassName="h-10" label="Loading recipients…" />
+            ) : recipients.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{c.status === "draft" ? "Recipients are added when you launch." : "No recipients match this filter."}</p>
             ) : (
               <TableScroller label="Recipients">
                 <table className="w-full text-xs">
                   <thead className={THEAD}>
                     <tr>
-                      <th className={TH}>Contact</th>
-                      <th className={TH}>Status</th>
-                      <th className={TH}>Opened</th>
-                      <th className={TH}>Clicked</th>
+                      <th scope="col" className={TH}>
+                        Contact
+                      </th>
+                      <th scope="col" className={TH}>
+                        Status
+                      </th>
+                      <th scope="col" className={TH}>
+                        Opened
+                      </th>
+                      <th scope="col" className={TH}>
+                        Clicked
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -711,7 +762,7 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
                 </table>
               </TableScroller>
             )}
-            <LoadMore hasMore={Boolean(rCursor)} loading={rLoading} count={recipients.length} onMore={() => loadRecipients(rCursor)} noun="recipients" auto={false} />
+            {recipients.length > 0 && <LoadMore hasMore={Boolean(rCursor)} loading={rLoading} count={recipients.length} onMore={() => loadRecipients(rCursor)} noun="recipients" auto={false} />}
           </section>
         </div>
       )}

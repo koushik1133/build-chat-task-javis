@@ -26,7 +26,8 @@ const LOG_TONE: Record<string, Tone> = { ok: "success", error: "danger", skipped
 const KINDS: AccountingEntityKind[] = ["invoice", "payment", "expense", "contact", "product", "supplier", "bill", "bill_payment"];
 
 const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
-const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+/** "bill_payment" → "Bill payment": display labels are sentence case with spaces. */
+const cap = (s: string) => (s ? (s[0].toUpperCase() + s.slice(1)).replace(/_/g, " ") : s);
 const fmt =(iso: string | null) => (iso ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "—");
 
 async function readError(res: Response, fallback: string): Promise<string> {

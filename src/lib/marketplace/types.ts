@@ -179,7 +179,25 @@ function scrubRecord(input: Record<string, unknown>, path: string, removed: stri
     if (typeof v === "string") {
       if (portableString(v)) out[k] = v.slice(0, 4000);
       else removed.push(`${path}.${k}`);
-    } else if (v && typeof v === "object" && !Array.isArray(v)) {
+    } else if (Array.isArray(v) && /(^|_)(id|ids|token|secret|key|urls?|webhooks?)$/i.test(k)) {
+      removed.push(`${path}.${k}`);
+    } else if (Array.isArray(v)) {
+      // Arrays get the same treatment as their elements: strings must be portable, objects are scrubbed, scalars pass.
+      const kept: unknown[] = [];
+      v.forEach((item, i) => {
+        if (typeof item === "string") {
+          if (portableString(item)) kept.push(item.slice(0, 4000));
+          else removed.push(`${path}.${k}[${i}]`);
+        } else if (item && typeof item === "object" && !Array.isArray(item)) {
+          kept.push(scrubRecord(item as Record<string, unknown>, `${path}.${k}[${i}]`, removed));
+        } else if (!Array.isArray(item)) {
+          kept.push(item);
+        } else {
+          removed.push(`${path}.${k}[${i}]`);
+        }
+      });
+      out[k] = kept;
+    } else if (v && typeof v === "object") {
       out[k] = scrubRecord(v as Record<string, unknown>, `${path}.${k}`, removed);
     } else if (/(^|_)(id|ids|token|secret|key|url|webhook)$/i.test(k)) {
       removed.push(`${path}.${k}`);

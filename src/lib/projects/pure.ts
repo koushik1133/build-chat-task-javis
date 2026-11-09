@@ -18,6 +18,16 @@ export type ProjectMemberRole = (typeof PROJECT_MEMBER_ROLES)[number];
 export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
+/**
+ * Stored → project priority. The tasks lane writes `normal` for the tier this
+ * module calls `medium`; both spellings live in `tasks.priority`, so readers map
+ * instead of leaking an off-enum value. Unknown values read as null.
+ */
+export function normaliseTaskPriority(v: unknown): TaskPriority | null {
+  if (v === "normal") return "medium";
+  return typeof v === "string" && (TASK_PRIORITIES as readonly string[]).includes(v) ? (v as TaskPriority) : null;
+}
+
 export class ProjectError extends Error {
   constructor(message: string, public readonly status: 400 | 404 | 409 = 400) {
     super(message);

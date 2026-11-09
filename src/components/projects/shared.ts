@@ -27,6 +27,12 @@ export const PROJECT_TONE: Record<ProjectStatus, Tone> = { planning: "neutral", 
 export const MILESTONE_TONE: Record<MilestoneStatus, Tone> = { open: "neutral", done: "success" };
 export const PRIORITY_TONE: Record<TaskPriority, Tone> = { low: "neutral", medium: "info", high: "warning", urgent: "danger" };
 
+/** "on_hold" → "On hold": sentence-case an enum value for display. */
+export function cap(s: string): string {
+  const t = s.replace(/_/g, " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 export function fmtDay(ymd: string | null | undefined): string {
   if (!ymd) return "—";
   const d = new Date(`${ymd.slice(0, 10)}T00:00:00Z`);

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, Plus, Trash2, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Checkbox, Input, Select } from "@/components/ui/input";
 import { LoadMore } from "@/components/ui/load-more";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { ErrorState } from "@/components/ui/feedback";
@@ -32,6 +32,8 @@ function localToIso(v: string): string | null {
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
+
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function dueLabel(iso: string): string {
   const d = new Date(iso);
@@ -153,16 +155,13 @@ export function TaskList({ initialOverdueOnly = false }: { initialOverdueOnly?: 
             </option>
           ))}
         </Select>
-        <Button type="submit" disabled={!draft.trim()} aria-label="Add task">
-          <Plus className="h-4 w-4" />
+        <Button type="submit" touch disabled={!draft.trim()} aria-label="Add task">
+          <Plus className="h-4 w-4" aria-hidden />
         </Button>
       </form>
 
-      <div className="flex items-center gap-2 text-xs">
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" className="h-4 w-4 accent-primary" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} />
-          Overdue only
-        </label>
+      <div className="flex items-center gap-2">
+        <Checkbox label="Overdue only" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} />
       </div>
 
       {error ? <ErrorState message={error} onRetry={() => void refresh()} /> : null}
@@ -199,41 +198,43 @@ function Section({
     <div>
       <h2 className="mb-2 text-sm font-semibold">{title}</h2>
       {tasks.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Nothing here.</p>
+        <p className="text-xs text-muted-foreground">Nothing here yet.</p>
       ) : (
         <ul className="divide-y divide-border rounded-lg border border-border">
           {tasks.map((t) => (
             <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 sm:flex-nowrap">
-              <input type="checkbox" checked={t.done} onChange={() => onPatch(t.id, { done: !t.done })} className="h-4 w-4 accent-primary" aria-label={`Mark ${t.title} ${t.done ? "open" : "done"}`} />
+              <label className="-my-2 -ml-2 inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center sm:my-0 sm:ml-0 sm:min-h-0 sm:min-w-0">
+                <input type="checkbox" checked={t.done} onChange={() => onPatch(t.id, { done: !t.done })} className="h-4 w-4 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background" aria-label={`Mark ${t.title} ${t.done ? "open" : "done"}`} />
+              </label>
               <div className="min-w-0 flex-1">
-                <div className={dim ? "text-sm text-muted-foreground line-through" : "text-sm"}>{t.title}</div>
+                <div className={dim ? "break-words text-sm text-muted-foreground line-through" : "break-words text-sm"}>{t.title}</div>
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                   <span>{timeAgo(t.created_at)}</span>
                   {t.due_at ? (
                     <Pill tone={t.overdue ? "danger" : "neutral"} title={new Date(t.due_at).toLocaleString()}>
-                      <CalendarClock className="h-3 w-3" />
+                      <CalendarClock className="h-3 w-3" aria-hidden />
                       {t.overdue ? `Overdue · ${dueLabel(t.due_at)}` : dueLabel(t.due_at)}
                     </Pill>
                   ) : null}
                   {t.assignee_id ? (
                     <Pill tone="accent">
-                      <UserRound className="h-3 w-3" />
+                      <UserRound className="h-3 w-3" aria-hidden />
                       {memberLabel.get(t.assignee_id) ?? t.assignee_id.slice(0, 8)}
                     </Pill>
                   ) : null}
-                  {t.priority !== "normal" ? <Pill tone={PRIORITY_TONE[t.priority]}>{t.priority}</Pill> : null}
+                  {t.priority !== "normal" ? <Pill tone={PRIORITY_TONE[t.priority]}>{capitalise(t.priority)}</Pill> : null}
                 </div>
               </div>
               {!dim ? (
-                <div className="flex items-center gap-1">
-                  <Select value={t.priority} onChange={(e) => onPatch(t.id, { priority: e.target.value as Priority })} aria-label="Priority" className="h-8 text-xs">
+                <div className="grid w-full grid-cols-2 gap-1 sm:flex sm:w-auto sm:items-center">
+                  <Select value={t.priority} onChange={(e) => onPatch(t.id, { priority: e.target.value as Priority })} aria-label={`Priority of ${t.title}`} className="sm:h-8 sm:w-auto sm:text-xs">
                     {PRIORITIES.map((p) => (
                       <option key={p} value={p}>
-                        {p}
+                        {capitalise(p)}
                       </option>
                     ))}
                   </Select>
-                  <Select value={t.assignee_id ?? ""} onChange={(e) => onPatch(t.id, { assignee_id: e.target.value || null })} aria-label="Assignee" className="h-8 text-xs">
+                  <Select value={t.assignee_id ?? ""} onChange={(e) => onPatch(t.id, { assignee_id: e.target.value || null })} aria-label={`Assignee of ${t.title}`} className="sm:h-8 sm:w-auto sm:text-xs">
                     <option value="">Unassigned</option>
                     {members.map((m) => (
                       <option key={m.userId ?? ""} value={m.userId ?? ""}>
@@ -243,8 +244,8 @@ function Section({
                   </Select>
                   <Input
                     type="datetime-local"
-                    className="h-8 w-[11.5rem] text-xs"
-                    aria-label="Due date"
+                    className="col-span-2 sm:h-8 sm:w-[11.5rem] sm:text-xs"
+                    aria-label={`Due date of ${t.title}`}
                     defaultValue={t.due_at ? toLocalInput(t.due_at) : ""}
                     onBlur={(e) => {
                       const iso = localToIso(e.target.value);
@@ -253,8 +254,8 @@ function Section({
                   />
                 </div>
               ) : null}
-              <Button variant="ghost" size="icon" onClick={() => onDelete(t.id)} aria-label={`Delete ${t.title}`}>
-                <Trash2 className="h-4 w-4" />
+              <Button variant="ghost" size="icon" touch className="ml-auto sm:ml-0" onClick={() => onDelete(t.id)} aria-label={`Delete ${t.title}`}>
+                <Trash2 className="h-4 w-4" aria-hidden />
               </Button>
             </li>
           ))}

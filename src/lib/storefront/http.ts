@@ -47,7 +47,7 @@ export function withCartCookie(res: NextResponse, pub: PublicStorefront, token: 
 export function shopError(err: unknown, log: string): NextResponse {
   if (err && typeof err === "object" && "code" in err && (err as { name?: string }).name === "CheckoutError") {
     const e = err as { code: string; message: string; detail?: Record<string, unknown> };
-    const status = e.code === "insufficient_stock" || e.code === "unavailable" ? 409 : 400;
+    const status = e.code === "insufficient_stock" || e.code === "unavailable" || e.code === "already_ordered" ? 409 : 400;
     return NextResponse.json({ error: e.code, detail: e.message, ...(e.detail ?? {}) }, { status, headers: NO_STORE });
   }
   if (err && typeof err === "object" && (err as { name?: string }).name === "CartError") {

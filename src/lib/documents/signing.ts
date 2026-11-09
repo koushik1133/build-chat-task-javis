@@ -333,7 +333,7 @@ async function completeDocument(dataId: string, documentId: string): Promise<voi
     // Signer-facing copy (other signers' IP/device redacted), stored once so the public link serves bytes, never a re-render.
     const redacted = await buildDocumentPdf(dataId, doc, { redactEvidence: true });
     await uploadAttachment(dataId, { entityKind: "document", entityId: doc.id, fileName: built.filename.replace(/-signed\.pdf$/, "") + PUBLIC_SIGNED_SUFFIX, declaredType: "application/pdf", bytes: Buffer.from(redacted.bytes), visibility: "internal", uploadedBy: null }).catch((err) => console.error("[documents] attach public signed pdf failed", err));
-    await notifyCompletion(dataId, doc).catch((err) => console.error("[documents] completion emails failed", err));
+    await notifyCompletion(dataId, doc, redacted.hash).catch((err) => console.error("[documents] completion emails failed", err));
   } catch (err) {
     console.error("[documents] signed pdf build failed", err);
   }
@@ -383,7 +383,7 @@ export const COMPLETION_LINK_TTL_DAYS = 30;
  * Every signer gets a recipient-bound, 30-day download link to the immutable
  * signed copy once the document completes.
  */
-async function notifyCompletion(dataId: string, doc: DocumentDTO): Promise<void> {
+async function notifyCompletion(dataId: string, doc: DocumentDTO, signerCopyHash: string): Promise<void> {
   const from = await businessName(dataId);
   const signers = await listSigners(doc.id);
   for (const s of signers) {
@@ -397,7 +397,7 @@ async function notifyCompletion(dataId: string, doc: DocumentDTO): Promise<void>
       body:
         `Everyone has signed "${doc.title}" (${referenceFor(doc)}) from ${from}.\n\n` +
         `Download your signed copy here (link valid for ${COMPLETION_LINK_TTL_DAYS} days): ${download}\n\n` +
-        `SHA-256 of the signed PDF: ${doc.signed_pdf_hash ?? "pending"}`,
+        `SHA-256 of your signed copy: ${signerCopyHash}`,
       data: { kind: "document_completed", document_id: doc.id, signer_id: s.id, url: download, page_url: link.url },
     }).catch(() => undefined);
   }

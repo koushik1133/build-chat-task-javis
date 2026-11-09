@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Clock, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
-import { Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { Checkbox, Input, Select } from "@/components/ui/input";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
@@ -13,7 +13,7 @@ import type { ExpenseDTO } from "@/lib/finance/expenses";
 import type { TimeEntryDTO } from "@/lib/finance/time";
 import type { ProjectBudget, ProjectDTO } from "@/lib/projects/pure";
 import type { Notice } from "./types";
-import { hours, isoToLocal, jsonFetch, localToIso } from "./shared";
+import { cap, hours, isoToLocal, jsonFetch, localToIso } from "./shared";
 
 const EXPENSE_CATEGORIES = ["general", "materials", "subcontractor", "travel", "fuel", "equipment", "software", "marketing", "meals", "fees", "other"] as const;
 
@@ -66,7 +66,7 @@ export function CostsTab({ project, budget, reloadProject, notify }: { project: 
             Time entries
           </h2>
           {!readOnly && (
-            <Button size="sm" variant="outline" onClick={() => setLogTime(true)}>
+            <Button size="sm" variant="outline" touch onClick={() => setLogTime(true)}>
               <Clock className="h-4 w-4" aria-hidden /> Log time
             </Button>
           )}
@@ -74,25 +74,35 @@ export function CostsTab({ project, budget, reloadProject, notify }: { project: 
         {time === null ? (
           <SkeletonList count={3} itemClassName="h-10" label="Loading time…" />
         ) : time.length === 0 ? (
-          <Empty title="No time logged" text="Log hours against this project to see them in budget burn." />
+          <Empty
+            title="No time logged"
+            text="Log hours against this project to see them in budget burn."
+            action={
+              !readOnly ? (
+                <Button size="sm" variant="outline" touch onClick={() => setLogTime(true)}>
+                  <Clock className="h-4 w-4" aria-hidden /> Log time
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <TableScroller label="Time entries">
             <table className="w-full min-w-[560px] text-sm">
               <thead className={THEAD}>
                 <tr>
-                  <th className={TH}>When</th>
-                  <th className={TH}>Description</th>
-                  <th className={`${TH} text-right`}>Minutes</th>
-                  <th className={`${TH} text-right`}>Value</th>
-                  <th className={TH}>Billable</th>
+                  <th scope="col" className={TH}>When</th>
+                  <th scope="col" className={TH}>Description</th>
+                  <th scope="col" className={`${TH} text-right`}>Minutes</th>
+                  <th scope="col" className={`${TH} text-right`}>Value</th>
+                  <th scope="col" className={TH}>Billable</th>
                 </tr>
               </thead>
               <tbody>
                 {time.map((e) => (
                   <tr key={e.id} className="border-t border-border">
                     <td className="px-3 py-2 tabular-nums">{new Date(e.started_at).toLocaleString()}</td>
-                    <td className="px-3 py-2">{e.description ?? "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{e.running ? "running" : e.minutes}</td>
+                    <td className="px-3 py-2 [overflow-wrap:anywhere]">{e.description ?? "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{e.running ? "Running" : e.minutes}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(e.value_minor, e.currency)}</td>
                     <td className="px-3 py-2">{e.billable ? "Yes" : "No"}</td>
                   </tr>
@@ -109,7 +119,7 @@ export function CostsTab({ project, budget, reloadProject, notify }: { project: 
             Expenses
           </h2>
           {!readOnly && (
-            <Button size="sm" variant="outline" onClick={() => setAddExpense(true)}>
+            <Button size="sm" variant="outline" touch onClick={() => setAddExpense(true)}>
               <Receipt className="h-4 w-4" aria-hidden /> Add expense
             </Button>
           )}
@@ -117,25 +127,35 @@ export function CostsTab({ project, budget, reloadProject, notify }: { project: 
         {expenses === null ? (
           <SkeletonList count={3} itemClassName="h-10" label="Loading expenses…" />
         ) : expenses.length === 0 ? (
-          <Empty title="No expenses" text="Materials, subcontractors and travel logged here count against the budget." />
+          <Empty
+            title="No expenses yet"
+            text="Materials, subcontractors and travel logged here count against the budget."
+            action={
+              !readOnly ? (
+                <Button size="sm" variant="outline" touch onClick={() => setAddExpense(true)}>
+                  <Receipt className="h-4 w-4" aria-hidden /> Add expense
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <TableScroller label="Expenses">
             <table className="w-full min-w-[560px] text-sm">
               <thead className={THEAD}>
                 <tr>
-                  <th className={TH}>Date</th>
-                  <th className={TH}>Category</th>
-                  <th className={TH}>Vendor / description</th>
-                  <th className={`${TH} text-right`}>Total</th>
-                  <th className={TH}>Billable</th>
+                  <th scope="col" className={TH}>Date</th>
+                  <th scope="col" className={TH}>Category</th>
+                  <th scope="col" className={TH}>Vendor / description</th>
+                  <th scope="col" className={`${TH} text-right`}>Total</th>
+                  <th scope="col" className={TH}>Billable</th>
                 </tr>
               </thead>
               <tbody>
                 {expenses.map((x) => (
                   <tr key={x.id} className="border-t border-border">
                     <td className="px-3 py-2 tabular-nums">{new Date(x.spent_at).toLocaleDateString()}</td>
-                    <td className="px-3 py-2 capitalize">{x.category}</td>
-                    <td className="px-3 py-2">{[x.vendor, x.description].filter(Boolean).join(" — ") || "—"}</td>
+                    <td className="px-3 py-2">{cap(x.category)}</td>
+                    <td className="px-3 py-2 [overflow-wrap:anywhere]">{[x.vendor, x.description].filter(Boolean).join(" — ") || "—"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(x.total_minor, x.currency)}</td>
                     <td className="px-3 py-2">{x.billable ? "Yes" : "No"}</td>
                   </tr>
@@ -219,7 +239,11 @@ function LogTimeDialog({ project, onClose, onSaved }: { project: ProjectDTO; onC
   return (
     <Dialog title="Log time" description={`Against ${project.name}`} onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
-        {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
+        {err && (
+          <Banner tone="error" onDismiss={() => setErr(null)}>
+            {err}
+          </Banner>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Started" required>
             <Input type="datetime-local" value={started} onChange={(e) => setStarted(e.target.value)} required />
@@ -289,13 +313,17 @@ function ExpenseDialog({ project, onClose, onSaved }: { project: ProjectDTO; onC
   return (
     <Dialog title="Add expense" description={`Against ${project.name}`} onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
-        {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
+        {err && (
+          <Banner tone="error" onDismiss={() => setErr(null)}>
+            {err}
+          </Banner>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Category">
             <Select value={category} onChange={(e) => setCategory(e.target.value as typeof category)}>
               {EXPENSE_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {cap(c)}
                 </option>
               ))}
             </Select>

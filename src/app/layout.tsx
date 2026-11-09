@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 import "./globals.css";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
+import { ThemeBootstrap } from "@/components/theme-bootstrap";
 import { WebVitals } from "@/components/web-vitals";
 
 const inter = Inter({
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-screen bg-background text-foreground antialiased font-sans">
         {children}
+        <ThemeBootstrap />
         <RegisterServiceWorker />
         <WebVitals />
       </body>

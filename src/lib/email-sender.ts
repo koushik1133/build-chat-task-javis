@@ -1,5 +1,14 @@
 import nodemailer from "nodemailer";
 
+/**
+ * A From display name goes inside a quoted header phrase: strip quotes, angle
+ * brackets, commas/semicolons and line breaks so a value like `x" <ceo@victim>`
+ * cannot break out of the phrase, add an address or inject a header.
+ */
+export function safeDisplayName(name: string | null | undefined): string {
+  return (name ?? "").replace(/["<>\\\r\n,;:]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
 export type EmailPayload = {
   to: string;
   subject: string;
@@ -38,7 +47,7 @@ export async function sendEmailUnified({
       };
     }
 
-    const name = fromName?.trim() || "Javis";
+    const name = safeDisplayName(fromName) || "Javis";
     const fromAddress = `"${name}" <${gmailUser}>`;
 
     try {
@@ -87,10 +96,11 @@ export async function sendEmailUnified({
   // Helper from platformFromAddress matching logic
   const base = process.env.RESEND_FROM ?? "KernelHub <onboarding@resend.dev>";
   let fromAddress = base;
-  if (fromName?.trim()) {
+  const safeName = safeDisplayName(fromName);
+  if (safeName) {
     const match = base.match(/<([^>]+)>/);
     const email = match?.[1] ?? base;
-    fromAddress = `${fromName.trim()} via KernelHub <${email}>`;
+    fromAddress = `${safeName} via KernelHub <${email}>`;
   }
 
   try {

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { query, queryOne, withRetry } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
+import { escapeLike } from "@/lib/like";
 import { tableExists } from "@/lib/table-exists";
 import { getAudience, resolveAudienceIds } from "./audiences";
 import { loadContact, sendMarketingMessage, type MarketingContact } from "./send";
@@ -177,7 +178,7 @@ export async function hasRepliedSince(dataId: string, contact: MarketingContact,
   if (contact.email && (await tableExists("mail_messages"))) {
     const mail = await queryOne<{ id: string }>(
       `SELECT id FROM mail_messages WHERE user_id = $1 AND direction = 'in' AND lower(from_addr) LIKE $2 AND COALESCE(received_at, created_at) > $3 LIMIT 1`,
-      [dataId, `%${contact.email.toLowerCase()}%`, since]
+      [dataId, `%${escapeLike(contact.email.toLowerCase())}%`, since]
     ).catch(() => null);
     if (mail) return true;
   }

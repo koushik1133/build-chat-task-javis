@@ -31,6 +31,8 @@ describeDb("projects flow", () => {
     await sql(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`);
     await sql(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee_id TEXT`);
     await sql(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority TEXT`);
+    // Assignees must be workspace members (SEC: cross-org ids are refused).
+    await sql(`INSERT INTO memberships (id, org_id, user_id, role, status, accepted_at) VALUES ($1, $2, $3, 'member', 'active', NOW())`, [`${org.orgId}-ana`, org.orgId, assignee]);
   });
   afterAll(async () => {
     await cleanupDataIds([org.dataId]);
@@ -86,6 +88,8 @@ describeDb("projects flow", () => {
     const yesterday = new Date(Date.now() - 86_400_000).toISOString();
     const nextWeek = new Date(Date.now() + 7 * 86_400_000).toISOString();
     await api(tasks.POST, `/api/projects/${project.id}/tasks`, { json: { title: "Bad", milestone_id: "nope" }, params: { id: project.id }, expect: 400 });
+    // SEC: a user id that is not a member of this workspace cannot be assigned.
+    await api(tasks.POST, `/api/projects/${project.id}/tasks`, { json: { title: "Foreign", assignee_id: "itest-someone-else" }, params: { id: project.id }, expect: 400 });
     lateTask = (await api<{ task: ProjectTaskDTO }>(tasks.POST, `/api/projects/${project.id}/tasks`, { json: { title: "Measure site", assignee_id: assignee, due_at: yesterday, priority: "high", estimate_minutes: 120, milestone_id: milestones[0].id }, params: { id: project.id }, expect: 201 })).body.task;
     futureTask = (await api<{ task: ProjectTaskDTO }>(tasks.POST, `/api/projects/${project.id}/tasks`, { json: { title: "Order materials", assignee_id: org.userId, due_at: nextWeek, estimate_minutes: 60, depends_on: [lateTask.id] }, params: { id: project.id }, expect: 201 })).body.task;
     expect(lateTask.project_id).toBe(project.id);

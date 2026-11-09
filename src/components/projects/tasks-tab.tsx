@@ -12,7 +12,7 @@ import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
 import { TASK_PRIORITIES, type MilestoneDTO, type ProjectDTO, type ProjectTaskDTO, type TaskPriority } from "@/lib/projects/pure";
 import { cn } from "@/lib/utils";
 import type { Notice } from "./types";
-import { PRIORITY_TONE, fmtDue, hours, isPast, isoToLocal, jsonFetch, localToIso, memberLabel, type MemberOption } from "./shared";
+import { PRIORITY_TONE, cap, fmtDue, hours, isPast, isoToLocal, jsonFetch, localToIso, memberLabel, type MemberOption } from "./shared";
 
 type View = "board" | "list";
 type Column = "todo" | "overdue" | "done";
@@ -104,7 +104,7 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
           </form>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={filterMilestone} onChange={(e) => setFilterMilestone(e.target.value)} aria-label="Filter by milestone" className="h-9 text-xs">
+          <Select value={filterMilestone} onChange={(e) => setFilterMilestone(e.target.value)} aria-label="Filter by milestone" className="w-auto">
             <option value="">All milestones</option>
             {milestones.map((m) => (
               <option key={m.id} value={m.id}>
@@ -112,7 +112,7 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
               </option>
             ))}
           </Select>
-          <Select value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)} aria-label="Filter by assignee" className="h-9 text-xs">
+          <Select value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)} aria-label="Filter by assignee" className="w-auto">
             <option value="">Everyone</option>
             {members.map((m) => (
               <option key={m.id} value={m.id}>
@@ -121,10 +121,10 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
             ))}
           </Select>
           <div className="inline-flex rounded-md border border-border" role="group" aria-label="View">
-            <button type="button" onClick={() => setView("board")} aria-pressed={view === "board"} className={cn("inline-flex h-9 items-center gap-1 px-3 text-xs", view === "board" && "bg-secondary")}>
+            <button type="button" onClick={() => setView("board")} aria-pressed={view === "board"} className={cn("inline-flex min-h-11 touch-manipulation items-center gap-1 rounded-l-md px-3 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9", view === "board" && "bg-secondary")}>
               <LayoutGrid className="h-4 w-4" aria-hidden /> Board
             </button>
-            <button type="button" onClick={() => setView("list")} aria-pressed={view === "list"} className={cn("inline-flex h-9 items-center gap-1 border-l border-border px-3 text-xs", view === "list" && "bg-secondary")}>
+            <button type="button" onClick={() => setView("list")} aria-pressed={view === "list"} className={cn("inline-flex min-h-11 touch-manipulation items-center gap-1 rounded-r-md border-l border-border px-3 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9", view === "list" && "bg-secondary")}>
               <List className="h-4 w-4" aria-hidden /> List
             </button>
           </div>
@@ -136,7 +136,24 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
       ) : tasks === null ? (
         <SkeletonList count={4} itemClassName="h-12" label="Loading tasks…" />
       ) : visible.length === 0 ? (
-        <Empty title={tasks.length === 0 ? "No tasks yet" : "No tasks match"} text={tasks.length === 0 ? "Quick add the first task above, then set owners and due dates." : "Try clearing the filters."} />
+        <Empty
+          title={tasks.length === 0 ? "No tasks yet" : "No tasks match"}
+          text={tasks.length === 0 ? "Quick add the first task above, then set owners and due dates." : "Try clearing the filters."}
+          action={
+            tasks.length > 0 ? (
+              <Button
+                variant="outline"
+                touch
+                onClick={() => {
+                  setFilterMilestone("");
+                  setFilterAssignee("");
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : undefined
+          }
+        />
       ) : view === "board" ? (
         <div className="grid gap-3 md:grid-cols-3">
           {COLUMNS.map((col) => {
@@ -152,12 +169,12 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
                     <li key={t.id} className="rounded-lg border border-border bg-background p-3">
                       <div className="flex items-start gap-2">
                         <Checkbox label={<span className="sr-only">Mark {t.title} {t.done ? "open" : "done"}</span>} checked={t.done} onChange={() => void patch(t, { done: !t.done })} disabled={readOnly} />
-                        <button type="button" onClick={() => setEditing(t)} className={cn("min-w-0 flex-1 text-left text-sm hover:underline", t.done && "text-muted-foreground line-through")}>
+                        <button type="button" onClick={() => setEditing(t)} className={cn("min-w-0 flex-1 break-words rounded text-left text-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", t.done && "text-muted-foreground line-through")}>
                           {t.title}
                         </button>
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                        {t.priority && <Pill tone={PRIORITY_TONE[t.priority]}>{t.priority}</Pill>}
+                        {t.priority && <Pill tone={PRIORITY_TONE[t.priority]}>{cap(t.priority)}</Pill>}
                         <span className={cn(!t.done && isPast(t.due_at) && "font-medium text-red-600 dark:text-red-400")}>{fmtDue(t.due_at)}</span>
                         <span>· {memberLabel(members, t.assignee_id)}</span>
                         {t.estimate_minutes ? <span>· {hours(t.estimate_minutes)}</span> : null}
@@ -165,7 +182,7 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
                       {!readOnly && (
                         <label className="mt-2 block text-xs text-muted-foreground">
                           <span className="sr-only">Move {t.title} to</span>
-                          <Select value={col.id} onChange={(e) => move(t, e.target.value as Column)} className="h-8 text-xs">
+                          <Select value={col.id} onChange={(e) => move(t, e.target.value as Column)} className="sm:h-8 sm:text-xs">
                             {COLUMNS.map((c) => (
                               <option key={c.id} value={c.id}>
                                 {c.label}
@@ -176,7 +193,7 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
                       )}
                     </li>
                   ))}
-                  {items.length === 0 && <li className="rounded-lg border border-dashed border-border p-3 text-center text-xs text-muted-foreground">Nothing here</li>}
+                  {items.length === 0 && <li className="rounded-lg border border-dashed border-border p-3 text-center text-xs text-muted-foreground">Nothing here yet</li>}
                 </ul>
               </section>
             );
@@ -187,15 +204,15 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
           <table className="w-full min-w-[720px] text-sm">
             <thead className={THEAD}>
               <tr>
-                <th className={cn(TH, "w-8")}>
+                <th scope="col" className={cn(TH, "w-8")}>
                   <span className="sr-only">Done</span>
                 </th>
-                <th className={TH}>Task</th>
-                <th className={TH}>Assignee</th>
-                <th className={TH}>Due</th>
-                <th className={TH}>Priority</th>
-                <th className={TH}>Milestone</th>
-                <th className={cn(TH, "text-right")}>Est.</th>
+                <th scope="col" className={TH}>Task</th>
+                <th scope="col" className={TH}>Assignee</th>
+                <th scope="col" className={TH}>Due</th>
+                <th scope="col" className={TH}>Priority</th>
+                <th scope="col" className={TH}>Milestone</th>
+                <th scope="col" className={cn(TH, "text-right")}>Estimate</th>
               </tr>
             </thead>
             <tbody>
@@ -205,13 +222,13 @@ export function TasksTab({ project, milestones, members, reloadProject, notify }
                     <Checkbox label={<span className="sr-only">Mark {t.title} {t.done ? "open" : "done"}</span>} checked={t.done} onChange={() => void patch(t, { done: !t.done })} disabled={readOnly} />
                   </td>
                   <td className="px-3 py-2">
-                    <button type="button" onClick={() => setEditing(t)} className={cn("text-left hover:underline", t.done && "text-muted-foreground line-through")}>
+                    <button type="button" onClick={() => setEditing(t)} className={cn("rounded text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", t.done && "text-muted-foreground line-through")}>
                       {t.title}
                     </button>
                   </td>
                   <td className="px-3 py-2">{memberLabel(members, t.assignee_id)}</td>
                   <td className={cn("px-3 py-2 tabular-nums", !t.done && isPast(t.due_at) && "font-medium text-red-600 dark:text-red-400")}>{fmtDue(t.due_at)}</td>
-                  <td className="px-3 py-2">{t.priority ? <Pill tone={PRIORITY_TONE[t.priority]}>{t.priority}</Pill> : "—"}</td>
+                  <td className="px-3 py-2">{t.priority ? <Pill tone={PRIORITY_TONE[t.priority]}>{cap(t.priority)}</Pill> : "—"}</td>
                   <td className="px-3 py-2">{milestoneName(t.milestone_id)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{t.estimate_minutes ? hours(t.estimate_minutes) : "—"}</td>
                 </tr>
@@ -293,7 +310,7 @@ function TaskDialog({ task, milestones, members, tasks, readOnly, onClose, onSav
               <option value="">None</option>
               {TASK_PRIORITIES.map((p) => (
                 <option key={p} value={p}>
-                  {p}
+                  {cap(p)}
                 </option>
               ))}
             </Select>

@@ -14,7 +14,7 @@ async function resolve(token: string): Promise<UnsubscribeTarget | null> {
   if (payload.kind === "unsub") return resolveUnsubscribeRecipient(payload.recipientId);
   if (payload.kind === "unsub_contact") {
     const c = await queryOne<{ id: string }>(`SELECT id FROM crm_contacts WHERE user_id = $1 AND id = $2`, [payload.dataId, payload.contactId]).catch(() => null);
-    return c ? { dataId: payload.dataId, contactId: payload.contactId, recipientId: null, campaignId: null, channel: "email" } : null;
+    return c ? { dataId: payload.dataId, contactId: payload.contactId, recipientId: null, campaignId: null, channel: payload.channel } : null;
   }
   return null;
 }
@@ -47,6 +47,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     const form = await req.formData().catch(() => null);
     all = form?.get("all") === "1" || form?.get("all") === "true";
   }
-  const r = await unsubscribe(target, { all, ip: clientIp(req), ua: req.headers.get("user-agent") });
-  return NextResponse.json({ ok: true, withdrawn: r.withdrawn }, { headers: { "Cache-Control": "no-store" } });
+  try {
+    const r = await unsubscribe(target, { all, ip: clientIp(req), ua: req.headers.get("user-agent") });
+    return NextResponse.json({ ok: true, withdrawn: r.withdrawn }, { headers: { "Cache-Control": "no-store" } });
+  } catch (err) {
+    // Never tell the person they are unsubscribed when the ledger write failed.
+    console.error("[t/u] unsubscribe failed:", err);
+    return NextResponse.json({ error: "internal_error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
+  }
 }

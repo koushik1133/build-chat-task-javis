@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { claimJobs, completeJob, failJob, parsePayload } from "@/lib/agents/queue";
 import { executeRun, resumeRun } from "@/lib/agents/runner";
@@ -111,8 +111,9 @@ async function handleTick(req: Request) {
   if (!secret) {
     return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 503 });
   }
-  const auth = req.headers.get("authorization");
-  if (auth !== `Bearer ${secret}`) {
+  const auth = Buffer.from(req.headers.get("authorization") ?? "");
+  const want = Buffer.from(`Bearer ${secret}`);
+  if (auth.length !== want.length || !timingSafeEqual(auth, want)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

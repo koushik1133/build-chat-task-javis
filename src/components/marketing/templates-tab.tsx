@@ -47,9 +47,9 @@ export function TemplatesTab({ notify }: { notify: (tone: Notice["tone"], text: 
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">Reusable content with merge fields. Pick one in the campaign wizard or in a sequence step.</p>
-        <Button type="button" touch onClick={() => setEditing("new")}>
+        <Button type="button" touch className="self-start sm:self-auto" onClick={() => setEditing("new")}>
           <Plus className="h-4 w-4" aria-hidden /> New template
         </Button>
       </div>
@@ -68,7 +68,9 @@ export function TemplatesTab({ notify }: { notify: (tone: Notice["tone"], text: 
                   <p className="truncate font-medium">{t.name}</p>
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">{t.subject || "(no subject)"}</p>
                 </div>
-                <Pill tone="neutral">{t.category}</Pill>
+                <Pill tone="neutral" className="capitalize">
+                  {t.category === "sms" ? "SMS" : t.category}
+                </Pill>
               </div>
               <p className="mt-2 line-clamp-2 text-xs text-muted-foreground [overflow-wrap:anywhere]">{t.body_md}</p>
               <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -77,7 +79,7 @@ export function TemplatesTab({ notify }: { notify: (tone: Notice["tone"], text: 
                   <Button type="button" variant="ghost" size="icon-sm" touch aria-label={`Edit ${t.name}`} onClick={() => setEditing(t)}>
                     <Pencil className="h-3.5 w-3.5" aria-hidden />
                   </Button>
-                  <Button type="button" variant="ghost" size="icon-sm" touch aria-label={`Delete ${t.name}`} onClick={() => remove(t)} className="text-red-600">
+                  <Button type="button" variant="ghost" size="icon-sm" touch aria-label={`Delete ${t.name}`} onClick={() => remove(t)} className="text-destructive hover:text-destructive">
                     <Trash2 className="h-3.5 w-3.5" aria-hidden />
                   </Button>
                 </span>
@@ -143,7 +145,7 @@ function TemplateDialog({ template, onClose, onSaved }: { template: TemplateRow 
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>
               {TEMPLATE_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {c === "sms" ? "SMS" : c.charAt(0).toUpperCase() + c.slice(1)}
                 </option>
               ))}
             </Select>
@@ -151,13 +153,13 @@ function TemplateDialog({ template, onClose, onSaved }: { template: TemplateRow 
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <ContentEditor value={content} onChange={setContent} channel={channel} compact />
-          <div>
-            <p className="mb-1 text-xs font-medium">Preview (sample contact)</p>
+          <div className="min-w-0">
+            <h3 className="mb-1 text-xs font-medium">Preview with a sample contact</h3>
             <ContentPreview value={content} channel={channel} />
           </div>
         </div>
         {err && (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-destructive">
             {err}
           </p>
         )}
@@ -166,7 +168,7 @@ function TemplateDialog({ template, onClose, onSaved }: { template: TemplateRow 
             Cancel
           </Button>
           <Button type="submit" touch disabled={busy}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />} Save template
+            {busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} Save template
           </Button>
         </DialogFooter>
       </form>

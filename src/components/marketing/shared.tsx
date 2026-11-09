@@ -107,7 +107,7 @@ export function EligibilitySummary({ preview, loading, channel, className }: { p
           <Pill tone={preview.eligible > 0 ? "success" : "warning"} title={`Contacts with a current marketing_${channel} consent grant, an address on this channel and no opt-out`}>
             {preview.eligible} eligible for {channel}
           </Pill>
-          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />}
+          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden />}
         </>
       ) : (
         <span className="text-muted-foreground">Pick filters to see the live count.</span>
@@ -148,7 +148,7 @@ export function AudienceBuilder({ value, onChange, channel }: { value: AudienceD
                 type="button"
                 aria-pressed={on}
                 onClick={() => toggleLifecycle(l)}
-                className={cn("min-h-9 rounded-full border px-3 text-xs capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", on ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-secondary/60")}
+                className={cn("min-h-11 touch-manipulation rounded-full border px-3 text-xs capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9", on ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-secondary/60")}
               >
                 {l}
               </button>
@@ -264,12 +264,12 @@ export function ContentEditor({
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input id="ai-goal" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder={channel === "sms" ? "e.g. 20% off this weekend for returning customers" : "e.g. announce our new Saturday opening hours"} />
             <Button type="button" variant="secondary" touch onClick={draft} disabled={drafting || goal.trim().length < 3}>
-              {drafting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />}
+              {drafting ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />}
               {drafting ? "Drafting…" : "Draft"}
             </Button>
           </div>
           {aiError && (
-            <p role="alert" className="mt-2 text-xs text-red-600">
+            <p role="alert" className="mt-2 text-xs text-destructive">
               {aiError}
             </p>
           )}
@@ -291,7 +291,7 @@ export function ContentEditor({
       <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Insert merge field">
         <span className="text-xs text-muted-foreground">Insert:</span>
         {MERGE_FIELDS.filter((f) => channel === "email" || f.key !== "unsubscribe_url").map((f) => (
-          <button key={f.key} type="button" onClick={() => insert(f.key)} className="min-h-8 rounded-md border border-border px-2 font-mono text-[11px] hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" title={f.label}>
+          <button key={f.key} type="button" onClick={() => insert(f.key)} className="min-h-11 touch-manipulation rounded-md border border-border px-2 font-mono text-[11px] hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8" title={f.label} aria-label={`Insert ${f.label}`}>
             {`{{${f.key}}}`}
           </button>
         ))}
@@ -308,7 +308,7 @@ export function ContentPreview({ value, channel, vars = SAMPLE_VARS, className }
   if (channel === "sms") {
     return (
       <div className={cn("rounded-lg border border-border bg-secondary/30 p-3", className)}>
-        <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">SMS preview</p>
+        <p className="mb-1 text-xs font-medium text-muted-foreground">SMS preview</p>
         <p className="whitespace-pre-wrap text-sm">{renderMerge(value.body_md, vars)}</p>
         <p className="mt-1 text-xs text-muted-foreground">Opt out: {vars.unsubscribe_url}</p>
       </div>
@@ -327,15 +327,79 @@ export function ContentPreview({ value, channel, vars = SAMPLE_VARS, className }
 
 /* ---------- funnel ---------- */
 
-export function FunnelBar({ label, value, max, tone = "bg-primary" }: { label: string; value: number; max: number; tone?: string }) {
-  const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
+export const CHANNEL_LABEL: Record<MarketingSendChannel, string> = { email: "Email", sms: "SMS" };
+
+export interface FunnelStage {
+  label: string;
+  value: number;
+  /** Share of the funnel's first stage, 0–100. Computed when omitted. */
+  pct?: number;
+  /** Optional note shown after the value, e.g. a rate against delivered. */
+  note?: string;
+  /** Visual grouping: `stage` is the main funnel (one hue), `outcome` is a muted drop-off row. */
+  kind?: "stage" | "outcome";
+}
+
+const nf = new Intl.NumberFormat();
+
+/**
+ * Horizontal funnel: thin bars, one hue for the funnel stages and a muted hue
+ * for drop-offs, values in text tokens, direct labels. On phones the label sits
+ * above a full-width bar; from `sm` up it is a three-column row. A plain-text
+ * summary describes the whole figure to assistive tech and a real table sits
+ * behind a disclosure for anyone who prefers numbers.
+ */
+export function Funnel({ title, stages, className }: { title: string; stages: FunnelStage[]; className?: string }) {
+  const max = Math.max(1, stages[0]?.value ?? 1);
+  const rows = stages.map((s) => ({ ...s, pct: s.pct ?? Math.min(100, Math.round((s.value / max) * 100)), kind: s.kind ?? "stage" }));
+  const summary = `${title}: ${rows.map((r, i) => `${r.label} ${nf.format(r.value)}${i === 0 ? "" : ` (${r.pct}%)`}`).join("; ")}.`;
   return (
-    <div className="grid grid-cols-[7rem_1fr_3rem] items-center gap-2 text-xs sm:grid-cols-[8rem_1fr_3.5rem]">
-      <span className="text-muted-foreground">{label}</span>
-      <div className="h-2 overflow-hidden rounded-full bg-secondary" role="img" aria-label={`${label}: ${value} (${pct}%)`}>
-        <div className={cn("h-full rounded-full transition-[width] motion-reduce:transition-none", tone)} style={{ width: `${pct}%` }} />
+    <figure className={cn("min-w-0", className)}>
+      <figcaption className="sr-only">{summary}</figcaption>
+      <div role="img" aria-label={summary} className="space-y-1.5">
+        {rows.map((r) => (
+          <div key={r.label} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:grid sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:gap-2">
+            <span className={cn("min-w-0 flex-1 truncate", r.kind === "outcome" ? "text-muted-foreground" : "text-foreground")}>{r.label}</span>
+            <span className="order-2 shrink-0 text-right tabular-nums sm:order-3">
+              <span className="font-medium">{nf.format(r.value)}</span>
+              {r.note && <span className="ml-1 text-muted-foreground">{r.note}</span>}
+            </span>
+            <div className="order-3 h-2 w-full basis-full overflow-hidden rounded bg-secondary sm:order-2 sm:w-auto sm:basis-auto" aria-hidden>
+              <div className={cn("h-full rounded transition-[width] motion-reduce:transition-none", r.kind === "outcome" ? "bg-muted-foreground/45" : "bg-primary")} style={{ width: `${r.pct}%` }} />
+            </div>
+          </div>
+        ))}
       </div>
-      <span className="text-right tabular-nums">{value}</span>
-    </div>
+      <details className="mt-2 text-xs">
+        <summary className="inline-flex min-h-11 cursor-pointer items-center rounded-md text-muted-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">Show as table</summary>
+        <table className="mt-1 w-full border-collapse">
+          <caption className="sr-only">{title}</caption>
+          <thead>
+            <tr className="border-b border-border text-muted-foreground">
+              <th scope="col" className="py-1 text-left font-medium">
+                Stage
+              </th>
+              <th scope="col" className="py-1 text-right font-medium">
+                Count
+              </th>
+              <th scope="col" className="py-1 text-right font-medium">
+                Of recipients
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-b border-border/60">
+                <th scope="row" className="py-1 text-left font-normal">
+                  {r.label}
+                </th>
+                <td className="py-1 text-right tabular-nums">{nf.format(r.value)}</td>
+                <td className="py-1 text-right tabular-nums">{r.pct}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+    </figure>
   );
 }

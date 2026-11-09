@@ -391,6 +391,11 @@ export class SignedPdfIntegrityError extends Error {
 /** File-name suffix of the signer-facing copy (evidence redacted) stored next to the full signed PDF. */
 export const PUBLIC_SIGNED_SUFFIX = "-signed-public.pdf";
 
+/** File names reserved for the completion writer; user uploads on a document may not use them. */
+export function isReservedSignedPdfName(fileName: string): boolean {
+  return /-signed(-public)?\.pdf$/i.test(fileName.trim());
+}
+
 /**
  * The immutable signed copy: the attachment written at completion, verified
  * against its recorded hash (`signed_pdf_hash` for the full copy; the
@@ -401,12 +406,16 @@ export const PUBLIC_SIGNED_SUFFIX = "-signed-public.pdf";
 export async function loadSignedPdf(dataId: string, doc: DocumentDTO, opts: { redacted?: boolean } = {}): Promise<BuiltPdf> {
   if (doc.status !== "signed") throw new DocumentError("Document is not fully signed", 409);
   if (!doc.signed_pdf_hash) throw new SignedPdfIntegrityError(doc.id, "", null);
+  // The signer copy is selected by the system-written marker (`uploaded_by IS NULL`: only
+  // completion writes attachments without an actor) so a member upload named
+  // "*-signed-public.pdf" can never be served as the hash-verified signed copy.
   const row = opts.redacted
     ? await queryOne<{ storage_path: string; content_type: string; file_name: string; sha256: string }>(
         `SELECT storage_path, content_type, file_name, sha256 FROM attachments
-          WHERE user_id = $1 AND entity_kind = 'document' AND entity_id = $2 AND deleted_at IS NULL AND file_name LIKE $3
+          WHERE user_id = $1 AND entity_kind = 'document' AND entity_id = $2 AND deleted_at IS NULL AND uploaded_by IS NULL
+            AND visibility = 'internal' AND file_name LIKE $3 AND created_at >= COALESCE($4::timestamptz, created_at)
           ORDER BY created_at ASC LIMIT 1`,
-        [dataId, doc.id, `%${PUBLIC_SIGNED_SUFFIX}`]
+        [dataId, doc.id, `%${PUBLIC_SIGNED_SUFFIX}`, doc.completed_at ?? null]
       )
     : await queryOne<{ storage_path: string; content_type: string; file_name: string; sha256: string }>(
         `SELECT storage_path, content_type, file_name, sha256 FROM attachments
@@ -414,6 +423,14 @@ export async function loadSignedPdf(dataId: string, doc: DocumentDTO, opts: { re
           ORDER BY created_at ASC LIMIT 1`,
         [dataId, doc.id, doc.signed_pdf_hash]
       );
+  if (!row && opts.redacted) {
+    // Documents completed before the redacted signer copy was stored only have the
+    // full signed PDF. Verify that legal record is intact, then render the redacted
+    // view from it (the full copy is never re-rendered or replaced).
+    await loadSignedPdf(dataId, doc);
+    console.warn(`[documents] no stored public signed copy for ${doc.id}; rendering redacted view from the verified signed record`);
+    return buildDocumentPdf(dataId, doc, { redactEvidence: true });
+  }
   if (!row) throw new SignedPdfIntegrityError(doc.id, doc.signed_pdf_hash, null);
   const expected = opts.redacted ? row.sha256 : doc.signed_pdf_hash;
   const obj = await getObject(row.storage_path, row.content_type);

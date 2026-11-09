@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { normaliseCursor, page, parseListParams } from "@/lib/public-api/pagination";
-import { createTask, deleteTask, listTasks, TASK_PRIORITIES, updateTask } from "@/lib/tasks/store";
+import { createTask, deleteTask, listTasks, TASK_PRIORITIES, updateTask, TaskInputError } from "@/lib/tasks/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,6 +65,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: true, task });
   } catch (err) {
     if (err instanceof Error && err.message === "Task not found") return NextResponse.json({ error: "not found" }, { status: 404 });
+    if (err instanceof TaskInputError) return NextResponse.json({ error: err.message }, { status: 400 });
     console.error("[tasks] update failed:", err);
     return NextResponse.json({ error: "Could not update the task" }, { status: 500 });
   }
@@ -109,6 +110,7 @@ export async function POST(req: Request) {
     const task = await createTask(scope.dataId, parsed.data, "app");
     return NextResponse.json({ task });
   } catch (err) {
+    if (err instanceof TaskInputError) return NextResponse.json({ error: err.message }, { status: 400 });
     console.error("[tasks] create failed:", err);
     return NextResponse.json({ error: "Could not create the task" }, { status: 500 });
   }

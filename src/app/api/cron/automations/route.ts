@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/dsql";
 import { runAutomation } from "@/lib/automation-runner";
@@ -27,8 +28,9 @@ async function handleCron(req: Request) {
     return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 503 });
   }
 
-  const auth = req.headers.get("authorization");
-  if (auth !== `Bearer ${secret}`) {
+  const auth = Buffer.from(req.headers.get("authorization") ?? "");
+  const want = Buffer.from(`Bearer ${secret}`);
+  if (auth.length !== want.length || !timingSafeEqual(auth, want)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

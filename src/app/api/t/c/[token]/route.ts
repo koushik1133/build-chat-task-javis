@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { recordClick } from "@/lib/marketing/campaigns";
 import { clickTargetAllowed, verifyToken } from "@/lib/marketing/tracking";
+import { clientIp, rateLimitAsync } from "@/lib/request-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
+  if (!(await rateLimitAsync(`t:click:${clientIp(req)}`, 120, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   const payload = verifyToken(token);
   if (!payload || payload.kind !== "click") return NextResponse.json({ error: "invalid_token" }, { status: 404 });
   const url = req.nextUrl.searchParams.get("u");

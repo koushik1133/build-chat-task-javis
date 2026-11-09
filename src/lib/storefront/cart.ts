@@ -85,6 +85,21 @@ export async function markCartOrdered(cartId: string, orderId: string): Promise<
   await query(`UPDATE carts SET order_id = $2, updated_at = NOW() WHERE id = $1`, [cartId, orderId]);
 }
 
+/**
+ * Claim the cart for one checkout: the conditional UPDATE on `order_id IS NULL`
+ * means two concurrent checkouts with the same cookie can never both create an
+ * order (double reservation / double charge). Returns false when already claimed.
+ */
+export async function claimCartForOrder(cartId: string, orderId: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(`UPDATE carts SET order_id = $2, updated_at = NOW() WHERE id = $1 AND order_id IS NULL RETURNING id`, [cartId, orderId]);
+  return rows.length > 0;
+}
+
+/** Undo a claim when the checkout failed after it (only our own claim is released). */
+export async function releaseCartClaim(cartId: string, orderId: string): Promise<void> {
+  await query(`UPDATE carts SET order_id = NULL, updated_at = NOW() WHERE id = $1 AND order_id = $2`, [cartId, orderId]);
+}
+
 export interface CartLine extends CatalogItem {
   qty: number;
   line_minor: number;

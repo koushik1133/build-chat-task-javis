@@ -162,12 +162,15 @@ export interface RenderedEmail {
  * merge body (escaped), optional preheader and tracking pixel.
  */
 export function renderEmail(input: { subject: string; preheader?: string | null; body_md: string; vars: MergeVars; pixelUrl?: string | null }): RenderedEmail {
-  const subject = renderMerge(input.subject, input.vars).trim();
+  // Subject is a header: strip CR/LF so a merged contact value can never inject a header line.
+  const subject = renderMerge(input.subject, input.vars).replace(/[\r\n]+/g, " ").trim();
   const bodyMd = ensureUnsubscribe(input.body_md);
-  // Merge BEFORE markdown so {{unsubscribe_url}} becomes a real href; values are escaped as HTML
-  // text, and markdownToHtml escapes the rest. URLs in vars stay usable inside [..](..).
+  // Markdown is parsed on the *template*, then merge values are substituted HTML-escaped.
+  // Contact data (names, companies from public forms) therefore never becomes markdown:
+  // "[Verify](https://evil)" as a name renders as literal text, not a link. `{{var}}` is
+  // still accepted as an href by `inline()`, so URL vars keep working inside [..](..).
   const merged = renderMerge(bodyMd, input.vars, { escape: false });
-  let html = markdownToHtml(merged);
+  let html = renderMerge(markdownToHtml(bodyMd), input.vars, { escape: true });
   if (input.preheader?.trim()) {
     const pre = escapeHtml(renderMerge(input.preheader, input.vars));
     html = `<div style="display:none;max-height:0;overflow:hidden;opacity:0">${pre}</div>\n${html}`;

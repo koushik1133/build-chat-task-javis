@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({ query: vi.fn(), queryOne: vi.fn(), withRetry: (fn: () => unknown) => fn(), transaction: vi.fn() }));
 vi.mock("@/lib/dsql", () => db);
 vi.mock("@/lib/events/bus", () => ({ emitEvent: vi.fn(async () => undefined), EVENT_TYPES: [] }));
+vi.mock("@/lib/auth/members", () => ({ isWorkspaceMember: vi.fn(async () => true) }));
 
-import { createTask, isOverdue, isTaskPriority, listTasks, toTaskDTO, updateTask } from "@/lib/tasks/store";
+import { createTask, isOverdue, isTaskPriority, listTasks, normaliseTaskPriority, toTaskDTO, updateTask } from "@/lib/tasks/store";
 
 const now = new Date("2026-03-10T12:00:00Z");
 
@@ -44,6 +45,27 @@ describe("tasks store (due_at / assignee_id / priority)", () => {
     expect(sql).toContain("priority = $5");
     expect(sql).not.toContain("title =");
     expect(params).toEqual(["t3", "org-1", null, null, "low"]);
+  });
+
+  it("re-dating a task clears overdue_notified_at so the sweep can flag it again", async () => {
+    db.queryOne.mockResolvedValueOnce({ id: "t4", title: "X", done: false, chat_id: null, due_at: "2026-03-20T00:00:00.000Z", assignee_id: null, priority: "normal", created_at: "2026-03-10T00:00:00.000Z" });
+    await updateTask("org-1", "t4", { due_at: "2026-03-20T00:00:00.000Z" });
+    const [sql, params] = db.queryOne.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("due_at = $3");
+    expect(sql).toContain("overdue_notified_at = NULL");
+    expect(params).toEqual(["t4", "org-1", "2026-03-20T00:00:00.000Z"]);
+
+    db.queryOne.mockResolvedValueOnce({ id: "t5", title: "Y", done: true, chat_id: null, due_at: null, assignee_id: null, priority: "normal", created_at: "2026-03-10T00:00:00.000Z" });
+    await updateTask("org-1", "t5", { done: true });
+    expect((db.queryOne.mock.calls[1] as [string])[0]).not.toContain("overdue_notified_at");
+  });
+
+  it("reads the projects lane's `medium` as `normal`", () => {
+    expect(normaliseTaskPriority("medium")).toBe("normal");
+    expect(normaliseTaskPriority("urgent")).toBe("urgent");
+    expect(normaliseTaskPriority(null)).toBe("normal");
+    const dto = toTaskDTO({ id: "t6", title: "Z", done: false, chat_id: null, due_at: null, assignee_id: null, priority: "medium", created_at: "2026-03-10T00:00:00.000Z" }, now);
+    expect(dto.priority).toBe("normal");
   });
 
   it("filters by assignee and overdue in the list query", async () => {

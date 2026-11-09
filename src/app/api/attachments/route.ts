@@ -1,3 +1,4 @@
+import { isReservedSignedPdfName } from "@/lib/documents/documents";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse, type Scope } from "@/lib/auth/scope";
@@ -69,6 +70,9 @@ export async function POST(req: NextRequest) {
   if (file.size > MAX_ATTACHMENT_BYTES) return NextResponse.json({ error: "payload_too_large", detail: "File must be 20 MB or smaller" }, { status: 413 });
   try {
     if (!(await entityExists(scope.dataId, meta.data.entity_kind, meta.data.entity_id))) return NextResponse.json({ error: "not_found", detail: "Entity not found" }, { status: 404 });
+    if (meta.data.entity_kind === "document" && isReservedSignedPdfName(file.name)) {
+      return NextResponse.json({ error: "invalid_file", detail: "That file name is reserved for the signed copy written at completion" }, { status: 400 });
+    }
     const attachment = await uploadAttachment(scope.dataId, {
       entityKind: meta.data.entity_kind,
       entityId: meta.data.entity_id,

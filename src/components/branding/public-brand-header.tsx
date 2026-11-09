@@ -6,10 +6,10 @@ import type { Branding } from "@/lib/branding";
  * Slim header for public, unauthenticated surfaces (/p/*, /book/*).
  * Server component: receives resolved branding, renders no client JS.
  */
-export function PublicBrandHeader({ branding, subtitle }: { branding: Branding; subtitle?: string }) {
+export function PublicBrandHeader({ branding, subtitle, wide = false }: { branding: Branding; subtitle?: string; /** Match a wider page (storefront catalog grid). */ wide?: boolean }) {
   return (
     <header className="border-b border-border bg-card">
-      <div className="mx-auto flex w-full max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
+      <div className={`mx-auto flex w-full items-center gap-3 px-4 py-3 sm:px-6 ${wide ? "max-w-5xl" : "max-w-3xl"}`}>
         {branding.logo_url ? (
           <img
             src={branding.logo_url}

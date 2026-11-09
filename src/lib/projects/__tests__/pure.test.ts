@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, buildTimeline, computeBudget, computeProgress, daysBetween, mapQuoteToProject, parseDependsOn, weekBuckets, ymd } from "../pure";
+import { addDays, buildTimeline, computeBudget, computeProgress, daysBetween, mapQuoteToProject, parseDependsOn, weekBuckets, ymd, normaliseTaskPriority } from "../pure";
 
 const NOW = new Date("2026-03-10T12:00:00Z");
 
@@ -130,5 +130,15 @@ describe("projects/pure: quote mapping", () => {
     expect(parseDependsOn(null)).toEqual([]);
     expect(parseDependsOn("nope")).toEqual([]);
     expect(parseDependsOn('["a", 1, "b"]')).toEqual(["a", "b"]);
+  });
+});
+
+describe("projects/pure: priority vocabulary", () => {
+  it("maps the tasks lane's `normal` to `medium` and rejects unknown values", () => {
+    expect(normaliseTaskPriority("normal")).toBe("medium");
+    expect(normaliseTaskPriority("medium")).toBe("medium");
+    expect(normaliseTaskPriority("urgent")).toBe("urgent");
+    expect(normaliseTaskPriority("asap")).toBeNull();
+    expect(normaliseTaskPriority(null)).toBeNull();
   });
 });
