@@ -197,7 +197,7 @@ export default function CalendarPage() {
   const inputCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30";
 
   return (
-    <PageContainer wide title="Calendar" description="Bookings, weekly availability and public booking links." tooltip="Customers book through your public links; the AI receptionist can book here too.">
+    <PageContainer wide title="Calendar" actions={<SubscribeIcs />} description="Bookings, weekly availability and public booking links." tooltip="Customers book through your public links; the AI receptionist can book here too.">
       {error && <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"><span>{error}</span><button onClick={() => setError(null)}><X className="h-4 w-4" /></button></div>}
       {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">{notice}</div>}
 
@@ -370,5 +370,28 @@ export default function CalendarPage() {
         </div>
       )}
     </PageContainer>
+  );
+}
+
+/** Copies a private ICS subscription link (creates one on first use; rotate it from Settings > Calendar sync). */
+function SubscribeIcs() {
+  const [state, setState] = useState<"idle" | "busy" | "copied" | "error">("idle");
+  async function copy() {
+    setState("busy");
+    try {
+      const res = await fetch("/api/calendar/feed", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      if (!res.ok) throw new Error("failed");
+      const { url } = (await res.json()) as { url: string };
+      await navigator.clipboard.writeText(url);
+      setState("copied");
+    } catch {
+      setState("error");
+    }
+    setTimeout(() => setState("idle"), 2500);
+  }
+  return (
+    <button type="button" onClick={() => void copy()} disabled={state === "busy"} aria-live="polite" className="inline-flex min-h-[40px] items-center rounded-md border border-border px-3 text-sm hover:bg-secondary disabled:opacity-60">
+      {state === "copied" ? "Link copied" : state === "error" ? "Could not create link" : "Subscribe (ICS)"}
+    </button>
   );
 }

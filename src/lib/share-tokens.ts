@@ -6,11 +6,11 @@ import { isUndefinedColumn, query, queryOne } from "@/lib/dsql";
  * itself is shown once (in the link) and never recoverable from the DB.
  */
 
-export type ShareKind = "quote" | "invoice" | "pay" | "portal" | "crew" | "report" | "sign" | "order";
+export type ShareKind = "quote" | "invoice" | "pay" | "portal" | "crew" | "report" | "sign" | "order" | "calfeed";
 
 /** `crew` tokens open the mobile crew mode at /m/<token> (today's tasks & bookings, clock in/out). */
 /** `report` tokens download a scheduled report as CSV at /api/p/report/<token> (7-day links in digest emails). */
-const PATHS: Record<ShareKind, string> = { quote: "/p/q", invoice: "/p/i", pay: "/p/pay", portal: "/p/portal", crew: "/m", report: "/api/p/report", sign: "/p/sign", order: "/shop/order" };
+const PATHS: Record<ShareKind, string> = { quote: "/p/q", invoice: "/p/i", pay: "/p/pay", portal: "/p/portal", crew: "/m", report: "/api/p/report", sign: "/p/sign", order: "/shop/order", calfeed: "/api/calendar/feed" };
 /** `order` tokens open the public order status page; the real path is /shop/<org-slug>/order/<token> (built in src/lib/storefront/orders.ts). */
 
 export function hashToken(token: string): string {

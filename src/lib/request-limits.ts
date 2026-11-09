@@ -248,10 +248,35 @@ export async function rateLimitAllAsync(
   return worst;
 }
 
-/** Best-effort caller IP for rate-limit keys (trusts the first forwarded hop). */
-export function clientIp(req: Request): string {
+/**
+ * Number of trusted reverse-proxy hops in front of the app. Default 1 when
+ * running on Vercel / NODE_ENV=production, else 0 (dev: first hop, since a
+ * browser or curl may send its own header and there is no proxy).
+ */
+export function trustedProxyHops(): number {
+  const raw = process.env.TRUSTED_PROXY_HOPS?.trim();
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isInteger(n) && n >= 0 && n <= 10) return n;
+  }
+  return process.env.VERCEL || process.env.NODE_ENV === "production" ? 1 : 0;
+}
+
+/**
+ * Best-effort caller IP for rate-limit keys. Each trusted proxy appends the
+ * address it saw to X-Forwarded-For, so with N trusted hops the client is the
+ * Nth entry from the right; anything further left is client-controlled and
+ * ignored. N=0 (dev) uses the first entry. A shorter list falls back to its first entry.
+ */
+export function clientIp(req: Request, hops: number = trustedProxyHops()): string {
   const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0].trim() || "unknown";
+  if (fwd) {
+    const parts = fwd.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length) {
+      const idx = hops <= 0 ? 0 : Math.max(0, parts.length - hops);
+      return parts[idx] || "unknown";
+    }
+  }
   return req.headers.get("x-real-ip")?.trim() || "unknown";
 }
 

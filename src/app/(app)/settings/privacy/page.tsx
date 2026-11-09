@@ -13,6 +13,7 @@ import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { isAbortError, useAbortable, useDebouncedValue } from "@/components/ui/hooks";
 import { PageContainer } from "@/components/page-container";
+import { ExportEverythingCard } from "@/components/snapshots/export-everything-card";
 import {
   breachHoursRemaining,
   CONSENT_PURPOSE_LABELS,
@@ -833,6 +834,9 @@ export default function PrivacySettingsPage() {
         {tab === "incidents" && <IncidentsTab onNotice={onNotice} />}
         {tab === "grievance" && <GrievanceTab onNotice={onNotice} />}
       </TabPanel>
+      <div className="mt-6">
+        <ExportEverythingCard />
+      </div>
     </PageContainer>
   );
 }

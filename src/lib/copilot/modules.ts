@@ -66,7 +66,7 @@ export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
     label: "CRM",
     paths: ["/crm", "/contacts"],
     tools: ["crm", "comms", "privacy", "records"],
-    prompt: "CRM rules: look contacts up before creating them (avoid duplicates); log activities for anything you do on a contact; check privacy.consent_status before any marketing send.",
+    prompt: "CRM rules: look contacts up before creating them (avoid duplicates); log activities for anything you do on a contact; check privacy.consent_status before any marketing send. Customers can message the team from their portal (portal.message_received events, /messaging Portal conversations); replying to them needs approval.",
     entityParams: { contact: "crm.get_contact", id: "crm.get_contact" },
   },
   leads: {
@@ -181,7 +181,7 @@ export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
   },
   calendar: {
     label: "Calendar",
-    paths: ["/calendar", "/bookings"],
+    paths: ["/calendar", "/bookings", "/settings/calendar-sync"],
     tools: ["calendar", "crm"],
     prompt: "Calendar rules: offer only real availability (calendar.propose_slots); booking, rescheduling and cancelling notify the customer and need approval.",
     entityParams: { booking: "calendar.propose_slots" },
@@ -237,8 +237,8 @@ export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
   settings: {
     label: "Settings",
     paths: ["/settings"],
-    tools: ["credits", "privacy", "agents"],
-    prompt: "Settings rules: explain where a setting lives and what it affects; you can read credit balance and consent state but configuration changes are done by the user in the UI.",
+    tools: ["credits", "privacy", "agents", "chat", "snapshots"],
+    prompt: "Settings rules: explain where a setting lives and what it affects; you can read credit balance and consent state but configuration changes are done by the user in the UI. Calendar sync (/settings/calendar-sync) pushes bookings to Google/Outlook and blocks slots from external busy time; chat apps (/settings/chat-apps) relay events to Slack/Teams/Discord, and chat.send posts a message (needs approval).",
   },
   general: {
     label: "Workspace",

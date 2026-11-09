@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
+import { containsUntrusted, UNTRUSTED_PREAMBLE, wrapUntrustedJson } from "@/lib/ai/untrusted";
 import { query } from "@/lib/dsql";
-import { listTools, needsApproval } from "@/lib/agents/registry";
+import { hasUntrustedOutput, listTools, needsApproval } from "@/lib/agents/registry";
 import type { RouterMessage, ToolContext, ToolSpec } from "@/lib/agents/types";
 import { completeWithTools } from "@/lib/llm/router";
 import { assertBudget } from "@/lib/llm/budgets";
@@ -137,6 +138,8 @@ function systemPrompt(module: CopilotModule, context: string, tools: ToolSpec[],
     "- Never invent ids. Get them from the snapshot or a list/search tool.",
     "- Keep answers concise and concrete. Use short bullet lists for multiple items.",
     "",
+    UNTRUSTED_PREAMBLE,
+    "",
     context,
     "",
     "## Available tools",
@@ -174,7 +177,7 @@ export async function planCopilot(userId: string, req: Pick<CopilotRequest, "mod
 export async function runCopilot(userId: string, req: CopilotRequest, opts: { can?: ToolContext["can"] } = {}): Promise<CopilotResult> {
   const plan = await planCopilot(userId, req);
   const tools = plan.tools;
-  const ctx: ToolContext = { userId, runId: `copilot:${randomUUID()}`, agentId: null, autonomy: "approve", can: opts.can };
+  const ctx: ToolContext = { userId, runId: `copilot:${randomUUID()}`, agentId: null, autonomy: "approve", can: opts.can, tainted: containsUntrusted(plan.system) };
 
   const messages: RouterMessage[] = [{ role: "system", content: plan.system }];
   for (const h of (req.history ?? []).slice(-MAX_HISTORY)) {
@@ -190,7 +193,7 @@ export async function runCopilot(userId: string, req: CopilotRequest, opts: { ca
   let text = "";
 
   for (let step = 0; step <= MAX_TOOL_STEPS; step++) {
-    const budget = await assertBudget(userId);
+    const budget = await assertBudget(userId, "copilot");
     const lastStep = step === MAX_TOOL_STEPS;
     const turn = await completeWithTools(messages, {
       tools: lastStep ? undefined : tools,
@@ -255,10 +258,12 @@ export async function runCopilot(userId: string, req: CopilotRequest, opts: { ca
       }
 
       toolCalls.push({ name: call.name, summary: result.summary, ok: result.ok });
+      const external = spec && result.ok && hasUntrustedOutput(spec);
+      if (external) ctx.tainted = true;
       messages.push({
         role: "tool",
         tool_call_id: call.id,
-        content: clip({ ok: result.ok, summary: result.summary, data: result.data, error: result.error }),
+        content: external ? wrapUntrustedJson(spec.name, result.data ?? result.summary, 3000) : clip({ ok: result.ok, summary: result.summary, data: result.data, error: result.error }),
       });
     }
   }

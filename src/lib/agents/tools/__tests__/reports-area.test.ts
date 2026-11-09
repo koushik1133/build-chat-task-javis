@@ -67,3 +67,14 @@ describe("reports.run area gating", () => {
     expect(ok.ok).toBe(true);
   });
 });
+
+describe("reports.run with a stored run principal", () => {
+  it("a write:agents-only principal cannot read billing datasets", async () => {
+    const { canFromStored, principalFromApiScopes } = await import("@/lib/agents/principal");
+    mocks.resolveDataset.mockResolvedValue({ key: "invoices", area: "billing" });
+    const can = canFromStored(JSON.stringify(principalFromApiScopes(["write:agents"]).permissions));
+    const res = await getTool("reports.run")!.run({ ...base, can }, { spec } as never);
+    expect(res.ok).toBe(false);
+    expect(mocks.runReport).not.toHaveBeenCalled();
+  });
+});

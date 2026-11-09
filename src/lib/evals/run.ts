@@ -175,7 +175,7 @@ export async function runSandboxCase(agent: AgentRow, userId: string, evalRunId:
   };
 
   while (turns < maxTurns) {
-    const budget = await assertBudget(userId);
+    const budget = await assertBudget(userId, "other");
     const started = Date.now();
     const result = await completeWithTools(messages, { tools, model: agent.model, allowlist: budget.allowlist });
     turns++;

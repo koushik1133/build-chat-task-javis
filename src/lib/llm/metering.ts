@@ -81,10 +81,14 @@ export async function meteredComplete(
   messages: RouterMessage[],
   opts: MeteredCompleteOptions = {}
 ): Promise<string> {
-  const budget = await assertBudget(userId);
+  const budget = await assertBudget(userId, feature);
   const { runId, ...rest } = opts;
+  const useFast = rest.tier === "fast" && !rest.model;
+  const maxTokens = budget.maxTokensPerCall != null ? Math.min(rest.maxTokens ?? 1500, budget.maxTokensPerCall) : rest.maxTokens;
   const res = await completeWithTools(messages, {
     ...rest,
+    maxTokens,
+    model: useFast && budget.fallbackModel ? budget.fallbackModel : rest.model,
     tools: undefined,
     allowlist: rest.allowlist ?? budget.allowlist,
   });

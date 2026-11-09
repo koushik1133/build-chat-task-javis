@@ -89,6 +89,14 @@ In-process fixed windows (`src/lib/request-limits.ts`). They bound a single inst
 | `POST /api/team/invite` | user | 20/hour |
 | Lead enrichment (LLM) | site | 20/hour |
 
+### Client IP and trusted proxy hops
+
+`clientIp()` reads `X-Forwarded-For` from the right. Each trusted reverse proxy appends the address it saw, so with `TRUSTED_PROXY_HOPS=N` the client is the Nth entry from the right; entries further left are client-supplied and ignored (a spoofed leading hop cannot rotate rate-limit keys). The default is 1 on Vercel / `NODE_ENV=production` and 0 elsewhere (0 = first hop, for local dev without a proxy). Set it to the real number of proxies (for example 2 behind a CDN plus a load balancer).
+
+### Marketing tracking links
+
+Open/click/unsubscribe links are HMAC-signed with `MARKETING_TRACKING_SECRET` (required in production; signing throws if unset). To rotate, move the old value to `MARKETING_TRACKING_SECRET_PREVIOUS` and set a new current value; verification accepts current, previous, then the legacy `CRON_SECRET`-derived key so links already sent keep working.
+
 ## What is simulated
 
 * Payments default to `PAYMENTS_PROVIDER=simulated`: checkout and webhooks are signed with `PAYMENTS_SIMULATED_SECRET` and mark invoices paid without any real charge.

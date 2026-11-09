@@ -108,17 +108,22 @@ export const EVENT_TYPES = [
   "attachment.added",
   "privacy.dsr.received",
   "marketplace.installed",
+  "snapshot.applied",
   "automation.run_finished",
   "automation.run_failed",
   "order.created",
   "order.paid",
   "order.fulfilled",
+  "order.unfulfilled",
   "order.cancelled",
   "cart.abandoned",
   "project.created",
   "project.status_changed",
   "milestone.completed",
   "task.overdue",
+  "portal.message_received",
+  "calsync.error",
+  "chat.delivery_failed",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

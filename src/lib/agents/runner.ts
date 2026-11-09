@@ -3,6 +3,7 @@ import { query, queryOne } from "@/lib/dsql";
 import { redactSecrets } from "@/lib/secure-store";
 import { settleRunOutcome } from "@/lib/credits/outcomes";
 import { enqueueJob } from "./queue";
+import { canFromStored, serializePrincipal, type RunPrincipal } from "./principal";
 import {
   CHECKPOINT_STEP_NAME,
   executeTool,
@@ -55,6 +56,8 @@ export interface RunRow {
   started_at: string | null;
   finished_at: string | null;
   attempt: number | null;
+  principal_role?: string | null;
+  principal_permissions?: string | null;
   created_at: string;
 }
 
@@ -66,6 +69,8 @@ export interface StartRunOptions {
   workflowName?: string | null;
   /** Set false when the caller executes the run inline (default: queue a job). */
   enqueue?: boolean;
+  /** Principal whose permissions the run carries; omit for system runs (owner matrix). */
+  principal?: RunPrincipal | null;
 }
 
 export type RunOutcome =
@@ -115,9 +120,10 @@ export async function startRun(userId: string, agentId: string, opts: StartRunOp
 
   const runId = randomUUID();
   const prompt = buildAgentPrompt(agent, opts.prompt);
+  const principal = serializePrincipal(opts.principal);
   await query(
-    `INSERT INTO agent_runs (id, user_id, agent_id, automation_id, workflow_name, prompt, output, status, trigger_kind, trigger_ref, attempt)
-     VALUES ($1, $2, $3, $4, $5, $6, '', 'queued', $7, $8, 0)`,
+    `INSERT INTO agent_runs (id, user_id, agent_id, automation_id, workflow_name, prompt, output, status, trigger_kind, trigger_ref, attempt, principal_role, principal_permissions)
+     VALUES ($1, $2, $3, $4, $5, $6, '', 'queued', $7, $8, 0, $9, $10)`,
     [
       runId,
       userId,
@@ -127,6 +133,8 @@ export async function startRun(userId: string, agentId: string, opts: StartRunOp
       prompt,
       opts.triggerKind ?? "manual",
       opts.triggerRef ?? null,
+      principal.role,
+      principal.permissions,
     ]
   );
   if (opts.enqueue !== false) await enqueueJob(userId, { kind: "run", runId });
@@ -191,7 +199,7 @@ export async function executeRun(runId: string, workerId = "inline"): Promise<Ru
   if (!agent) return finalize(run, { status: "failed", error: "agent not found" });
 
   await markRunning(run.id, workerId);
-  const loopRun: LoopRun = { id: run.id, user_id: run.user_id, agent_id: run.agent_id, prompt: run.prompt ?? buildAgentPrompt(agent) };
+  const loopRun: LoopRun = { id: run.id, user_id: run.user_id, agent_id: run.agent_id, prompt: run.prompt ?? buildAgentPrompt(agent), principal_permissions: run.principal_permissions ?? null };
 
   try {
     const outcome = await runAgentLoop(loopRun, agent);
@@ -256,7 +264,7 @@ export async function resumeRun(runId: string, approvalId: string, workerId = "i
   if (!cp) return finalize(run, { status: "failed", error: "checkpoint not found; cannot resume" });
 
   await markRunning(run.id, workerId);
-  const loopRun: LoopRun = { id: run.id, user_id: run.user_id, agent_id: run.agent_id, prompt: run.prompt ?? "" };
+  const loopRun: LoopRun = { id: run.id, user_id: run.user_id, agent_id: run.agent_id, prompt: run.prompt ?? "", principal_permissions: run.principal_permissions ?? null };
   const messages: RouterMessage[] = [...cp.messages];
 
   try {
@@ -271,7 +279,7 @@ export async function resumeRun(runId: string, approvalId: string, workerId = "i
         const started = Date.now();
         const result = await executeTool(
           spec,
-          { userId: run.user_id, runId: run.id, agentId: agent.id, autonomy: resolveAutonomy(agent.autonomy_level) },
+          { userId: run.user_id, runId: run.id, agentId: agent.id, autonomy: resolveAutonomy(agent.autonomy_level), can: canFromStored(run.principal_permissions) },
           input
         );
         await persistStep(loopRun, {

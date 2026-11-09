@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { UNTRUSTED_PREAMBLE, wrapUntrusted } from "@/lib/ai/untrusted";
 import { query, queryOne } from "@/lib/dsql";
 import { complete } from "@/lib/llm";
 import { deleteFile, upsertChunks } from "@/lib/pinecone";
@@ -411,7 +412,7 @@ export async function draftArticleFromTickets(dataId: string, ticketIds: string[
         .filter((m) => m.ticket_id === t.id)
         .map((m) => `[${m.author_kind}] ${m.body.slice(0, 1200)}`)
         .join("\n");
-      return `Ticket #${t.number} — ${t.subject}\n${lines || "(no messages)"}`;
+      return wrapUntrusted(`ticket_${t.number}`, `Ticket #${t.number} — ${t.subject}\n${lines || "(no messages)"}`, { maxChars: 8000 });
     })
     .join("\n\n---\n\n")
     .slice(0, 24_000);
@@ -422,6 +423,7 @@ export async function draftArticleFromTickets(dataId: string, ticketIds: string[
         role: "system",
         content: [
           "You write concise, customer-facing help-center articles from support ticket transcripts.",
+          UNTRUSTED_PREAMBLE.replace(/\n/g, " "),
           "Never mention ticket numbers, customer names, emails or internal notes. Generalise the problem and give the solution as steps.",
           "Reply with ONLY a JSON object: {\"title\": string, \"excerpt\": string (<=160 chars), \"tags\": string[] (<=5), \"body_md\": string (markdown with ## headings, steps, and a short 'Still stuck?' closing line)}.",
         ].join(" "),

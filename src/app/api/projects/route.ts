@@ -11,7 +11,7 @@ import { createProject, listProjects } from "@/lib/projects/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GET /api/projects?status=&q=&archived=1&cursor=&limit=&summary=1 — summary adds progress + budget per project. */
+/** GET /api/projects?status=(planning|active|on_hold|done|cancelled|open)&q=&archived=1&cursor=&limit=&summary=1 — summary adds progress + budget per project. */
 export async function GET(req: NextRequest) {
   const s = await projectScope(req, false);
   if (!s.ok) return s.res;
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     if (list.badCursor) return NextResponse.json({ error: "invalid cursor" }, { status: 400 });
     const statusRaw = sp.get("status");
     const status = statusRaw && (PROJECT_STATUSES as readonly string[]).includes(statusRaw) ? (statusRaw as ProjectStatus) : null;
-    const rows = await listProjects(s.scope.dataId, { status, q: sp.get("q"), includeArchived: sp.get("archived") === "1", cursor: list.cursor, limit: list.limit + 1 });
+    const rows = await listProjects(s.scope.dataId, { status, open: statusRaw === "open", q: sp.get("q"), includeArchived: sp.get("archived") === "1", cursor: list.cursor, limit: list.limit + 1 });
     const pg = page(rows, list.limit, (r) => normaliseCursor({ created_at: r.created_at, id: r.id }));
     if (sp.get("summary") !== "1") return NextResponse.json({ projects: pg.data, next_cursor: pg.next_cursor });
     const projects = await Promise.all(

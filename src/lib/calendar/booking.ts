@@ -3,6 +3,7 @@ import { query, queryOne, transaction } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { recordConsent, type ConsentSubject } from "@/lib/privacy/consent";
 import { enqueueNotification } from "@/lib/notifications/outbox";
+import { externalBusyIntervals } from "@/lib/calsync/busy";
 import { listSlots, wouldClash, zonedParts, type AvailabilityRule, type Interval } from "@/lib/calendar/slots";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
@@ -197,11 +198,11 @@ export async function resolveOrgBySlug(orgSlug: string): Promise<{ dataId: strin
 
 /* ---------- availability ---------- */
 
-async function busyIntervals(calendarId: string, from: Date, to: Date): Promise<{ existing: Interval[]; blocks: Interval[] }> {
+async function busyIntervals(calendarId: string, from: Date, to: Date, dataId?: string): Promise<{ existing: Interval[]; blocks: Interval[]; external: Interval[] }> {
   const pad = 24 * 60 * MS_PER_MIN; // buffers never exceed a day
   const lo = new Date(from.getTime() - pad).toISOString();
   const hi = new Date(to.getTime() + pad).toISOString();
-  const [b, k] = await Promise.all([
+  const [b, k, external] = await Promise.all([
     query<{ starts_at: string; ends_at: string }>(
       `SELECT starts_at, ends_at FROM bookings WHERE calendar_id = $1 AND status = 'confirmed' AND starts_at < $3 AND ends_at > $2`,
       [calendarId, lo, hi]
@@ -210,9 +211,10 @@ async function busyIntervals(calendarId: string, from: Date, to: Date): Promise<
       `SELECT starts_at, ends_at FROM calendar_blocks WHERE calendar_id = $1 AND starts_at < $3 AND ends_at > $2`,
       [calendarId, lo, hi]
     ),
+    dataId ? externalBusyIntervals(dataId, new Date(lo), new Date(hi)) : Promise.resolve([] as Interval[]),
   ]);
   const toI = (r: { starts_at: string; ends_at: string }): Interval => ({ start: new Date(r.starts_at), end: new Date(r.ends_at) });
-  return { existing: b.map(toI), blocks: k.map(toI) };
+  return { existing: b.map(toI), blocks: k.map(toI), external };
 }
 
 export async function availableSlots(
@@ -223,8 +225,8 @@ export async function availableSlots(
 ): Promise<{ timezone: string; slots: string[] }> {
   const cal = await queryOne<{ timezone: string }>(`SELECT timezone FROM calendars WHERE id = $1`, [type.calendar_id]);
   const timezone = cal?.timezone ?? "UTC";
-  const [rules, busy] = await Promise.all([listRules(type.calendar_id), busyIntervals(type.calendar_id, from, to)]);
-  const slots = listSlots({ rules, existing: busy.existing, blocks: busy.blocks, type, from, to, now, timezone });
+  const [rules, busy] = await Promise.all([listRules(type.calendar_id), busyIntervals(type.calendar_id, from, to, type.user_id)]);
+  const slots = listSlots({ rules, existing: busy.existing, blocks: busy.blocks, busy: busy.external, type, from, to, now, timezone });
   return { timezone, slots };
 }
 
@@ -348,11 +350,12 @@ export async function createBooking(dataId: string, input: CreateBookingInput): 
   if (!input.ignoreRules) {
     const t = type ?? { duration_minutes: duration, buffer_before: 0, buffer_after: 0, min_notice_minutes: 0, max_days_ahead: 365 };
     const rules = await listRules(calendarId);
-    const { existing, blocks } = await busyIntervals(calendarId, start, end);
+    const { existing, blocks, external } = await busyIntervals(calendarId, start, end, dataId);
     const slots = listSlots({
       rules,
       existing,
       blocks,
+      busy: external,
       type: t,
       from: new Date(start.getTime() - 1),
       to: new Date(end.getTime() + 1),
@@ -507,7 +510,7 @@ export async function cancelBooking(dataId: string, id: string, reason?: string)
       recipient: dataId,
       subject: `Booking cancelled: ${existing.name}`,
       body: `The appointment with ${existing.name} on ${when} was cancelled.`,
-      data: { bookingId: id, kind: "booking.cancelled", href: "/calendar" },
+      data: { bookingId: id, kind: "booking.cancelled", category: "bookings", href: "/calendar" },
     });
   } catch (err) {
     console.error("[booking] notification enqueue failed:", err);
@@ -544,4 +547,120 @@ export function describeInstant(iso: string, timezone: string): string {
   const hh = String(p.hour).padStart(2, "0");
   const mm = String(p.minute).padStart(2, "0");
   return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")} ${hh}:${mm} (${timezone})`;
+}
+
+/* ---------- reschedule ---------- */
+
+export type RescheduleBy = "staff" | "contact" | "agent";
+
+/** Thrown when a customer-initiated change falls inside the org's change window. */
+export class BookingPolicyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BookingPolicyError";
+  }
+}
+
+export const DEFAULT_RESCHEDULE_HOURS = 24;
+
+/** Hours before the start within which a customer can no longer move/cancel (`organizations.settings.booking_reschedule_hours`). */
+export async function bookingChangeWindowHours(dataId: string): Promise<number> {
+  const row = await queryOne<{ settings: string | null }>(`SELECT settings FROM organizations WHERE owner_user_id = $1`, [dataId]).catch(() => null);
+  if (!row?.settings) return DEFAULT_RESCHEDULE_HOURS;
+  try {
+    const v = (JSON.parse(row.settings) as Record<string, unknown>).booking_reschedule_hours;
+    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+    return Number.isFinite(n) && n >= 0 && n <= 24 * 60 ? n : DEFAULT_RESCHEDULE_HOURS;
+  } catch {
+    return DEFAULT_RESCHEDULE_HOURS;
+  }
+}
+
+/**
+ * Move a booking to a new start (duration preserved). Customers (`by: "contact"`) must be outside the
+ * change window and land on an open slot (rules, min notice, horizon); staff/agents may override rules
+ * but never double-book. Throws BookingConflictError (409) / BookingPolicyError / BookingValidationError.
+ */
+export async function rescheduleBooking(
+  dataId: string,
+  bookingId: string,
+  startsAt: string | Date,
+  by: RescheduleBy = "staff",
+  opts: { windowHours?: number; now?: Date } = {}
+): Promise<BookingRow> {
+  const existing = await getBooking(dataId, bookingId);
+  if (!existing) throw new BookingValidationError("booking not found");
+  if (existing.status !== "confirmed") throw new BookingValidationError("only confirmed bookings can be rescheduled");
+  const start = new Date(startsAt);
+  if (Number.isNaN(start.getTime())) throw new BookingValidationError("startsAt must be a valid date");
+  const now = opts.now ?? new Date();
+  const durationMs = Math.max(new Date(existing.ends_at).getTime() - new Date(existing.starts_at).getTime(), 5 * MS_PER_MIN);
+  const end = new Date(start.getTime() + durationMs);
+
+  if (by === "contact") {
+    const hours = opts.windowHours ?? (await bookingChangeWindowHours(dataId));
+    if (new Date(existing.starts_at).getTime() - now.getTime() < hours * 60 * MS_PER_MIN) {
+      throw new BookingPolicyError(`Appointments can only be changed at least ${hours} hours in advance. Please contact us directly.`);
+    }
+  }
+
+  const type = existing.booking_type_id ? await getBookingType(dataId, existing.booking_type_id) : null;
+  const cal = await queryOne<CalendarRow>(`SELECT id, user_id, name, timezone, color, created_at FROM calendars WHERE id = $1 AND user_id = $2`, [existing.calendar_id, dataId]);
+  if (!cal) throw new BookingValidationError("unknown calendar");
+  const buffers = { before: type?.buffer_before ?? 0, after: type?.buffer_after ?? 0 };
+
+  const loadBusy = async (q: (sql: string, p: unknown[]) => Promise<Array<{ starts_at: string; ends_at: string }>>): Promise<Interval[]> => {
+    const lo = new Date(start.getTime() - 24 * 60 * MS_PER_MIN).toISOString();
+    const hi = new Date(end.getTime() + 24 * 60 * MS_PER_MIN).toISOString();
+    const [b, k] = await Promise.all([
+      q(`SELECT starts_at, ends_at FROM bookings WHERE calendar_id = $1 AND status = 'confirmed' AND id <> $4 AND starts_at < $3 AND ends_at > $2`, [existing.calendar_id, lo, hi, existing.id]),
+      q(`SELECT starts_at, ends_at FROM calendar_blocks WHERE calendar_id = $1 AND starts_at < $3 AND ends_at > $2`, [existing.calendar_id, lo, hi]),
+    ]);
+    return [...b, ...k].map((r) => ({ start: new Date(r.starts_at), end: new Date(r.ends_at) }));
+  };
+
+  if (by !== "staff") {
+    const rules = await listRules(existing.calendar_id);
+    const busy = await loadBusy((s, p) => query<{ starts_at: string; ends_at: string }>(s, p));
+    const t = type ?? { duration_minutes: Math.round(durationMs / MS_PER_MIN), buffer_before: 0, buffer_after: 0, min_notice_minutes: 0, max_days_ahead: 365 };
+    const slots = listSlots({ rules, existing: busy, blocks: [], type: t, from: new Date(start.getTime() - 1), to: new Date(end.getTime() + 1), now, timezone: cal.timezone });
+    if (!slots.includes(start.toISOString())) throw new BookingConflictError();
+  }
+
+  await transaction(async (client) => {
+    const busy = await loadBusy(async (s, p) => (await client.query<{ starts_at: string; ends_at: string }>(s, p)).rows);
+    if (wouldClash({ start, end }, busy, buffers)) throw new BookingConflictError();
+    await client.query(`UPDATE bookings SET starts_at = $3, ends_at = $4, updated_at = NOW() WHERE user_id = $1 AND id = $2`, [dataId, existing.id, start.toISOString(), end.toISOString()]);
+  });
+
+  const updated = (await getBooking(dataId, existing.id)) ?? { ...existing, starts_at: start.toISOString(), ends_at: end.toISOString() };
+  const when = fmtWhen(updated.starts_at, cal.timezone);
+  const label = type?.name ?? "appointment";
+  try {
+    if (existing.email) {
+      await enqueueNotification(dataId, {
+        channel: "email",
+        recipient: existing.email,
+        subject: `Rescheduled: your ${label} is now ${when}`,
+        body: `Hi ${existing.name},\n\nYour ${label} has been moved to ${when}.\n`,
+        data: { bookingId: existing.id, kind: "booking.rescheduled" },
+      });
+    }
+    await enqueueNotification(dataId, {
+      channel: "in_app",
+      recipient: dataId,
+      subject: `Booking rescheduled: ${existing.name}`,
+      body: `${existing.name} moved their ${label} to ${when} (${by}).`,
+      data: { bookingId: existing.id, kind: "booking.rescheduled", category: "bookings", href: "/calendar" },
+    });
+  } catch (err) {
+    console.error("[booking] notification enqueue failed:", err);
+  }
+  await emitEvent(dataId, {
+    type: "booking.rescheduled",
+    entity: "booking",
+    entityId: existing.id,
+    data: { name: existing.name, from: existing.starts_at, to: updated.starts_at, by },
+  });
+  return updated;
 }

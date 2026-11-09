@@ -371,6 +371,19 @@ export async function fulfillOrder(dataId: string, id: string, actorId?: string 
   return fresh;
 }
 
+/** Undo a mistaken fulfilment: fulfilled → paid. Refunded/cancelled orders cannot be reopened. */
+export async function unfulfillOrder(dataId: string, id: string, actorId?: string | null): Promise<OrderDTO> {
+  const order = await getOrder(dataId, id);
+  if (!order) throw new Error("Order not found");
+  if (order.status === "paid") return order;
+  if (order.status !== "fulfilled") throw new Error(`Order is ${order.status_label.toLowerCase()} and cannot be marked unfulfilled`);
+  const moved = await setStatus(dataId, id, "fulfilled", "paid", { fulfilled_at: null });
+  if (!moved) throw new Error("Order changed while updating; reload and try again");
+  const fresh = (await getOrder(dataId, id)) ?? order;
+  void emitEvent(dataId, { type: "order.unfulfilled", entity: "order", entityId: id, data: { number: order.number, customer_email: order.customer_email, contact_id: order.contact_id, actor: actorId ?? null } });
+  return fresh;
+}
+
 export interface CancelResult {
   order: OrderDTO;
   released: number;

@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Mail, MessageSquareText, Pause, Play, Plus, RefreshCw, Send, Square, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -554,7 +555,7 @@ function CampaignDrawer({ id, initial, onClose, notify, onChanged }: { id: strin
     setBusy(action);
     try {
       if (action === "delete") {
-        if (!window.confirm("Delete this campaign and its recipient history?")) return;
+        if (!(await confirmDialog({ title: "Delete this campaign?", body: "Its recipient history is deleted too.", confirmLabel: "Delete", tone: "danger" }))) return;
         await jsonFetch(`/api/marketing/campaigns/${id}`, { method: "DELETE" }, "Could not delete");
         notify("success", "Campaign deleted.");
         onChanged();

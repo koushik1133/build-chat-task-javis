@@ -77,3 +77,13 @@ Add this script to `package.json`:
 3. Keep global sweeps (`expireQuotes`, `runSlaSweep`, `fanOutNewEvents`,
    `deliverPending`) tolerant of other files' rows: assert on your own ids, not on
    totals.
+
+## AI golden evals
+
+Offline suites for the receptionist and prompt-injection policy (fake LLM, no network, no DB):
+
+```
+npm run eval:golden   # vitest run src/lib/evals/__tests__/golden.test.ts
+```
+
+Cases live in `src/lib/evals/golden/{receptionist,injection}.json`. Script line for package.json: `"eval:golden": "vitest run src/lib/evals/__tests__/golden.test.ts"`. See `docs/AI-SAFETY.md`.

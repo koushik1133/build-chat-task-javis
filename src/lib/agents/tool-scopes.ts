@@ -25,6 +25,7 @@ export const TOOL_MODULE_AREA: Record<string, Area> = {
   agents: "agents",
   automations: "agents",
   marketplace: "agents",
+  snapshots: "settings",
   social: "social",
   calendar: "calendar",
   billing: "billing",
@@ -42,6 +43,7 @@ export const TOOL_MODULE_AREA: Record<string, Area> = {
   home: "reports",
   reports: "reports",
   workforce: "team",
+  chat: "settings",
 };
 
 export function areaForTool(spec: Pick<ToolSpec, "module">): Area {

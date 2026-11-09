@@ -144,6 +144,8 @@ const SAMPLE_DATA: Record<string, Record<string, unknown>> = {
   "ticket.sla_breached": { number: 17, kind: "first_response" },
   "product.created": { name: "Widget", sku: "WID-1", kind: "product" },
   "product.stock_changed": { kind: "receive", qty: 10, stock_on_hand: 25, stock_available: 22, low_stock: false },
+  "calsync.error": { provider: "google", error: "Calendar API returned 401" },
+  "chat.delivery_failed": { integration: "Ops channel", provider: "slack", error: "HTTP 404" },
   "webhook.test": { message: "This is a test delivery from KernelHub." },
 };
 
@@ -161,6 +163,8 @@ const ENTITY_FOR_PREFIX: Record<string, string> = {
   message: "message",
   social: "post",
   webhook: "webhook",
+  calsync: "calendar_connection",
+  chat: "chat_integration",
 };
 
 /** Representative payload for docs, Zapier "perform list" and the settings page. */

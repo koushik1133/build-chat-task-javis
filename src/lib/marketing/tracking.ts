@@ -3,7 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from "crypto";
 /**
  * Signed tracking tokens for the public /api/t/* routes. Tokens carry only
  * opaque ids (recipient / contact / org data id) — never an address — and are
- * HMAC-signed with a key derived from CRON_SECRET so a forged token cannot
+ * HMAC-signed with MARKETING_TRACKING_SECRET (previous and the legacy CRON_SECRET-derived key still verify) so a forged token cannot
  * mark opens, redirect through our domain or unsubscribe someone else.
  *
  * Token = base64url(payload) + "." + base64url(hmac(payload)).
@@ -24,19 +24,37 @@ export type TrackingPayload =
 
 export type TrackingChannel = "email" | "sms";
 
-function key(): Buffer {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) {
-    if (process.env.NODE_ENV === "production") throw new Error("CRON_SECRET is required for tracking links");
-    return createHash("sha256").update("marketing-tracking:dev-insecure").digest();
-  }
-  return createHash("sha256").update(`marketing-tracking:${secret}`).digest();
+const keyFrom = (secret: string): Buffer => createHash("sha256").update(`marketing-tracking:${secret}`).digest();
+
+/** Signing key: MARKETING_TRACKING_SECRET, else (dev only) a CRON_SECRET-derived key. Throws in production when unset. */
+function signingKey(): Buffer {
+  const dedicated = process.env.MARKETING_TRACKING_SECRET?.trim();
+  if (dedicated) return keyFrom(dedicated);
+  if (process.env.NODE_ENV === "production") throw new Error("MARKETING_TRACKING_SECRET is required for tracking links");
+  const legacy = process.env.CRON_SECRET?.trim();
+  return legacy ? keyFrom(legacy) : createHash("sha256").update("marketing-tracking:dev-insecure").digest();
+}
+
+/** Keys accepted when verifying: current, previous (rotation), then the legacy CRON_SECRET-derived key so links already sent keep working. */
+function verifyKeys(): Buffer[] {
+  const keys: Buffer[] = [];
+  const add = (k: Buffer) => {
+    if (!keys.some((x) => x.equals(k))) keys.push(k);
+  };
+  const current = process.env.MARKETING_TRACKING_SECRET?.trim();
+  const previous = process.env.MARKETING_TRACKING_SECRET_PREVIOUS?.trim();
+  const legacy = process.env.CRON_SECRET?.trim();
+  if (current) add(keyFrom(current));
+  else add(signingKey());
+  if (previous) add(keyFrom(previous));
+  if (legacy) add(keyFrom(legacy));
+  return keys;
 }
 
 const b64 = (s: string | Buffer) => Buffer.from(s).toString("base64url");
 
 function sign(payload: string): string {
-  return `${b64(payload)}.${createHmac("sha256", key()).update(payload).digest("base64url")}`;
+  return `${b64(payload)}.${createHmac("sha256", signingKey()).update(payload).digest("base64url")}`;
 }
 
 export function urlHash(url: string): string {
@@ -69,14 +87,17 @@ export function verifyToken(token: string | null | undefined): TrackingPayload |
   } catch {
     return null;
   }
-  const expected = createHmac("sha256", key()).update(payload).digest();
   let given: Buffer;
   try {
     given = Buffer.from(token.slice(dot + 1), "base64url");
   } catch {
     return null;
   }
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  const valid = verifyKeys().some((k) => {
+    const expected = createHmac("sha256", k).update(payload).digest();
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  });
+  if (!valid) return null;
   const parts = payload.split("|");
   switch (parts[0]) {
     case "o":

@@ -18,6 +18,7 @@ interface TotalsRow {
 }
 interface FeatureRow extends TotalsRow { feature: string }
 interface ProviderRow extends TotalsRow { provider: string; model: string }
+interface TopRunRow { run_id: string; feature: string; calls: NumLike; cost_micros: NumLike; tokens: NumLike; last_at: string | null }
 interface DayRow { day: string; calls: NumLike; cost_micros: NumLike }
 
 function monthStartIso(): string {
@@ -41,7 +42,7 @@ export async function GET() {
                COALESCE(SUM(cost_micros), 0) AS cost_micros`;
 
   try {
-    const [totals, byFeature, byProvider, days, budget, orgSettings] = await Promise.all([
+    const [totals, byFeature, byProvider, days, budget, orgSettings, topRuns] = await Promise.all([
       queryOne<TotalsRow>(
         `SELECT ${AGG} FROM ai_usage WHERE user_id = $1 AND created_at >= $2`,
         [scope.dataId, since]
@@ -67,6 +68,13 @@ export async function GET() {
       ),
       getBudget(scope.dataId),
       getOrgSettings(scope.dataId),
+      query<TopRunRow>(
+        `SELECT u.run_id, MAX(u.feature) AS feature, COUNT(*) AS calls, COALESCE(SUM(u.cost_micros), 0) AS cost_micros,
+                COALESCE(SUM(u.prompt_tokens + u.completion_tokens), 0) AS tokens, MAX(u.created_at) AS last_at
+         FROM ai_usage u WHERE u.user_id = $1 AND u.created_at >= $2 AND u.run_id IS NOT NULL
+         GROUP BY u.run_id ORDER BY cost_micros DESC LIMIT 5`,
+        [scope.dataId, since]
+      ).catch(() => [] as TopRunRow[]),
     ]);
 
     // Dense 30-day series so the bar strip always has 30 slots.
@@ -103,6 +111,7 @@ export async function GET() {
         costMicros: num(r.cost_micros),
       })),
       series,
+      topRuns: topRuns.map((r) => ({ runId: r.run_id, feature: r.feature, calls: num(r.calls), costMicros: num(r.cost_micros), tokens: num(r.tokens), lastAt: r.last_at })),
       budget,
       providers: describeProviders(),
     });

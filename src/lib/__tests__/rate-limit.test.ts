@@ -63,3 +63,26 @@ describe("rateLimitAll / authRateLimit", () => {
     expect(clientIp(new Request("https://x", { headers: { "x-real-ip": "9.9.9.9" } }))).toBe("9.9.9.9");
   });
 });
+
+describe("clientIp trusted hops", () => {
+  const mk = (xff: string) => new Request("http://x", { headers: { "x-forwarded-for": xff } });
+  it("takes the Nth entry from the right", async () => {
+    const { clientIp } = await import("../request-limits");
+    expect(clientIp(mk("6.6.6.6, 1.1.1.1, 2.2.2.2"), 1)).toBe("2.2.2.2");
+    expect(clientIp(mk("6.6.6.6, 1.1.1.1, 2.2.2.2"), 2)).toBe("1.1.1.1");
+    expect(clientIp(mk("6.6.6.6, 1.1.1.1"), 5)).toBe("6.6.6.6");
+    expect(clientIp(mk("6.6.6.6, 1.1.1.1"), 0)).toBe("6.6.6.6");
+  });
+  it("defaults by environment and honours TRUSTED_PROXY_HOPS", async () => {
+    const { trustedProxyHops } = await import("../request-limits");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("NODE_ENV", "test");
+    expect(trustedProxyHops()).toBe(0);
+    vi.stubEnv("VERCEL", "1");
+    expect(trustedProxyHops()).toBe(1);
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "2");
+    expect(trustedProxyHops()).toBe(2);
+    vi.unstubAllEnvs();
+  });
+});

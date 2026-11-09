@@ -45,8 +45,45 @@ export function listTools(filter: ToolFilter = {}): ToolSpec[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export type ToolRisk = "low" | "medium" | "high";
+
+/** External sends, money movement, deletion, publishing and access changes. */
+const HIGH_RISK_TOOLS = new Set([
+  "comms.send_email", "messaging.reply", "helpdesk.reply", "billing.send_quote", "billing.issue_credit_note",
+  "accounting.push_invoice", "accounting.push", "documents.send", "voice.start_campaign", "social.publish_post",
+  "marketing.enroll", "marketing.launch", "chat.send", "records.delete", "marketplace.install", "procurement.create_po",
+  "privacy.open_request", "kb.publish_article",
+]);
+const HIGH_RISK_ACTION = /^(send|refund|void|delete|erase|purge|launch|push|invite|grant|revoke|set_role|decide|approve|create_api_key|create_webhook|create_key)/;
+const UNTRUSTED_OUTPUT_TOOLS = new Set([
+  "helpdesk.get_ticket", "helpdesk.list_tickets", "crm.get_contact", "crm.search_contacts", "webchat.sessions",
+  "records.search", "messaging.list", "mail.read", "mail.search",
+]);
+
+/** Effective risk: explicit spec value, else name-based classification (reads are low). */
+export function riskOf(spec: ToolSpec): ToolRisk {
+  if (spec.risk) return spec.risk;
+  if (spec.scope === "read") return "low";
+  const action = spec.name.split(".")[1] ?? "";
+  if (HIGH_RISK_TOOLS.has(spec.name) || HIGH_RISK_ACTION.test(action)) return "high";
+  return "medium";
+}
+
+/** Whether the tool's result carries external text that must be wrapped. */
+export function hasUntrustedOutput(spec: ToolSpec): boolean {
+  return spec.untrustedOutput === true || UNTRUSTED_OUTPUT_TOOLS.has(spec.name) || spec.name.startsWith("leads.");
+}
+
+/** True when the action firewall (not the autonomy level) is what forces approval. */
+export function taintForcesApproval(spec: ToolSpec, ctx: ToolContext): boolean {
+  return ctx.tainted === true && spec.scope === "write" && riskOf(spec) === "high";
+}
+
+export const TAINT_REASON = "Requires approval: run contains customer-supplied content";
+
 /** Decide whether a call must pause for a human, given the agent's autonomy. */
 export function needsApproval(spec: ToolSpec, input: unknown, ctx: ToolContext): boolean {
+  if (taintForcesApproval(spec, ctx)) return true;
   if (ctx.autonomy === "draft") return spec.scope === "write";
   if (ctx.autonomy === "auto") return false;
   // "approve": defer to the tool's own rule; default write tools to gated.

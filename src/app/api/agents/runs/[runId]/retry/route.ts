@@ -1,3 +1,4 @@
+import { principalFromScope } from "@/lib/agents/principal";
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { AgentNotFoundError, getRun, startRun } from "@/lib/agents/runner";
@@ -20,6 +21,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ runId: string
       triggerKind: "manual",
       triggerRef: run.id,
       automationId: run.automation_id,
+      principal: principalFromScope(scope),
       workflowName: run.workflow_name ? `${run.workflow_name} (retry)` : "Retry",
     });
     return NextResponse.json({ runId: newRunId, retryOf: run.id }, { status: 202 });

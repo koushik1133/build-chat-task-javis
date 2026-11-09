@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowDown, GitBranch, Loader2, Pause, Play, Plus, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -52,7 +53,7 @@ export function SequencesTab({ notify }: { notify: (tone: Notice["tone"], text: 
     }
   }
   async function remove(s: SeqListRow) {
-    if (!window.confirm(`Delete sequence "${s.name}" and its enrollments?`)) return;
+    if (!(await confirmDialog({ title: `Delete sequence "${s.name}"?`, body: "Its enrollments are deleted too.", confirmLabel: "Delete", tone: "danger" }))) return;
     try {
       await jsonFetch(`/api/marketing/sequences/${s.id}`, { method: "DELETE" }, "Could not delete");
       notify("success", "Sequence deleted.");

@@ -1,3 +1,4 @@
+import { principalFromScope } from "@/lib/agents/principal";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
@@ -41,7 +42,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   if (!sync) {
     try {
-      const runId = await startRun(scope.dataId, id, { prompt, triggerKind: "manual", workflowName: "Manual Run" });
+      const runId = await startRun(scope.dataId, id, { prompt, triggerKind: "manual", workflowName: "Manual Run", principal: principalFromScope(scope) });
       return NextResponse.json({ success: true, runId, status: "queued" }, { status: 202 });
     } catch (err) {
       if (err instanceof AgentNotFoundError) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
@@ -51,7 +52,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   try {
-    const runResult = await runAgentJob(scope.dataId, id, { prompt, workflowName: "Manual Run" });
+    const runResult = await runAgentJob(scope.dataId, id, { prompt, workflowName: "Manual Run", principal: principalFromScope(scope) });
     if (!runResult) {
       return NextResponse.json({ error: "Agent not found or run failed" }, { status: 404 });
     }

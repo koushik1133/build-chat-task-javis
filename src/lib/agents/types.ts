@@ -42,6 +42,12 @@ export interface ToolContext {
    * owner matrix of `userId` (see `effectivePermissionsForOwner`).
    */
   can?: (area: Area, edit?: boolean) => boolean;
+  /**
+   * True once untrusted (customer-originated) content has entered this run's
+   * context. High-risk write tools then always need a human, whatever the
+   * autonomy level (the action firewall).
+   */
+  tainted?: boolean;
 }
 
 /** Outcome of a tool call. `requiresApproval` is decided BEFORE `run` is invoked. */
@@ -65,6 +71,10 @@ export interface ToolSpec<TInput = unknown> {
   /** JSON Schema handed to the model (zod v3 has no built-in exporter). */
   parameters: Record<string, unknown>;
   scope: "read" | "write";
+  /** Blast radius of a write. Defaults to a name-based classification (see registry `riskOf`). */
+  risk?: "low" | "medium" | "high";
+  /** Result contains customer/visitor-originated text: wrap it as untrusted before the model sees it. */
+  untrustedOutput?: boolean;
   /**
    * Whether this call must pause for a human. A function may inspect the
    * validated input (e.g. only external sends need approval).

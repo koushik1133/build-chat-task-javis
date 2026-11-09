@@ -35,6 +35,8 @@ export interface ListSlotsInput {
   rules: AvailabilityRule[];
   existing: Interval[];
   blocks: Interval[];
+  /** External calendar busy windows (synced from Google/Outlook). Optional so callers stay pure. */
+  busy?: Interval[];
   type: SlotType;
   from: Date;
   to: Date;
@@ -163,7 +165,7 @@ export function listSlots(input: ListSlotsInput): string[] {
   const latestEnd = Math.min(input.to.getTime(), horizon);
   if (earliest >= latestEnd) return [];
 
-  const busy: Interval[] = [...existing, ...blocks];
+  const busy: Interval[] = [...existing, ...blocks, ...(input.busy ?? [])];
   const out: string[] = [];
   const seen = new Set<number>();
 

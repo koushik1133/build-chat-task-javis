@@ -243,6 +243,10 @@ export async function resolvePublicBranding(pathname: string | null | undefined)
       const row = await resolveShareToken("crew", parts[1]);
       return row ? getBranding(row.user_id) : DEFAULT_BRANDING;
     }
+    if (parts[0] === "p" && parts[1] === "c" && parts[2] === "lookup" && parts[3]) {
+      const org = await queryOne<{ owner_user_id: string }>(`SELECT owner_user_id FROM organizations WHERE slug = $1`, [parts[3]]);
+      return org ? getBranding(org.owner_user_id) : DEFAULT_BRANDING;
+    }
     if (parts[0] === "p" && parts[1] && parts[2]) {
       const kinds: Record<string, "quote" | "invoice" | "pay" | "portal" | "sign"> = { q: "quote", i: "invoice", pay: "pay", c: "portal", sign: "sign" };
       const kind = kinds[parts[1]];

@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -99,7 +100,7 @@ function ProjectInner() {
 
   async function archive() {
     if (!detail) return;
-    if (!window.confirm(`Archive "${detail.project.name}"? It disappears from the list; tasks and history are kept.`)) return;
+    if (!(await confirmDialog({ title: `Archive "${detail.project.name}"?`, body: "It disappears from the list; tasks and history are kept.", confirmLabel: "Archive" }))) return;
     try {
       await jsonFetch(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE", fallback: "Could not archive" });
       router.push("/projects");

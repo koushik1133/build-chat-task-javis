@@ -37,6 +37,8 @@ vi.mock("@/lib/reports/digest", () => ({ sendDueDigests: vi.fn(async () => ({ se
 vi.mock("@/lib/documents/documents", () => ({ expireDocuments: vi.fn(async () => ({ expired: 0 })) }));
 vi.mock("@/lib/attachments/store", () => ({ purgeDeletedAttachments: vi.fn(async () => ({ purged: 0 })) }));
 vi.mock("@/lib/workforce/shifts", () => ({ remindUpcomingShifts: vi.fn(async () => ({ reminded: 0 })) }));
+vi.mock("@/lib/calsync/sync", () => ({ processCalendarEvents: vi.fn(async () => ({ pushed: 0 })), syncDue: vi.fn(async () => ({ synced: 0 })) }));
+vi.mock("@/lib/chatops/process", () => ({ processChatEvents: vi.fn(async () => ({ delivered: 0 })) }));
 vi.mock("@/lib/projects/overdue", () => ({ markOverdueTasks: vi.fn(async () => ({ notified: 0 })) }));
 vi.mock("@/lib/storefront/cart", () => ({ abandonedCartSweep: vi.fn(async () => ({ emitted: 0 })) }));
 vi.mock("@/lib/marketing/campaigns", () => ({ sendBatch: vi.fn(async () => ({ sent: 0 })), syncDeliveryStatuses: vi.fn(async () => ({ delivered: 0 })) }));

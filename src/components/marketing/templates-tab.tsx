@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { FileText, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,7 @@ export function TemplatesTab({ notify }: { notify: (tone: Notice["tone"], text: 
   }, [load]);
 
   async function remove(t: TemplateRow) {
-    if (!window.confirm(`Delete template "${t.name}"?`)) return;
+    if (!(await confirmDialog({ title: `Delete template "${t.name}"?`, confirmLabel: "Delete", tone: "danger" }))) return;
     try {
       await jsonFetch(`/api/marketing/templates/${t.id}`, { method: "DELETE" }, "Could not delete");
       notify("success", "Template deleted.");

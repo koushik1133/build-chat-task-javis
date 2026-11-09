@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import { useState } from "react";
 import { Plus, Trash2, UserPlus } from "lucide-react";
 import type { Notice, ProjectDetail } from "./types";
@@ -30,7 +31,7 @@ export function OverviewTab({ detail, members, reload, notify }: { detail: Proje
     }
   }
   async function removeMilestone(m: MilestoneDTO) {
-    if (!window.confirm(`Delete milestone "${m.name}"? Tasks linked to it are kept.`)) return;
+    if (!(await confirmDialog({ title: `Delete milestone "${m.name}"?`, body: "Tasks linked to it are kept.", confirmLabel: "Delete", tone: "danger" }))) return;
     try {
       await jsonFetch(`/api/projects/milestones/${encodeURIComponent(m.id)}`, { method: "DELETE", fallback: "Could not delete milestone" });
       await reload();

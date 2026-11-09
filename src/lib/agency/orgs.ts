@@ -97,10 +97,37 @@ export class AgencyForbiddenError extends Error {
   }
 }
 
+export interface SnapshotOutcome {
+  snapshot_id: string;
+  status: "applied" | "partial" | "failed";
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: Array<{ section: string; key: string; message: string }>;
+}
+
+/**
+ * Apply an agency-visible snapshot of the PARENT org to a freshly created
+ * client workspace. Never throws: a failure is reported in the outcome so org
+ * creation still succeeds.
+ */
+async function applyStartingSnapshot(parent: Pick<Scope, "userId" | "dataId">, childDataId: string, snapshotId: string): Promise<SnapshotOutcome> {
+  const fail = (message: string): SnapshotOutcome => ({ snapshot_id: snapshotId, status: "failed", created: 0, updated: 0, skipped: 0, errors: [{ section: "snapshot", key: snapshotId, message }] });
+  try {
+    const { getSnapshotDoc, applySnapshot } = await import("@/lib/snapshots/store");
+    const found = await getSnapshotDoc(parent.dataId, snapshotId);
+    if (!found || found.meta.origin !== "own" || found.meta.visibility !== "agency") return fail("Snapshot not found or not shared with client workspaces");
+    const r = await applySnapshot(childDataId, found.doc, { mode: "skip_existing", actorId: parent.userId, snapshotId, snapshotSha: found.meta.sha256 });
+    return { snapshot_id: snapshotId, status: r.status, created: r.created, updated: r.updated, skipped: r.skipped, errors: r.errors };
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Snapshot apply failed");
+  }
+}
+
 export async function createChildOrg(
   parent: Pick<Scope, "orgId" | "userId" | "dataId" | "role">,
-  input: { name: string; slug?: string | null }
-): Promise<ChildOrgDTO> {
+  input: { name: string; slug?: string | null; snapshot_id?: string | null }
+): Promise<ChildOrgDTO & { snapshot_result?: SnapshotOutcome }> {
   // Only the parent's owner or an admin may create client workspaces, whatever
   // area overrides say about "settings" — this hands out memberships on a new org.
   if (parent.role !== "owner" && parent.role !== "admin") {
@@ -140,7 +167,12 @@ export async function createChildOrg(
 
   const row = await queryOne<ChildOrgRow>(`SELECT ${COLS} FROM organizations WHERE id = $1`, [id]);
   if (!row) throw new Error("client workspace creation failed");
-  return toDTO(row, { members: seats.size, invites: 0 });
+  const dto = toDTO(row, { members: seats.size, invites: 0 });
+  if (input.snapshot_id) {
+    // The child's data key is its own org id (see the header comment).
+    return { ...dto, snapshot_result: await applyStartingSnapshot(parent, row.owner_user_id, input.snapshot_id) };
+  }
+  return dto;
 }
 
 async function membershipCounts(orgIds: string[]): Promise<Map<string, { members: number; invites: number }>> {

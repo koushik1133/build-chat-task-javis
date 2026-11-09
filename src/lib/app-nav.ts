@@ -59,6 +59,8 @@ import {
   FolderKanban,
   ShoppingCart,
   Send,
+  MessageCircle,
+  DatabaseBackup,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -151,6 +153,9 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/settings/outbox", label: "Outbox", icon: Inbox },
       { href: "/settings/api-keys", label: "API Keys", icon: KeyRound },
       { href: "/settings/webhooks", label: "Webhooks", icon: Webhook },
+      { href: "/settings/calendar-sync", label: "Calendar sync", icon: CalendarClock },
+      { href: "/settings/chat-apps", label: "Chat apps", icon: MessageCircle },
+      { href: "/settings/snapshots", label: "Snapshots & backup", icon: DatabaseBackup },
       { href: "/settings/widgets", label: "Website widgets", icon: MessageSquareCode },
       { href: "/settings/developers", label: "Developers", icon: Code2 },
       { href: "/settings/mail", label: "Email Inbox", icon: Mail },

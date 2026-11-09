@@ -153,6 +153,8 @@ export function toProjectTaskDTO(r: TaskRow): ProjectTaskDTO {
 
 export interface ListProjectsOpts {
   status?: ProjectStatus | null;
+  /** Server-side open filter: planning, active, on_hold. Ignored when status is set. */
+  open?: boolean;
   includeArchived?: boolean;
   q?: string | null;
   limit?: number;
@@ -166,6 +168,8 @@ export async function listProjects(dataId: string, opts: ListProjectsOpts = {}):
   if (opts.status) {
     params.push(opts.status);
     sql += ` AND p.status = $${params.length}`;
+  } else if (opts.open) {
+    sql += ` AND p.status IN ('planning', 'active', 'on_hold')`;
   }
   if (opts.q?.trim()) {
     params.push(`%${opts.q.trim().toLowerCase()}%`);

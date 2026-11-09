@@ -1507,3 +1507,33 @@ export const StorefrontProduct = z.object({
   image_url: z.string().nullable(),
 });
 export const StorefrontProductPut = StorefrontProductPatchSchema;
+
+/* ─── Snapshots ────────────────────────────────────────────────────────── */
+export const SnapshotMetaView = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  sections: z.array(z.string()),
+  sha256: z.string(),
+  size_bytes: z.number().int(),
+  visibility: z.enum(["private", "agency"]),
+  origin: z.enum(["own", "agency"]).optional(),
+  created_at: z.string(),
+});
+export const SnapshotParams = z.object({ id: z.string().min(1).max(80) });
+
+/* ─── Portal messages (Phase 9) ────────────────────────────────────────── */
+
+export const PortalMessage = z.object({
+  id: Id,
+  contact_id: Id,
+  direction: z.enum(["in", "out"]).describe("`in` = from the customer's portal, `out` = staff reply"),
+  body: z.string(),
+  author_member_id: z.string().nullable(),
+  read_at: IsoOrNull,
+  created_at: Iso,
+});
+export const PortalMessageListQuery = ListQuery.extend({ contact_id: Id.optional() });
+export const PortalMessageCreate = z
+  .object({ contact_id: Id, body: z.string().trim().min(1).max(2000).describe("Plain text, up to 2000 characters") })
+  .strict();

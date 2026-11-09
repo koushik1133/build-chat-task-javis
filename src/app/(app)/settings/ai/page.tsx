@@ -10,6 +10,7 @@ import { Pill } from "@/components/ui/pill";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { PageContainer } from "@/components/page-container";
+import { AiLimits, type LimitsBudget, type TopRun } from "@/components/settings/ai-limits";
 import { CreditsSection } from "@/components/credits/credits-section";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +18,7 @@ interface Totals { calls: number; promptTokens: number; completionTokens: number
 interface FeatureRow extends Totals { feature: string }
 interface ProviderRow extends Totals { provider: string; model: string }
 interface SeriesPoint { date: string; calls: number; costMicros: number }
-interface Budget { capMicros: number | null; hardStop: boolean; allowlist: string[] | null; spentMicros: number }
+interface Budget extends LimitsBudget { capMicros: number | null; hardStop: boolean; allowlist: string[] | null; spentMicros: number }
 interface ProviderInfo {
   id: string; label: string; model: string; envKey: string; configured: boolean; supportsTools: boolean;
 }
@@ -30,6 +31,7 @@ interface Usage {
   byProvider: ProviderRow[];
   series: SeriesPoint[];
   budget: Budget;
+  topRuns?: TopRun[];
   providers: ProviderInfo[];
 }
 
@@ -288,6 +290,8 @@ export default function AiSettingsPage() {
                 </Button>
               </div>
             </form>
+
+            <AiLimits budget={usage.budget} topRuns={usage.topRuns ?? []} onSaved={() => void load()} />
 
             <section className="mb-6 rounded-xl border border-border bg-card p-4 sm:p-5" aria-labelledby="feature-heading">
               <h2 id="feature-heading" className="mb-3 text-sm font-semibold">

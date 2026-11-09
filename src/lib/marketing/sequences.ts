@@ -1,3 +1,4 @@
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import { randomUUID } from "crypto";
 import { query, queryOne, withRetry } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
@@ -36,12 +37,15 @@ export interface EnrollmentRow {
   next_at: string | null;
   status: EnrollmentStatus;
   exited_reason: string | null;
+  /** Highest step index whose message was sent; guards against re-sending after a crash before advance. */
+  last_step_sent_index?: number | null;
+  last_step_sent_at?: string | null;
   created_at: string;
   updated_at: string;
 }
 
 const COLS = `id, user_id, name, trigger, trigger_config, steps, status, created_at, updated_at`;
-const ENR_COLS = `id, user_id, sequence_id, contact_id, step_index, next_at, status, exited_reason, created_at, updated_at`;
+const ENR_COLS = `id, user_id, sequence_id, contact_id, step_index, next_at, status, exited_reason, last_step_sent_index, last_step_sent_at, created_at, updated_at`;
 
 export class SequenceError extends Error {
   constructor(
@@ -61,9 +65,22 @@ export interface SequenceInput {
   status?: SequenceStatus;
 }
 
-export async function listSequences(dataId: string): Promise<Array<SequenceRow & { active: number; done: number; exited: number }>> {
-  const rows = await query<SequenceRow>(`SELECT ${COLS} FROM sequences WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`, [dataId]);
+export async function listSequences(dataId: string, opts: { cursor?: Cursor | null; limit?: number } = {}): Promise<Array<SequenceRow & { active: number; done: number; exited: number; audience_name: string | null }>> {
+  const params: unknown[] = [dataId];
+  const where = `user_id = $1${keysetClause(opts.cursor, params)}`;
+  params.push(Math.min(Math.max(opts.limit ?? 200, 1), 201));
+  const rows = await query<SequenceRow>(`SELECT ${COLS} FROM sequences WHERE ${where} ORDER BY ${keysetOrder()} LIMIT $${params.length}`, params);
   if (rows.length === 0) return [];
+  const audienceIds = new Set<string>();
+  for (const r of rows) {
+    const id = parseTriggerConfig(r.trigger_config).audience_id;
+    if (id) audienceIds.add(id);
+  }
+  const names = new Map<string, string>();
+  if (audienceIds.size > 0) {
+    const auds = await query<{ id: string; name: string }>(`SELECT id, name FROM audiences WHERE user_id = $1 AND id = ANY($2)`, [dataId, [...audienceIds]]).catch(() => []);
+    for (const a of auds) names.set(a.id, a.name);
+  }
   const counts = await query<{ sequence_id: string; status: EnrollmentStatus; n: string }>(
     `SELECT sequence_id, status, COUNT(*)::text AS n FROM sequence_enrollments WHERE user_id = $1 AND sequence_id = ANY($2) GROUP BY sequence_id, status`,
     [dataId, rows.map((r) => r.id)]
@@ -74,7 +91,10 @@ export async function listSequences(dataId: string): Promise<Array<SequenceRow &
     cur[c.status] = parseInt(c.n, 10) || 0;
     by.set(c.sequence_id, cur);
   }
-  return rows.map((r) => ({ ...r, ...(by.get(r.id) ?? { active: 0, done: 0, exited: 0 }) }));
+  return rows.map((r) => {
+    const aid = parseTriggerConfig(r.trigger_config).audience_id;
+    return { ...r, ...(by.get(r.id) ?? { active: 0, done: 0, exited: 0 }), audience_name: aid ? names.get(aid) ?? null : null };
+  });
 }
 
 export async function getSequence(dataId: string, id: string): Promise<SequenceRow | null> {
@@ -197,6 +217,7 @@ export interface RunDueResult {
   exited: number;
   done: number;
   failed: number;
+  skippedDuplicate?: number;
 }
 
 /** Cron worker: deliver due steps. Never throws. */
@@ -230,6 +251,12 @@ export async function runDueEnrollments(limit = 100): Promise<RunDueResult> {
       const seq = await getSequence(enr.user_id, enr.sequence_id);
       const steps = seq ? parseSteps(seq.steps) : [];
       const step = steps[enr.step_index];
+      if (seq && step && enr.last_step_sent_index != null && enr.last_step_sent_index >= enr.step_index) {
+        // This step was already sent but the enrollment was not advanced (crash/retry): advance, never re-send.
+        result.skippedDuplicate = (result.skippedDuplicate ?? 0) + 1;
+        await advance(enr, steps, result);
+        continue;
+      }
       if (!seq || !step) {
         await query(`UPDATE sequence_enrollments SET status = 'done', next_at = NULL, updated_at = NOW() WHERE id = $1`, [enr.id]);
         result.done++;
@@ -266,6 +293,11 @@ export async function runDueEnrollments(limit = 100): Promise<RunDueResult> {
         continue;
       }
       result.sent++;
+      // Mark the step sent before advancing so a failure between the two cannot cause a re-send.
+      await query(
+        `UPDATE sequence_enrollments SET last_step_sent_index = $2, last_step_sent_at = NOW(), updated_at = NOW() WHERE id = $1 AND (last_step_sent_index IS NULL OR last_step_sent_index < $2)`,
+        [enr.id, enr.step_index]
+      ).catch((err) => console.error(`[marketing] could not mark step sent for ${enr.id}:`, err));
       await advance(enr, steps, result);
     } catch (err) {
       result.failed++;

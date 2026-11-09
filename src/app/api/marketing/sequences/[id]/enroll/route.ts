@@ -8,7 +8,13 @@ import { EnrollSchema } from "@/lib/marketing/schemas";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** POST { contact_ids } — enroll contacts (idempotent per contact). */
+/**
+ * POST { contact_ids } — enroll contacts (idempotent per contact).
+ *
+ * Enroll picker: search contacts with `GET /api/crm/contacts?q=<text>&limit=<n>` (requires the
+ * crm view area). `q` matches full_name, email and company (case-insensitive substring); results
+ * are keyset-paginated via `next_cursor`. Pass the chosen `id`s here.
+ */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const s = await marketingScope(true);
   if (!s.ok) return s.res;

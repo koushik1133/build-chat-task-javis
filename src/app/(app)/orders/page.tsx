@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Copy, ExternalLink, Loader2, PackageCheck, RefreshCw, ShoppingCart, Store, Undo2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Dialog, DialogFooter, Drawer } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
@@ -227,7 +228,23 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
     void load();
   }, [load]);
 
+  async function unfulfil() {
+    if (!(await confirmDialog({ title: "Mark as unfulfilled?", body: "The order returns to Paid. The customer is not emailed.", confirmLabel: "Mark unfulfilled" }))) return;
+    setBusy("unfulfil");
+    try {
+      const r = await api<{ order: OrderDTO }>(`/api/orders/${id}/unfulfil`, { method: "POST" });
+      onChanged(r.order);
+      notify({ tone: "success", text: `Order ${r.order.number} is back to paid.` });
+      await load();
+    } catch (err) {
+      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not mark the order unfulfilled." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function fulfil() {
+    if (!(await confirmDialog({ title: "Mark as fulfilled?", body: "The customer is emailed that the order is on its way.", confirmLabel: "Mark fulfilled" }))) return;
     setBusy("fulfil");
     try {
       const r = await api<{ order: OrderDTO }>(`/api/orders/${id}`, { method: "PATCH", body: JSON.stringify({ status: "fulfilled" }) });
@@ -261,6 +278,9 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
         )}
         {(o.status === "paid" || o.status === "fulfilled") && refundable > 0 && (
           <Button type="button" variant="outline" touch onClick={() => setRefundOpen(true)} disabled={busy !== null}><Undo2 className="mr-1.5 h-4 w-4" aria-hidden />Refund</Button>
+        )}
+        {o.status === "fulfilled" && (
+          <Button type="button" variant="outline" touch onClick={() => void unfulfil()} disabled={busy !== null} aria-busy={busy === "unfulfil" || undefined}>{busy === "unfulfil" ? spinner : <Undo2 className="mr-1.5 h-4 w-4" aria-hidden />}Mark unfulfilled</Button>
         )}
         {o.status === "paid" && (
           <Button type="button" touch onClick={() => void fulfil()} disabled={busy !== null} aria-busy={busy === "fulfil" || undefined}>{busy === "fulfil" ? spinner : <PackageCheck className="mr-1.5 h-4 w-4" aria-hidden />}Mark fulfilled</Button>
@@ -309,7 +329,7 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payment</h3>
             {detail.invoice ? (
               <p>
-                Invoice <Link href="/billing" className="rounded font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{detail.invoice.number}</Link> · <StatusPill status={detail.invoice.status} /> · paid {fmtMoney(detail.invoice.paid_minor, o.currency)} of {fmtMoney(detail.invoice.total_minor, o.currency)}
+                Invoice <Link href={`/billing?invoice=${encodeURIComponent(detail.invoice.id)}`} className="rounded font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{detail.invoice.number}</Link> · <StatusPill status={detail.invoice.status} /> · paid {fmtMoney(detail.invoice.paid_minor, o.currency)} of {fmtMoney(detail.invoice.total_minor, o.currency)}
               </p>
             ) : (
               <p className="text-muted-foreground">No invoice linked.</p>
@@ -480,6 +500,7 @@ function StorefrontTab({ notify }: { notify: (n: Notice) => void }) {
     }
   }
 
+  const [copiedEmbed, setCopiedEmbed] = useState(false);
   async function copy() {
     try {
       await navigator.clipboard.writeText(publicUrl);
@@ -487,6 +508,20 @@ function StorefrontTab({ notify }: { notify: (n: Notice) => void }) {
       setTimeout(() => setCopied(false), 1500);
     } catch {
       notify({ tone: "error", text: "Could not copy; select the link and copy it manually." });
+    }
+  }
+
+  const embedSnippet = useMemo(
+    () => `<a href="${publicUrl}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#111827;color:#fff;font:600 14px system-ui,sans-serif;text-decoration:none">${(sf?.title ? `Shop ${sf.title}` : "Shop now").replace(/[<>&"]/g, "")}</a>`,
+    [publicUrl, sf?.title]
+  );
+  async function copyEmbed() {
+    try {
+      await navigator.clipboard.writeText(embedSnippet);
+      setCopiedEmbed(true);
+      setTimeout(() => setCopiedEmbed(false), 1500);
+    } catch {
+      notify({ tone: "error", text: "Could not copy; select the snippet and copy it manually." });
     }
   }
 
@@ -513,6 +548,17 @@ function StorefrontTab({ notify }: { notify: (n: Notice) => void }) {
           <span className="sr-only" aria-live="polite">{copied ? "Shop link copied" : ""}</span>
           <Button asChild variant="outline" size="sm" touch><a href={publicUrl} target="_blank" rel="noreferrer"><ExternalLink className="mr-1.5 h-4 w-4" aria-hidden />Open shop</a></Button>
           <Button type="button" size="sm" touch variant={sf.enabled ? "secondary" : "default"} disabled={saving} aria-busy={saving || undefined} onClick={() => void patch({ enabled: !sf.enabled }, sf.enabled ? "Storefront switched off." : "Storefront is live.")}>{sf.enabled ? "Switch off" : "Enable shop"}</Button>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="embed-title">
+        <h2 id="embed-title" className="text-sm font-semibold">Add to your website</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Paste this button into any page on your site. It opens your shop in a new tab, so there is nothing to install and it works with any website builder. An in-page shop widget is not available yet.</p>
+        <label htmlFor="embed-snippet" className="sr-only">Button HTML</label>
+        <Textarea id="embed-snippet" readOnly rows={3} value={embedSnippet} className="mt-3 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+        <div className="mt-2 flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" touch onClick={() => void copyEmbed()}>{copiedEmbed ? <Check className="mr-1.5 h-4 w-4" aria-hidden /> : <Copy className="mr-1.5 h-4 w-4" aria-hidden />}{copiedEmbed ? "Copied" : "Copy snippet"}</Button>
+          <span className="sr-only" aria-live="polite">{copiedEmbed ? "Snippet copied" : ""}</span>
         </div>
       </section>
 

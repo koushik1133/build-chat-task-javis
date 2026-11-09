@@ -6,6 +6,7 @@
  * code should use `startRun` + the worker instead.
  */
 
+import type { RunPrincipal } from "@/lib/agents/principal";
 import { query } from "@/lib/dsql";
 import {
   AgentNotFoundError,
@@ -35,6 +36,7 @@ export async function runAgentJob(
     prompt?: string | null;
     workflowName?: string;
     automationId?: string | null;
+    principal?: RunPrincipal | null;
   } = {}
 ): Promise<AgentRunResult | null> {
   const agent = await loadAgent(userId, agentId);
@@ -48,6 +50,7 @@ export async function runAgentJob(
       automationId: opts.automationId ?? null,
       triggerKind: opts.automationId ? "automation" : "manual",
       enqueue: false,
+      principal: opts.principal ?? null,
     });
   } catch (err) {
     if (err instanceof AgentNotFoundError) return null;

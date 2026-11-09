@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,7 @@ export function AudiencesTab({ notify }: { notify: (tone: Notice["tone"], text: 
   }, [load]);
 
   async function remove(a: AudienceRow) {
-    if (!window.confirm(`Delete audience "${a.name}"? Campaigns that used it keep their recipients.`)) return;
+    if (!(await confirmDialog({ title: `Delete audience "${a.name}"?`, body: "Campaigns that used it keep their recipients.", confirmLabel: "Delete", tone: "danger" }))) return;
     try {
       await jsonFetch(`/api/marketing/audiences/${a.id}`, { method: "DELETE" }, "Could not delete");
       notify("success", "Audience deleted.");

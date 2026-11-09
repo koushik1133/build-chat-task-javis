@@ -6,6 +6,9 @@
     { "name": "SUPABASE_SERVICE_ROLE_KEY", "group": "core", "required": true, "secret": true, "description": "Supabase service-role key (server only). JWT payload role must be service_role." },
     { "name": "DSQL_ENDPOINT", "group": "core", "required": true, "description": "Aurora DSQL cluster host, or localhost / 127.0.0.1 for plain Postgres." },
     { "name": "CRON_SECRET", "group": "core", "required": true, "secret": true, "minLength": 16, "description": "Bearer token for /api/cron/agents. openssl rand -hex 32." },
+    { "name": "MARKETING_TRACKING_SECRET", "group": "core", "secret": true, "minLength": 16, "description": "HMAC secret signing marketing open/click/unsubscribe links. Required in production. openssl rand -hex 32." },
+    { "name": "MARKETING_TRACKING_SECRET_PREVIOUS", "group": "core", "secret": true, "minLength": 16, "description": "Previous tracking secret kept during rotation so already-sent links still verify." },
+    { "name": "TRUSTED_PROXY_HOPS", "group": "core", "description": "Number of trusted reverse-proxy hops in X-Forwarded-For (client IP is taken that many entries from the right). Default 1 on Vercel/production, 0 otherwise.", "default": "1" },
     { "name": "NEXT_PUBLIC_APP_URL", "group": "core", "required": true, "format": "url", "description": "Canonical public origin (links in emails, OAuth redirects, portal URLs)." },
 
     { "name": "ATTACHMENTS_LOCAL_DIR", "group": "flag", "description": "Dev-only: store attachments in this local directory instead of Supabase Storage (ignored in production).", "default": ".data/attachments" },
@@ -66,9 +69,9 @@
     { "name": "PUBLIC_WIDGET_ORIGINS", "group": "flag", "description": "Comma-separated origins allowed on public widget/lead/analytics endpoints." },
     { "name": "WEBHOOKS_ALLOW_INSECURE", "group": "flag", "enum": ["0", "1"], "default": "0", "devOnly": true, "description": "1 = allow http://localhost webhook targets (never in production)." },
 
-    { "name": "GOOGLE_CLIENT_ID", "group": "provider", "provider": "google_mail", "description": "Google OAuth client for Gmail inbox sync." },
+    { "name": "GOOGLE_CLIENT_ID", "group": "provider", "provider": "google_mail", "description": "Google OAuth client for Gmail inbox sync and Google Calendar sync." },
     { "name": "GOOGLE_CLIENT_SECRET", "group": "provider", "provider": "google_mail", "secret": true, "description": "Google OAuth secret." },
-    { "name": "MS_CLIENT_ID", "group": "provider", "provider": "outlook_mail", "description": "Microsoft OAuth client for Outlook inbox sync." },
+    { "name": "MS_CLIENT_ID", "group": "provider", "provider": "outlook_mail", "description": "Microsoft OAuth client for Outlook inbox sync and Outlook Calendar sync." },
     { "name": "MS_CLIENT_SECRET", "group": "provider", "provider": "outlook_mail", "secret": true, "description": "Microsoft OAuth secret." },
     { "name": "MS_TENANT", "group": "provider", "default": "common", "description": "Microsoft tenant id." },
 

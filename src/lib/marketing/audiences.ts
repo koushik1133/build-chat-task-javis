@@ -1,3 +1,4 @@
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { escapeLike } from "@/lib/like";
@@ -126,8 +127,11 @@ export async function eligibleCount(dataId: string, def: AudienceDefinition, cha
 
 /* ---------- CRUD ---------- */
 
-export async function listAudiences(dataId: string): Promise<AudienceRow[]> {
-  return query<AudienceRow>(`SELECT ${COLS} FROM audiences WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`, [dataId]);
+export async function listAudiences(dataId: string, opts: { cursor?: Cursor | null; limit?: number } = {}): Promise<AudienceRow[]> {
+  const params: unknown[] = [dataId];
+  const where = `user_id = $1${keysetClause(opts.cursor, params)}`;
+  params.push(Math.min(Math.max(opts.limit ?? 200, 1), 201));
+  return query<AudienceRow>(`SELECT ${COLS} FROM audiences WHERE ${where} ORDER BY ${keysetOrder()} LIMIT $${params.length}`, params);
 }
 
 export async function getAudience(dataId: string, id: string): Promise<AudienceRow | null> {

@@ -234,8 +234,20 @@ function Kpi({ label, value }: { label: string; value: string }) {
 function CreateClientDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (name: string) => void }) {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [snapshotId, setSnapshotId] = useState("");
+  const [snapshots, setSnapshots] = useState<Array<{ id: string; name: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Only the agency's own, client-shared snapshots can seed a new workspace.
+    fetch("/api/snapshots", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { snapshots?: Array<{ id: string; name: string; visibility: string; origin?: string }> } | null) =>
+        setSnapshots((d?.snapshots ?? []).filter((s) => s.visibility === "agency" && s.origin !== "agency"))
+      )
+      .catch(() => undefined);
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -244,8 +256,10 @@ function CreateClientDialog({ onClose, onCreated }: { onClose: () => void; onCre
     try {
       const body: Record<string, string> = { name: name.trim() };
       if (slug.trim()) body.slug = slug.trim().toLowerCase();
-      const r = await api<{ client: Client }>("/api/agency/workspaces", { method: "POST", body: JSON.stringify(body) });
-      onCreated(r.client.name);
+      if (snapshotId) body.snapshot_id = snapshotId;
+      const r = await api<{ client: Client; snapshot_result?: { errors: unknown[] } }>("/api/agency/workspaces", { method: "POST", body: JSON.stringify(body) });
+      const errs = r.snapshot_result?.errors.length ?? 0;
+      onCreated(errs ? `${r.client.name} (the snapshot applied with ${errs} error${errs === 1 ? "" : "s"}; see Settings > Snapshots in that workspace)` : r.client.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the workspace.");
       setBusy(false);
@@ -262,6 +276,14 @@ function CreateClientDialog({ onClose, onCreated }: { onClose: () => void; onCre
         <Field label="Slug" hint="Optional. Used in public booking and portal links.">
           <Input value={slug} onChange={(e) => setSlug(e.target.value)} maxLength={40} pattern="[a-z0-9-]+" placeholder="acme-dental" />
         </Field>
+        {snapshots.length > 0 && (
+          <Field label="Start from snapshot" hint="Copies configuration (record types, templates, tax rates…) but never data.">
+            <Select value={snapshotId} onChange={(e) => setSnapshotId(e.target.value)}>
+              <option value="">Blank workspace</option>
+              {snapshots.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+          </Field>
+        )}
         <DialogFooter>
           <Button type="button" variant="outline" touch onClick={onClose}>Cancel</Button>
           <Button type="submit" touch disabled={busy || !name.trim()}>{busy && spinner} Create workspace</Button>

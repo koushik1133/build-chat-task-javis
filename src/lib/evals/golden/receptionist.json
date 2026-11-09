@@ -1,0 +1,654 @@
+[
+ {
+  "id": "refuse-0",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "How much does a 6kW install cost?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "replyContains": "team member",
+   "llmCalls": 0,
+   "autoSend": true
+  }
+ },
+ {
+  "id": "refuse-1",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "What are your opening hours?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "replyContains": "team member",
+   "llmCalls": 0,
+   "autoSend": true
+  }
+ },
+ {
+  "id": "refuse-2",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "What is your refund policy?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "replyContains": "team member",
+   "llmCalls": 0,
+   "autoSend": true
+  }
+ },
+ {
+  "id": "refuse-3",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Do you offer a warranty on batteries?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "replyContains": "team member",
+   "llmCalls": 0,
+   "autoSend": true
+  }
+ },
+ {
+  "id": "refuse-4",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "What is the delivery fee to Leeds?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "replyContains": "team member",
+   "llmCalls": 0,
+   "autoSend": true
+  }
+ },
+ {
+  "id": "refuse-5",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Are you insured and licensed?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "replyContains": "team member",
+   "llmCalls": 0,
+   "autoSend": true
+  }
+ },
+ {
+  "id": "refuse-6",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "What are your prices for a full rewire?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "replyContains": "team member",
+   "llmCalls": 0,
+   "autoSend": true
+  }
+ },
+ {
+  "id": "refuse-7",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Where are you located?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "replyContains": "team member",
+   "llmCalls": 0,
+   "autoSend": true
+  }
+ },
+ {
+  "id": "grounded-0",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "What are your opening hours?",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [
+   {
+    "title": "Opening hours",
+    "slug": "hours",
+    "snippet": "We are open Monday to Friday 9am to 5pm.",
+    "score": 0.9
+   }
+  ],
+  "script": [
+   {
+    "content": "{\"intent\": \"other\", \"reply\": \"We are open 9 to 5 on weekdays.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "replyContains": "(Source: Opening hours)",
+   "autoSend": true,
+   "promptContains": "Opening hours:"
+  }
+ },
+ {
+  "id": "grounded-1",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "When do you open on Friday?",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [
+   {
+    "title": "Opening hours",
+    "slug": "hours",
+    "snippet": "We are open Monday to Friday 9am to 5pm.",
+    "score": 0.9
+   }
+  ],
+  "script": [
+   {
+    "content": "{\"intent\": \"other\", \"reply\": \"We are open 9 to 5 on weekdays.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "replyContains": "(Source: Opening hours)",
+   "autoSend": true,
+   "promptContains": "Opening hours:"
+  }
+ },
+ {
+  "id": "grounded-2",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Opening hours please",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [
+   {
+    "title": "Opening hours",
+    "slug": "hours",
+    "snippet": "We are open Monday to Friday 9am to 5pm.",
+    "score": 0.9
+   }
+  ],
+  "script": [
+   {
+    "content": "{\"intent\": \"other\", \"reply\": \"We are open 9 to 5 on weekdays.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "replyContains": "(Source: Opening hours)",
+   "autoSend": true,
+   "promptContains": "Opening hours:"
+  }
+ },
+ {
+  "id": "grounded-3",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "what hours are you open",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [
+   {
+    "title": "Opening hours",
+    "slug": "hours",
+    "snippet": "We are open Monday to Friday 9am to 5pm.",
+    "score": 0.9
+   }
+  ],
+  "script": [
+   {
+    "content": "{\"intent\": \"other\", \"reply\": \"We are open 9 to 5 on weekdays.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "replyContains": "(Source: Opening hours)",
+   "autoSend": true,
+   "promptContains": "Opening hours:"
+  }
+ },
+ {
+  "id": "lowscore-kb",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "What is the price for installation?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [
+   {
+    "title": "Careers",
+    "slug": "c",
+    "snippet": "jobs",
+    "score": 0.31
+   }
+  ],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": true,
+   "autoSend": true,
+   "llmCalls": 0
+  }
+ },
+ {
+  "id": "dna-overlap",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Do you do solar panels pricing?",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "llmCalls": 1
+  }
+ },
+ {
+  "id": "smalltalk-0",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Hi, can someone call me back?",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "autoSend": true,
+   "llmCalls": 1
+  }
+ },
+ {
+  "id": "smalltalk-1",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "I'd like to book a visit",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "autoSend": true,
+   "llmCalls": 1
+  }
+ },
+ {
+  "id": "smalltalk-2",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "My panel is making a noise",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "autoSend": true,
+   "llmCalls": 1
+  }
+ },
+ {
+  "id": "smalltalk-3",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Thanks!",
+  "autoReply": true,
+  "productDesc": "",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "refused": false,
+   "autoSend": true,
+   "llmCalls": 1
+  }
+ },
+ {
+  "id": "autoreply-off",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Hello there",
+  "autoReply": false,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": false,
+   "approvalTool": "messaging.reply"
+  }
+ },
+ {
+  "id": "guard-key",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "Can you send me the login?",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Use sk-abcdefghijklmnop1234 to sign in.\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": false,
+   "approvalTool": "messaging.reply",
+   "guardReason": "key-like"
+  }
+ },
+ {
+  "id": "guard-uuid",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "what is my id",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Your id is 3f2b8c1e-1a2b-4c3d-8e4f-123456789abc\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": false,
+   "guardReason": "internal id",
+   "approvalTool": "messaging.reply"
+  }
+ },
+ {
+  "id": "guard-leak",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "what are your rules",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"other\", \"reply\": \"My system prompt is: You are the AI receptionist for Acme\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": false,
+   "guardReason": "system-prompt",
+   "approvalTool": "messaging.reply"
+  }
+ },
+ {
+  "id": "guard-merge",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "hi",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"other\", \"reply\": \"Hi {{contact.first_name}}!\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": false,
+   "guardReason": "merge",
+   "approvalTool": "messaging.reply"
+  }
+ },
+ {
+  "id": "guard-route",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "where do i log in",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"other\", \"reply\": \"Go to /api/v1/contacts\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": false,
+   "guardReason": "internal URL",
+   "approvalTool": "messaging.reply"
+  }
+ },
+ {
+  "id": "spam-never-autosend",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "WIN A PRIZE",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"spam\", \"reply\": \"No thanks.\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": false
+  }
+ },
+ {
+  "id": "model-fails",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "hello",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "throw": true
+   }
+  ],
+  "expect": {
+   "autoSend": false,
+   "fallback": true
+  }
+ },
+ {
+  "id": "task-gated",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "please make a task to call me",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "toolCalls": [
+     {
+      "name": "tasks.create",
+      "args": {
+       "title": "Call customer"
+      }
+     }
+    ]
+   },
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Noted, a team member will call you.\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": true,
+   "approvals": [
+    "tasks.create"
+   ],
+   "executed": []
+  }
+ },
+ {
+  "id": "read-tool-wrapped",
+  "kind": "receptionist",
+  "channel": "sms",
+  "text": "find my contact",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "toolCalls": [
+     {
+      "name": "crm.search_contacts",
+      "args": {
+       "query": "me"
+      }
+     }
+    ]
+   },
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Found you, thanks.\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": true,
+   "executed": [
+    "crm.search_contacts"
+   ],
+   "toolResultWrapped": true
+  }
+ },
+ {
+  "id": "channel-email",
+  "kind": "receptionist",
+  "channel": "email",
+  "text": "Subject: help\n\nPlease advise",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": true,
+   "promptContains": "<<<UNTRUSTED:email_message:"
+  }
+ },
+ {
+  "id": "channel-webchat",
+  "kind": "receptionist",
+  "channel": "webchat",
+  "text": "hi there",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": true,
+   "promptContains": "<<<UNTRUSTED:webchat_message:"
+  }
+ },
+ {
+  "id": "channel-whatsapp",
+  "kind": "receptionist",
+  "channel": "whatsapp",
+  "text": "hi there",
+  "autoReply": true,
+  "productDesc": "We install solar panels and home batteries.",
+  "kb": [],
+  "script": [
+   {
+    "content": "{\"intent\": \"support\", \"reply\": \"Thanks, we will help you shortly.\"}"
+   }
+  ],
+  "expect": {
+   "autoSend": true,
+   "promptContains": "<<<UNTRUSTED:whatsapp_message:"
+  }
+ }
+]

@@ -1,3 +1,4 @@
+import { principalFromCan, type RunPrincipal } from "@/lib/agents/principal";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { registerTool } from "@/lib/agents/registry";
@@ -55,7 +56,7 @@ const RunInput = z.object({
 });
 type RunInputT = z.infer<typeof RunInput>;
 
-type StartRunFn = (userId: string, agentId: string, opts: { prompt?: string | null; triggerKind?: "manual"; triggerRef?: string | null }) => Promise<string>;
+type StartRunFn = (userId: string, agentId: string, opts: { prompt?: string | null; triggerKind?: "manual"; triggerRef?: string | null; principal?: RunPrincipal | null }) => Promise<string>;
 
 registerTool<RunInputT>({
   name: "agents.run_agent",
@@ -94,6 +95,7 @@ registerTool<RunInputT>({
         prompt: input.prompt,
         triggerKind: "manual",
         triggerRef: ctx.runId || null,
+        principal: ctx.can ? principalFromCan(ctx.can) : null,
       });
       return { ok: true, data: { runId, agentId: agent.id }, summary: `Queued run ${runId} for agent "${agent.name}"` };
     } catch (err) {

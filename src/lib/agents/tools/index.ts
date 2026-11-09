@@ -38,6 +38,8 @@ import "./automations";
 import "./reports";
 import "./procurement";
 import "./workforce";
+import "./snapshots";
+import "./chat";
 import "./marketing";
 import "./projects";
 import "./orders";

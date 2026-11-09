@@ -399,6 +399,25 @@ export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
       enabled: false,
     },
   },
+  {
+    key: "portal-message-ack",
+    title: "Portal message → acknowledge + follow-up task",
+    summary: "When a customer writes from their portal, alert the owner in-app and open a follow-up task.",
+    category: "support",
+    definition: {
+      name: "Portal message acknowledgement",
+      description: "In-app alert plus a task so no customer message goes unanswered.",
+      trigger_type: "event",
+      trigger_config: { event_type: "portal.message_received" },
+      conditions: null,
+      steps: [
+        { id: "ack", kind: "notify", name: "In-app alert", config: { channel: "in_app", to: OWNER, subject: "Portal message from {{event.data.contactName}}", body: "{{event.data.preview}}" } },
+        { id: "task", kind: "tool", name: "Follow-up task", config: { tool: "tasks.create", input: { title: "Reply to {{event.data.contactName}} (portal message)" } } },
+      ],
+      autonomy: "auto",
+      enabled: false,
+    },
+  },
 ];
 
 export function getTemplate(key: string): AutomationTemplate | undefined {

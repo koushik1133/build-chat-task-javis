@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { FileSignature } from "lucide-react";
 import { Pill } from "@/components/ui/pill";
 import { Banner, SkeletonList } from "@/components/ui/feedback";
+import { Button } from "@/components/ui/button";
+import type { PortalDocumentItem } from "@/lib/portal-rules";
 
 interface PortalDoc {
   id: string;
@@ -20,7 +22,7 @@ const TONE = { sent: "info", viewed: "info", signed: "success", declined: "dange
 const date = (iso: string | null) => (iso ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(iso)) : "");
 
 /** Portal "Documents": pending signatures first, then signed. Signing itself happens through the emailed per-signer link. */
-export function DocumentsTab({ token }: { token: string }) {
+export function DocumentsTab({ token, signLinks = [] }: { token: string; signLinks?: PortalDocumentItem[] }) {
   const [docs, setDocs] = useState<PortalDoc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -49,7 +51,12 @@ export function DocumentsTab({ token }: { token: string }) {
           {d.pending_signers.length > 0 && d.status !== "signed" ? ` · waiting on ${d.pending_signers.join(", ")}` : ""}
         </div>
       </div>
-      <Pill tone={TONE[d.status as keyof typeof TONE] ?? "neutral"} className="shrink-0 capitalize">{d.status}</Pill>
+      <div className="flex shrink-0 items-center gap-2">
+        {signLinks.find((s) => s.id === d.id)?.signPath && (
+          <Button asChild size="sm" touch><a href={signLinks.find((s) => s.id === d.id)?.signPath ?? "#"}>Sign now</a></Button>
+        )}
+        <Pill tone={TONE[d.status as keyof typeof TONE] ?? "neutral"} className="capitalize">{d.status}</Pill>
+      </div>
     </li>
   );
 

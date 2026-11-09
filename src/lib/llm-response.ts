@@ -34,7 +34,12 @@ export function llmErrorResponse(err: unknown): NextResponse | null {
 
   if (err instanceof LlmBudgetExceededError || name === "LlmBudgetExceededError") {
     return NextResponse.json(
-      { error: (err as Error).message, code: "llm_budget_exceeded" },
+      {
+        error: (err as Error).message,
+        code: "llm_budget_exceeded",
+        cap: (err as LlmBudgetExceededError).cap ?? "monthly",
+        ...((err as LlmBudgetExceededError).feature ? { feature: (err as LlmBudgetExceededError).feature } : {}),
+      },
       { status: 402 }
     );
   }

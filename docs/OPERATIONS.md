@@ -37,6 +37,8 @@ Single scheduled entry point (GET or POST, `Authorization: Bearer $CRON_SECRET`,
 
 `src/lib/request-limits.ts`: `rateLimit()` (in-process) and `rateLimitAsync()`/`rateLimitDb()` (shared `rate_limits` table) chosen by `RATE_LIMIT_STORE` (`memory` default, `db` for multi-instance). The cron tick prunes rows older than 24 h (`pruneRateLimits`). Limited requests get 429. Signup/login/reset limits are described in `docs/SECURITY.md`.
 
+Client IP for rate-limit keys is the `TRUSTED_PROXY_HOPS`-th entry from the right of `X-Forwarded-For` (default 1 on Vercel/production, 0 in dev). Set it to the number of proxies in front of the app; a wrong value either keys everyone to the proxy address (too high) or trusts spoofable entries (too low). Rotating `MARKETING_TRACKING_SECRET`: put the old value in `MARKETING_TRACKING_SECRET_PREVIOUS`, deploy, and drop it once old emails are no longer expected to be clicked.
+
 ## Notification outbox
 
 Every outbound message (email, SMS, WhatsApp, push, in-app, webhook) is a row written by `enqueueNotification()` (`src/lib/notifications/outbox.ts`) and delivered by `drainOutbox(50)` on each cron tick. Status: `queued → sent | simulated | failed` (`read` for in-app). When a channel has no live provider (`channelStatus()` in `src/lib/notifications/status.ts`) the row is marked `simulated` with the full body, so OTPs and invite links are readable at **Settings → Outbox** (`/settings/outbox`). A growing `queued` count means the cron is not running; a growing `failed` count means provider credentials or sender identities are wrong.

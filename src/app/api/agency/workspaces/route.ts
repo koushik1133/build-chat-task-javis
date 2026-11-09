@@ -12,6 +12,7 @@ const CreateBody = z
   .object({
     name: z.string().trim().min(1).max(80),
     slug: z.string().trim().min(2).max(40).regex(/^[a-z0-9-]+$/, "lowercase letters, numbers and dashes").optional(),
+    snapshot_id: z.string().trim().min(1).max(80).optional(),
   })
   .strict();
 
@@ -50,7 +51,8 @@ export async function POST(req: NextRequest) {
     }
     const client = await createChildOrg(scope, parsed.data);
     void recordAudit(scope, { action: "create", entity: "client_workspace", entityId: client.id, after: { name: client.name, slug: client.slug }, req }).catch(() => undefined);
-    return NextResponse.json({ client }, { status: 201 });
+    const { snapshot_result, ...clientDto } = client;
+    return NextResponse.json({ client: clientDto, ...(snapshot_result ? { snapshot_result } : {}) }, { status: 201 });
   } catch (err) {
     if (err instanceof AgencyForbiddenError) return NextResponse.json({ error: "forbidden", detail: err.message }, { status: 403 });
     return dbUnavailableResponse(err, "agency/workspaces");

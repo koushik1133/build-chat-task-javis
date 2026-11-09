@@ -179,6 +179,9 @@ export const ROUTES = {
   createRecordType: def({ id: "createRecordType", method: "POST", path: "/record-types", summary: "Create a record type", tag: "Records", scope: "write:crm", body: S.RecordTypeCreate, response: S.RecordType, status: 201 }),
   updateRecordType: def({ id: "updateRecordType", method: "PATCH", path: "/record-types/{type}", summary: "Update a record type", tag: "Records", scope: "write:crm", params: S.RecordTypeParams, body: S.RecordTypePatch, response: S.RecordType }),
 
+  /* snapshots */
+  listSnapshots: def({ id: "listSnapshots", method: "GET", path: "/snapshots", summary: "List workspace configuration snapshots", tag: "Snapshots", scope: "read:settings", query: S.ListQuery, response: S.SnapshotMetaView, list: true, tools: ["snapshots.list"] }),
+  getSnapshot: def({ id: "getSnapshot", method: "GET", path: "/snapshots/{id}", summary: "Get snapshot metadata", tag: "Snapshots", scope: "read:settings", params: S.SnapshotParams, response: S.SnapshotMetaView }),
   /* marketplace */
   listListings: def({ id: "listMarketplaceListings", method: "GET", path: "/marketplace", summary: "Browse the marketplace", tag: "Marketplace", scope: "read:agents", query: S.ListingListQuery, response: S.Listing, list: true, tools: ["marketplace.search"] }),
   getListing: def({ id: "getMarketplaceListing", method: "GET", path: "/marketplace/{id}", summary: "Get a listing with its definition", tag: "Marketplace", scope: "read:agents", params: S.ListingParams, response: S.ListingDetail }),
@@ -279,6 +282,9 @@ export const ROUTES = {
   createProjectMilestone: def({ id: "createProjectMilestone", method: "POST", path: "/projects/{id}/milestones", summary: "Add a milestone", tag: "Projects", scope: "write:tasks", params: S.IdParams, body: S.ProjectMilestoneCreate, response: S.ProjectMilestone, status: 201 }),
   listProjectTasks: def({ id: "listProjectTasks", method: "GET", path: "/projects/{id}/tasks", summary: "List tasks of a project", tag: "Projects", scope: "read:tasks", params: S.IdParams, query: S.ProjectTaskListQuery, response: S.ProjectTask, list: true }),
   createProjectTask: def({ id: "createProjectTask", method: "POST", path: "/projects/{id}/tasks", summary: "Add a task to a project", description: "Creates a row in the shared tasks table with `project_id` set; assignee, due date, priority and estimate are optional.", tag: "Projects", scope: "write:tasks", params: S.IdParams, body: S.ProjectTaskCreate, response: S.ProjectTask, status: 201, emits: ["task.created"], tools: ["projects.create_task"] }),
+  /* ── Phase 9 lane B: customer portal ────────────────────────────────── */
+  listPortalMessages: def({ id: "listPortalMessages", method: "GET", path: "/portal-messages", summary: "List portal messages", description: "Customer portal conversations, newest first; filter by `contact_id`.", tag: "Portal", scope: "read:crm", query: S.PortalMessageListQuery, response: S.PortalMessage, list: true }),
+  createPortalMessage: def({ id: "createPortalMessage", method: "POST", path: "/portal-messages", summary: "Reply to a customer in their portal", description: "Adds a staff reply and emails the contact a notice with their portal link.", tag: "Portal", scope: "write:crm", body: S.PortalMessageCreate, response: S.PortalMessage, status: 201 }),
   /* ── Phase 8 lane B: storefront + orders ────────────────────────────── */
   listOrders: def({ id: "listOrders", method: "GET", path: "/orders", summary: "List storefront orders", tag: "Orders", scope: "read:billing", query: S.OrderListQuery, response: S.Order, list: true, tools: ["orders.list"] }),
   getOrder: def({ id: "getOrder", method: "GET", path: "/orders/{id}", summary: "Get an order", tag: "Orders", scope: "read:billing", params: S.IdParams, response: S.Order }),
@@ -310,6 +316,7 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Change orders", description: "Priced scope changes against quotes and invoices." },
   { name: "Knowledge", description: "Knowledge-base articles and search." },
   { name: "Marketplace", description: "Installable agents, playbooks, automations and record packs." },
+  { name: "Snapshots", description: "Portable workspace configuration snapshots (never data)." },
   { name: "Credits", description: "AI credit balance and ledger." },
   { name: "Privacy", description: "Consent ledger and data-subject requests." },
   { name: "Marketing", description: "Consent-first email / SMS campaigns, audiences and templates." },
@@ -324,6 +331,7 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Reports", description: "Saved reports, report runs and dashboards." },
   { name: "Procurement", description: "Suppliers, purchase orders, receiving and supplier bills (accounts payable)." },
   { name: "Orders", description: "Public storefront orders and catalog visibility." },
+  { name: "Portal", description: "Customer portal conversations." },
   { name: "Projects", description: "Projects, milestones and project tasks (assignees, due dates, budgets)." },
 ];
 

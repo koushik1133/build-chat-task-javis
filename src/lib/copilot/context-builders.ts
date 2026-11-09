@@ -1,6 +1,7 @@
 import { query, queryOne } from "@/lib/dsql";
 import { buildBusinessDnaBlock } from "@/lib/prompts";
 import type { BusinessContext } from "@/lib/strategy";
+import { wrapUntrusted } from "@/lib/ai/untrusted";
 
 /**
  * Per-module context for the copilot system prompt: a compact snapshot of the
@@ -28,6 +29,10 @@ async function count(sql: string, params: unknown[]): Promise<number> {
 function s(v: unknown, max = 80): string {
   const str = v == null ? "" : String(v);
   return str.length > max ? `${str.slice(0, max - 1)}…` : str;
+}
+/** Customer/visitor-originated text: wrapped so the copilot treats it as data. */
+function u(label: string, v: unknown, max = 240): string {
+  return wrapUntrusted(label, v == null ? "" : String(v), { maxChars: max });
 }
 function day(v: unknown): string {
   const str = v == null ? "" : String(v);
@@ -59,7 +64,7 @@ async function crmContext(userId: string, recordId?: string): Promise<string> {
     ).catch(() => null);
     if (c) {
       lines.push(`- Focused contact: ${s(c.full_name, 60)} <${s(c.email, 60)}> at ${s(c.company, 40)}, ${c.role ?? "-"}, stage ${c.lifecycle}, deal $${c.deal_value ?? 0}, last contact ${day(c.last_contact) || "never"}`);
-      if (c.notes) lines.push(`  Notes: ${s(c.notes, 300)}`);
+      if (c.notes) lines.push(`  Notes: ${u("contact_notes", c.notes, 300)}`);
       const acts = await rows(
         `SELECT type, title, created_at FROM crm_activities WHERE contact_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 5`,
         [recordId, userId]
@@ -97,9 +102,9 @@ async function leadsContext(userId: string, recordId?: string): Promise<string> 
       [recordId, userId]
     ).catch(() => null);
     if (l) {
-      lines.push(`- Focused lead ${l.id} (${l.status ?? "new"}): ${s(l.data, 300)}`);
-      if (l.research_summary) lines.push(`  Research: ${s(l.research_summary, 500)}`);
-      if (l.draft_email_subject) lines.push(`  Draft subject: ${s(l.draft_email_subject, 100)}`);
+      lines.push(`- Focused lead ${l.id} (${l.status ?? "new"}): ${u("lead_data", l.data, 300)}`);
+      if (l.research_summary) lines.push(`  Research: ${u("lead_research", l.research_summary, 500)}`);
+      if (l.draft_email_subject) lines.push(`  Draft subject: ${u("lead_subject", l.draft_email_subject, 100)}`);
     }
   }
   return lines.join("\n");
@@ -242,13 +247,13 @@ async function helpdeskContext(userId: string, ticketId?: string): Promise<strin
      ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at ASC LIMIT 8`,
     [userId]
   );
-  for (const t of urgent) lines.push(`  - #${t.number} ${s(t.subject, 60)} — ${t.status}, ${t.priority}${t.first_response_due_at ? `, first response due ${String(t.first_response_due_at).slice(0, 16)}` : ""} [id ${t.id}]`);
+  for (const t of urgent) lines.push(`  - #${t.number} ${u("ticket_subject", t.subject, 60)} — ${t.status}, ${t.priority}${t.first_response_due_at ? `, first response due ${String(t.first_response_due_at).slice(0, 16)}` : ""} [id ${t.id}]`);
   if (ticketId) {
     const t = await queryOne<Row>(`SELECT id, number, subject, status, priority, requester_name, requester_email, assigned_to, first_response_due_at, resolution_due_at, breached_first_response, breached_resolution, tags FROM tickets WHERE id = $1 AND user_id = $2`, [ticketId, userId]).catch(() => null);
     if (t) {
-      lines.push(`- Focused ticket #${t.number} "${s(t.subject, 80)}": ${t.status}, ${t.priority}, requester ${s(t.requester_name, 40) || "-"} <${s(t.requester_email, 60)}>${t.assigned_to ? `, assigned to ${t.assigned_to}` : ", unassigned"}${t.breached_first_response || t.breached_resolution ? " — SLA BREACHED" : ""}`);
+      lines.push(`- Focused ticket #${t.number} ${u("ticket_subject", t.subject, 80)}: ${t.status}, ${t.priority}, requester ${u("ticket_requester", `${t.requester_name ?? ""} <${t.requester_email ?? ""}>`, 100)}${t.assigned_to ? `, assigned to ${t.assigned_to}` : ", unassigned"}${t.breached_first_response || t.breached_resolution ? " — SLA BREACHED" : ""}`);
       const msgs = await rows(`SELECT author_kind, is_internal, LEFT(body, 240) AS body, created_at FROM ticket_messages WHERE ticket_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 5`, [ticketId, userId]);
-      for (const m of msgs.reverse()) lines.push(`  - ${day(m.created_at)} ${m.author_kind}${m.is_internal ? " (internal)" : ""}: ${s(m.body, 240)}`);
+      for (const m of msgs.reverse()) lines.push(`  - ${day(m.created_at)} ${m.author_kind}${m.is_internal ? " (internal)" : ""}: ${m.is_internal ? s(m.body, 240) : u("ticket_message", m.body, 240)}`);
     }
   }
   return lines.join("\n");

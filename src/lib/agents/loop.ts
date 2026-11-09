@@ -1,3 +1,4 @@
+import { canFromStored } from "./principal";
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { completeWithTools } from "@/lib/llm/router";
@@ -6,7 +7,9 @@ import { recordUsage } from "@/lib/llm/metering";
 import { parseModelJson } from "@/lib/model-json";
 import { getDefaultSystemPrompt } from "@/lib/agent-templates";
 import { formatCorrectionsBlock, recallCorrections } from "./memory";
-import { getTool, listTools, needsApproval } from "./registry";
+import { getTool, hasUntrustedOutput, listTools, needsApproval, taintForcesApproval, TAINT_REASON } from "./registry";
+import { containsUntrusted, UNTRUSTED_PREAMBLE, wrapUntrustedJson } from "@/lib/ai/untrusted";
+import { redactForLog } from "@/lib/ai/output-guard";
 import { ensureToolsLoaded } from "./tools";
 import {
   RUN_LIMITS,
@@ -36,6 +39,8 @@ export interface LoopRun {
   user_id: string;
   agent_id: string;
   prompt: string;
+  /** JSON area->{view,edit} of the principal that triggered the run (null = owner matrix). */
+  principal_permissions?: string | null;
 }
 
 /** Enough state to rebuild the loop after a human decision. */
@@ -182,6 +187,8 @@ export async function buildSystemPrompt(
     system += "\nNo tools are available for this run. Answer directly from the instructions.";
   }
 
+  system += `\n\n${UNTRUSTED_PREAMBLE}\n`;
+
   // Corrections-as-memory: the top-k operator corrections most relevant to this task.
   const corrections = await recallCorrections(agent.user_id, agent.id, 5, task).catch(() => []);
   system += formatCorrectionsBlock(corrections);
@@ -201,6 +208,12 @@ function summarize(value: unknown, max = 2000): string {
     }
   }
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/** Step persistence keeps debugging detail but redacts PII in customer-originated output. */
+function summarizeForStep(spec: ToolSpec, value: unknown): string {
+  const text = summarize(value);
+  return hasUntrustedOutput(spec) ? redactForLog(text) : text;
 }
 
 /** Run one tool with the per-step timeout. Never throws. */
@@ -276,6 +289,7 @@ export async function runToolCall(
     } catch {
       preview = summarize(input, 500);
     }
+    if (taintForcesApproval(spec, ctx)) preview = `${TAINT_REASON} — ${preview}`.slice(0, 500);
     const approvalId = randomUUID();
     await query(
       `INSERT INTO approvals (id, user_id, run_id, agent_id, tool_name, input, preview, status, expires_at)
@@ -301,9 +315,13 @@ export async function runToolCall(
     kind: "tool",
     name: spec.name,
     input: JSON.stringify(input),
-    output: result.ok ? summarize(result.data !== undefined ? result.data : result.summary) : `error: ${result.error ?? result.summary}`,
+    output: result.ok ? summarizeForStep(spec, result.data !== undefined ? result.data : result.summary) : `error: ${result.error ?? result.summary}`,
     ms: Date.now() - started,
   });
+  if (result.ok && hasUntrustedOutput(spec)) {
+    ctx.tainted = true;
+    return toolMessage(wrapUntrustedJson(spec.name, result.data !== undefined ? result.data : result.summary, 4000));
+  }
   return toolMessage(toolResultContent(result));
 }
 
@@ -324,7 +342,7 @@ export async function runAgentLoop(run: LoopRun, agent: AgentDefinition, opts: L
   const autonomy = resolveAutonomy(agent.autonomy_level);
   const maxSteps = resolveMaxSteps(agent.max_steps);
   const tools = listTools({ names: parseAgentToolNames(agent.tools) }).slice(0, RUN_LIMITS.maxToolsPerRun);
-  const ctx: ToolContext = { userId: run.user_id, runId: run.id, agentId: agent.id, autonomy };
+  const ctx: ToolContext = { userId: run.user_id, runId: run.id, agentId: agent.id, autonomy, can: canFromStored(run.principal_permissions) };
 
   let messages: RouterMessage[];
   let turn: number;
@@ -341,6 +359,11 @@ export async function runAgentLoop(run: LoopRun, agent: AgentDefinition, opts: L
       { role: "user", content: run.prompt },
     ];
     turn = 0;
+  }
+
+  // Taint: untrusted content already in the context (inbound prompt, or a resumed run's history).
+  if (containsUntrusted(run.prompt) || messages.some((m) => m.role !== "system" && typeof m.content === "string" && containsUntrusted(m.content))) {
+    ctx.tainted = true;
   }
 
   let lastText: string | null = null;
@@ -373,12 +396,13 @@ export async function runAgentLoop(run: LoopRun, agent: AgentDefinition, opts: L
   }
 
   while (turn < maxSteps) {
-    const budget = await assertBudget(run.user_id);
+    const budget = await assertBudget(run.user_id, "agent");
     const started = Date.now();
     const result = await completeWithTools(messages, {
       tools,
       model: agent.model,
       allowlist: budget.allowlist,
+      ...(budget.maxTokensPerCall != null ? { maxTokens: budget.maxTokensPerCall } : {}),
     });
     turn++;
 

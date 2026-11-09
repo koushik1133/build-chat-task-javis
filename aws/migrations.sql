@@ -3180,3 +3180,178 @@ CREATE TABLE IF NOT EXISTS link_clicks (
 
 CREATE INDEX ASYNC IF NOT EXISTS idx_link_clicks_campaign ON link_clicks (campaign_id, clicked_at);
 
+
+-- ==== PHASE 9 LANE A ====
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS principal_role TEXT;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS principal_permissions TEXT;
+ALTER TABLE sequence_enrollments ADD COLUMN IF NOT EXISTS last_step_sent_index INTEGER;
+ALTER TABLE sequence_enrollments ADD COLUMN IF NOT EXISTS last_step_sent_at TIMESTAMPTZ;
+
+
+-- ==== PHASE 9 LANE B ====
+-- Phase 9 lane B: customer portal 2.0 — portal messaging
+
+CREATE TABLE IF NOT EXISTS portal_messages (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  contact_id       TEXT NOT NULL,
+  direction        TEXT NOT NULL,            -- in (from contact) | out (from staff)
+  body             TEXT NOT NULL,
+  author_member_id TEXT,                     -- staff member user id for direction = out
+  read_at          TIMESTAMPTZ,              -- in: read by staff; out: read by contact
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_portal_messages_contact ON portal_messages (user_id, contact_id, created_at, id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_portal_messages_unread ON portal_messages (user_id, direction, read_at, created_at);
+
+
+-- ==== PHASE 9 LANE C ====
+-- ==== PHASE 9 LANE C: calendar two-way sync + chat-app notifications ====
+
+CREATE TABLE IF NOT EXISTS calendar_connections (
+  id                   TEXT PRIMARY KEY,
+  user_id              TEXT NOT NULL,
+  provider             TEXT NOT NULL,                  -- google|outlook|simulated
+  account_email        TEXT NOT NULL,
+  auth                 TEXT,                           -- encrypted JSON (secure-store); NULL for simulated
+  external_calendar_id TEXT,
+  sync_cursor          TEXT,
+  status               TEXT NOT NULL DEFAULT 'connected', -- connected|error|disabled
+  last_sync_at         TIMESTAMPTZ,
+  last_error           TEXT,
+  settings             TEXT NOT NULL DEFAULT '{}',     -- JSON {push_bookings, pull_busy, calendar_id}
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_calendar_connections_user ON calendar_connections (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS calendar_event_links (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  connection_id    TEXT NOT NULL,
+  booking_id       TEXT NOT NULL,
+  external_event_id TEXT NOT NULL,
+  etag             TEXT,
+  last_pushed_at   TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_calendar_event_links_conn_booking ON calendar_event_links (connection_id, booking_id);
+
+CREATE TABLE IF NOT EXISTS external_busy (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  connection_id     TEXT NOT NULL,
+  external_event_id TEXT NOT NULL,
+  starts_at         TIMESTAMPTZ NOT NULL,
+  ends_at           TIMESTAMPTZ NOT NULL,
+  summary_hash      TEXT,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_external_busy_conn_event ON external_busy (connection_id, external_event_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_external_busy_user_range ON external_busy (user_id, starts_at);
+
+CREATE TABLE IF NOT EXISTS calsync_sim_events (
+  id            TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL,
+  calendar_id   TEXT NOT NULL,
+  title         TEXT,
+  starts_at     TIMESTAMPTZ NOT NULL,
+  ends_at       TIMESTAMPTZ NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_calsync_sim_events_conn ON calsync_sim_events (connection_id, calendar_id);
+
+CREATE TABLE IF NOT EXISTS calsync_cursors (
+  name          TEXT PRIMARY KEY,
+  last_event_at TIMESTAMPTZ,
+  last_event_id TEXT,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS chat_integrations (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  provider       TEXT NOT NULL,                        -- slack|teams|discord|webhook
+  name           TEXT NOT NULL,
+  webhook_url_enc TEXT NOT NULL,
+  channel_label  TEXT,
+  events         TEXT NOT NULL DEFAULT '[]',           -- JSON array of event type patterns
+  enabled        BOOLEAN NOT NULL DEFAULT TRUE,
+  last_status    TEXT,
+  last_error     TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_chat_integrations_user ON chat_integrations (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS chat_cursors (
+  name          TEXT PRIMARY KEY,
+  last_event_at TIMESTAMPTZ,
+  last_event_id TEXT,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ==== PHASE 9 LANE D ====
+-- Phase 9 lane D: workspace snapshots (portable configuration templates) + application registry.
+-- One statement per block (Aurora DSQL). No foreign keys.
+
+CREATE TABLE IF NOT EXISTS snapshots (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  description   TEXT,
+  sections      TEXT NOT NULL DEFAULT '[]',   -- JSON array of section keys included
+  payload       TEXT NOT NULL,                -- the snapshot JSON document (schema: 1)
+  sha256        TEXT NOT NULL,
+  size_bytes    INTEGER NOT NULL DEFAULT 0,
+  source_org_id TEXT,
+  visibility    TEXT NOT NULL DEFAULT 'private', -- private | agency
+  created_by    TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS snapshots_user_created_idx ON snapshots (user_id, created_at DESC);
+
+CREATE INDEX ASYNC IF NOT EXISTS snapshots_user_visibility_idx ON snapshots (user_id, visibility);
+
+CREATE TABLE IF NOT EXISTS snapshot_applications (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,                  -- target workspace data id
+  snapshot_id TEXT,
+  applied_by  TEXT,
+  mode        TEXT NOT NULL DEFAULT 'skip_existing',
+  plan        TEXT,                           -- JSON plan summary
+  result      TEXT,                           -- JSON result summary (+ errors)
+  status      TEXT NOT NULL DEFAULT 'applied', -- applied | partial | failed
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS snapshot_applications_user_created_idx ON snapshot_applications (user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS snapshot_objects (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  section      TEXT NOT NULL,
+  natural_key  TEXT NOT NULL,
+  object_id    TEXT NOT NULL,
+  snapshot_sha TEXT,
+  item_sha     TEXT,
+  applied_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS snapshot_objects_key_uniq ON snapshot_objects (user_id, section, natural_key);
+
+
+-- ==== PHASE 9 LANE E ====
+-- Phase 9 lane E: AI cost controls (per-feature caps, daily cap, token ceiling, fallback model)
+ALTER TABLE ai_budgets ADD COLUMN IF NOT EXISTS feature_caps TEXT;
+ALTER TABLE ai_budgets ADD COLUMN IF NOT EXISTS daily_cap_micros BIGINT;
+ALTER TABLE ai_budgets ADD COLUMN IF NOT EXISTS max_tokens_per_call INTEGER;
+ALTER TABLE ai_budgets ADD COLUMN IF NOT EXISTS fallback_model TEXT;
+

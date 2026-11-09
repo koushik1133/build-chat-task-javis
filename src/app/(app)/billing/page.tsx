@@ -74,6 +74,21 @@ export default function BillingPage() {
     router.replace("/billing", { scroll: false });
   }, [router]);
 
+  // Deep link: /billing?invoice=<id> switches to the invoices tab, scrolls to that row and highlights it.
+  const [focusInvoice, setFocusInvoice] = useState<string | null>(null);
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("invoice");
+    if (!id) return;
+    setTab("invoices");
+    setInvoiceView("invoices");
+    setFocusInvoice(id);
+  }, []);
+  useEffect(() => {
+    if (!focusInvoice || loading) return;
+    const el = document.getElementById(`invoice-${focusInvoice}`);
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusInvoice, loading, invoices]);
+
   const load = useCallback(async () => {
     const signal = nextSignal();
     setLoading(true);
@@ -267,6 +282,7 @@ export default function BillingPage() {
                 />
               ) : (
             <InvoiceList
+              focusId={focusInvoice}
               invoices={invoices}
               syncState={syncState}
               busyId={busyId}
@@ -438,8 +454,8 @@ const QuoteRow = memo(function QuoteRow({ q, busy, onSend, onConvert, onDelete, 
   );
 });
 
-function InvoiceList({ invoices, syncState, busyId, onNew, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles }: {
-  invoices: Invoice[]; syncState: Record<string, SyncState> | null; busyId: string | null; onNew: () => void; onFiles: (i: Invoice) => void;
+function InvoiceList({ focusId, invoices, syncState, busyId, onNew, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles }: {
+  focusId?: string | null; invoices: Invoice[]; syncState: Record<string, SyncState> | null; busyId: string | null; onNew: () => void; onFiles: (i: Invoice) => void;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
   onCreditNote: (i: Invoice) => void; onRefund: (i: Invoice) => void;
 }) {
@@ -460,21 +476,21 @@ function InvoiceList({ invoices, syncState, busyId, onNew, onSend, onPayLink, on
   return (
     <ul className="divide-y divide-border rounded-xl border border-border bg-card" aria-label="Invoices">
       {invoices.map((i) => (
-        <InvoiceRow key={i.id} i={i} sync={syncState ? (syncState[i.id] ?? (i.status === "draft" || i.status === "void" ? null : "pending")) : null} busy={busyId === i.id} onFiles={onFiles} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} onCreditNote={onCreditNote} onRefund={onRefund} />
+        <InvoiceRow key={i.id} i={i} focused={focusId === i.id} sync={syncState ? (syncState[i.id] ?? (i.status === "draft" || i.status === "void" ? null : "pending")) : null} busy={busyId === i.id} onFiles={onFiles} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} onCreditNote={onCreditNote} onRefund={onRefund} />
       ))}
     </ul>
   );
 }
 
-const InvoiceRow = memo(function InvoiceRow({ i, sync, busy, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles }: {
-  i: Invoice; sync: SyncState | null; busy: boolean; onFiles: (i: Invoice) => void;
+const InvoiceRow = memo(function InvoiceRow({ i, focused, sync, busy, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles }: {
+  i: Invoice; focused?: boolean; sync: SyncState | null; busy: boolean; onFiles: (i: Invoice) => void;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
   onCreditNote: (i: Invoice) => void; onRefund: (i: Invoice) => void;
 }) {
   const open = !["paid", "void"].includes(i.status);
   const issued = !["draft", "void"].includes(i.status);
   return (
-    <li className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between" aria-busy={busy || undefined}>
+    <li id={`invoice-${i.id}`} className={`flex scroll-mt-24 flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between${focused ? " bg-primary/5 ring-2 ring-inset ring-primary/40" : ""}`} aria-busy={busy || undefined}>
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

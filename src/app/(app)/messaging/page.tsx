@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { PageContainer } from "@/components/page-container";
+import { PortalThreads } from "@/components/messaging/portal-threads";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
@@ -206,6 +207,8 @@ export default function MessagingPage() {
           Simulate inbound message
         </Button>
       </div>
+
+      <PortalThreads />
 
       <div className="flex h-[calc(100dvh-14rem)] min-h-[450px] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         {/* Left List Pane */}

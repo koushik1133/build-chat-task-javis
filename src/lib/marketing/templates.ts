@@ -1,3 +1,4 @@
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 
@@ -25,14 +26,16 @@ export interface TemplateInput {
   category?: string | null;
 }
 
-export async function listTemplates(dataId: string, opts: { category?: string | null } = {}): Promise<TemplateRow[]> {
+export async function listTemplates(dataId: string, opts: { category?: string | null; cursor?: Cursor | null; limit?: number } = {}): Promise<TemplateRow[]> {
   const params: unknown[] = [dataId];
   let where = `user_id = $1`;
   if (opts.category) {
     params.push(opts.category);
     where += ` AND category = $${params.length}`;
   }
-  return query<TemplateRow>(`SELECT ${COLS} FROM email_templates WHERE ${where} ORDER BY updated_at DESC LIMIT 200`, params);
+  where += keysetClause(opts.cursor, params);
+  params.push(Math.min(Math.max(opts.limit ?? 200, 1), 201));
+  return query<TemplateRow>(`SELECT ${COLS} FROM email_templates WHERE ${where} ORDER BY ${keysetOrder()} LIMIT $${params.length}`, params);
 }
 
 export async function getTemplate(dataId: string, id: string): Promise<TemplateRow | null> {

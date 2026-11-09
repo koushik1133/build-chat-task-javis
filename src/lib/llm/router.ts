@@ -23,9 +23,14 @@ export interface CompleteWithToolsOptions {
   model?: string | null;
   allowlist?: string[] | null;
   maxTokens?: number;
+  /** "fast" hints that a cheaper model is fine (titles, summaries). */
+  tier?: "fast" | "default";
   temperature?: number;
   timeoutMs?: number;
 }
+
+/** Cheaper per-provider models for `tier: "fast"`. */
+const FAST_MODELS: Partial<Record<string, string>> = { groq: "llama-3.1-8b-instant" };
 
 /** Network errors, timeouts, 5xx and 429 are worth retrying on another provider. */
 export function isRetriableLlmError(err: unknown): boolean {
@@ -68,7 +73,7 @@ export async function completeWithTools(
 
   for (const p of providers) {
     const client = new OpenAI({ apiKey: p.apiKey, baseURL: p.baseURL, timeout: timeoutMs, maxRetries: 0 });
-    const model = opts.model && opts.model.trim() ? opts.model : p.model;
+    const model = opts.model && opts.model.trim() ? opts.model : opts.tier === "fast" ? FAST_MODELS[p.id] ?? p.model : p.model;
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
