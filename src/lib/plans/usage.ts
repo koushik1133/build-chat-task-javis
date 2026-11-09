@@ -1,4 +1,5 @@
 import { query, queryOne } from "@/lib/dsql";
+import { tableExists } from "@/lib/table-exists";
 import { METRICS, type Metric } from "./catalog";
 import { monthStart } from "./rules";
 
@@ -35,6 +36,8 @@ export async function measure(dataId: string, metric: Metric, now = new Date()):
       const row = await queryOne<{ b: string | number | null }>(`SELECT COALESCE(SUM(size_bytes), 0) AS b FROM attachments WHERE user_id = $1 AND deleted_at IS NULL`, [dataId]);
       return Math.ceil(n(row?.b) / (1024 * 1024));
     }
+    case "locations":
+      return (await tableExists("locations")) ? count(`SELECT COUNT(*) AS c FROM locations WHERE user_id = $1 AND active = TRUE`, [dataId]) : 0;
     case "api_keys":
       return count(`SELECT COUNT(*) AS c FROM api_keys WHERE user_id = $1 AND revoked_at IS NULL`, [dataId]);
     case "ai_credits_used": {

@@ -30,6 +30,8 @@ const GROUP_KEYS: Record<SearchKind, MessageKey> = {
   record: "search.group.records",
   article: "search.group.articles",
   order: "search.group.orders",
+  membership_plan: "search.group.membershipPlans",
+  member: "search.group.members",
   project: "search.group.projects",
   supplier: "search.group.suppliers",
   purchase_order: "search.group.purchaseOrders",
@@ -46,6 +48,14 @@ const GROUP_KEYS: Record<SearchKind, MessageKey> = {
   report: "search.group.reports",
   snapshot: "search.group.snapshots",
   booking_type: "search.group.bookingTypes",
+  location: "search.group.locations",
+  transfer: "search.group.transfers",
+  tax_filing: "search.group.taxFilings",
+  shipment: "search.group.shipments",
+  return: "search.group.returns",
+  voucher: "search.group.vouchers",
+  gift_card: "search.group.giftCards",
+  survey: "search.group.surveys",
 };
 
 function searchPages(scope: Scope, q: string, t: ReturnType<typeof makeT>): SearchItem[] {

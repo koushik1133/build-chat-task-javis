@@ -99,7 +99,16 @@
     { "name": "XERO_CLIENT_ID", "group": "provider", "provider": "xero", "description": "Xero OAuth client id." },
     { "name": "XERO_CLIENT_SECRET", "group": "provider", "provider": "xero", "secret": true, "description": "Xero OAuth secret." },
 
+    { "name": "EASYPOST_API_KEY", "group": "provider", "provider": "easypost", "secret": true, "description": "EasyPost API key; development fallback only (production orgs connect their own key under Shipping). Untested against the live API." },
+    { "name": "EASYPOST_WEBHOOK_SECRET", "group": "provider", "provider": "easypost", "secret": true, "description": "EasyPost webhook HMAC secret for /api/shipping/webhook/easypost." },
+    { "name": "SHIPPO_API_KEY", "group": "provider", "provider": "shippo", "secret": true, "description": "Shippo API token; development fallback only (production orgs connect their own token). Untested against the live API." },
+    { "name": "SHIPPO_WEBHOOK_SECRET", "group": "provider", "provider": "shippo", "secret": true, "description": "Shared token appended as ?token= to the Shippo webhook URL /api/shipping/webhook/shippo." },
+    { "name": "SHIPPING_WEBHOOK_SECRET", "group": "provider", "provider": "shipping_sim", "secret": true, "description": "HMAC secret for simulated-carrier tracking webhooks (x-kernelhub-signature)." },
+    { "name": "SHIPPING_ALLOW_SIMULATED", "group": "flag", "enum": ["true", "false"], "default": "false", "description": "Allow the simulated carrier in production (it is always allowed outside production)." },
+
     { "name": "JAVIS_DEV_PORT", "group": "dev", "description": "Port for scripts/dev.mjs.", "default": "3001" },
+    { "name": "VIES_ENABLED", "group": "flag", "enum": ["0", "1"], "default": "0", "description": "Set to 1 to run live EU VIES VAT-ID lookups (fixed public EC endpoint); otherwise lookups are format-only/simulated." },
+    { "name": "UPDATE_GOLDEN", "group": "dev", "description": "Tests only: set to 1 to rewrite the tax e-invoice golden fixtures." },
     { "name": "KH_BASE_URL", "group": "dev", "description": "Base URL for scripts/seed-demo.mjs and scripts/smoke.mjs." },
     { "name": "KH_API_KEY", "group": "dev", "secret": true, "description": "API key for scripts/seed-demo.mjs." }
   ],
@@ -116,6 +125,9 @@
     { "id": "upload_post", "label": "upload-post.com social publishing", "vars": ["UPLOAD_POST_API_KEY"] },
     { "id": "stripe", "label": "Stripe payments", "vars": ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"], "requiredWhen": { "var": "PAYMENTS_PROVIDER", "equals": "stripe" } },
     { "id": "razorpay", "label": "Razorpay payments", "vars": ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"], "requiredWhen": { "var": "PAYMENTS_PROVIDER", "equals": "razorpay" } },
+    { "id": "easypost", "label": "EasyPost shipping (dev fallback)", "vars": ["EASYPOST_API_KEY", "EASYPOST_WEBHOOK_SECRET"] },
+    { "id": "shippo", "label": "Shippo shipping (dev fallback)", "vars": ["SHIPPO_API_KEY", "SHIPPO_WEBHOOK_SECRET"] },
+    { "id": "shipping_sim", "label": "Simulated carrier webhooks", "vars": ["SHIPPING_WEBHOOK_SECRET"] },
     { "id": "turnstile", "label": "Cloudflare Turnstile", "vars": ["TURNSTILE_SECRET_KEY", "NEXT_PUBLIC_TURNSTILE_SITE_KEY"] },
     { "id": "google_mail", "label": "Gmail inbox sync (OAuth)", "vars": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] },
     { "id": "outlook_mail", "label": "Outlook inbox sync (OAuth)", "vars": ["MS_CLIENT_ID", "MS_CLIENT_SECRET"] },

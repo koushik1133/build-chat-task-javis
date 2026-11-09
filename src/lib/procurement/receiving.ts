@@ -22,6 +22,8 @@ export const ReceiveLinesSchema = z
     lines: z.array(z.object({ product_id: z.string().min(1).max(100), qty: z.number().int().min(1).max(1_000_000) }).strict()).min(1).max(200),
     note: z.string().trim().max(1000).nullable().optional(),
     received_at: z.string().datetime({ offset: true }).optional(),
+    /** Stock location to receive into (default location when omitted). */
+    location_id: z.string().min(1).max(100).nullable().optional(),
   })
   .strict();
 export type ReceiveLinesInput = z.infer<typeof ReceiveLinesSchema>;
@@ -128,7 +130,7 @@ async function receiveOnce(dataId: string, poId: string, input: ReceiveLinesInpu
 
   const recosted: Record<string, number> = {};
   for (const l of input.lines) {
-    await adjustStock(dataId, l.product_id, { kind: "receive", qty: l.qty, ref_kind: "purchase_order", ref_id: po.id, note: `Received on ${po.number}` }, actorId ?? null);
+    await adjustStock(dataId, l.product_id, { kind: "receive", qty: l.qty, ref_kind: "purchase_order", ref_id: po.id, note: `Received on ${po.number}`, location_id: input.location_id ?? null }, actorId ?? null);
     const unitCost = costByProduct.get(l.product_id) ?? 0;
     const next = await recostProduct(dataId, l.product_id, l.qty, unitCost);
     if (next !== null) recosted[l.product_id] = next;

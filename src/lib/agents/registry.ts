@@ -57,7 +57,7 @@ const HIGH_RISK_TOOLS = new Set([
   // Configuration / standing-rule / bulk-state changes that a customer must never be able to steer.
   "snapshots.apply", "automations.install_template", "automations.toggle", "billing.create_recurring",
   "orders.fulfil", "orders.unfulfil", "social.schedule_post", "inventory.adjust_stock", "agents.run_agent",
-  "calendar.cancel_booking", "calendar.reschedule",
+  "calendar.cancel_booking", "calendar.reschedule", "shipping.create_shipment",
 ]);
 const HIGH_RISK_ACTION = /^(send|refund|void|delete|erase|purge|launch|push|invite|grant|revoke|set_role|decide|approve|create_api_key|create_webhook|create_key)/;
 const UNTRUSTED_OUTPUT_TOOLS = new Set([
@@ -65,7 +65,7 @@ const UNTRUSTED_OUTPUT_TOOLS = new Set([
   "records.search", "messaging.list", "mail.read", "mail.search",
   // Read tools that surface customer-typed names, notes, order comments or document text.
   "orders.list", "billing.list_invoices", "billing.list_quotes", "billing.statement", "documents.status", "reports.run",
-  "tasks.list", "knowledge.search", "production.list_cards", "projects.list", "projects.status", "social.list_posts",
+  "shipping.track", "shipping.returns", "tasks.list", "knowledge.search", "production.list_cards", "projects.list", "projects.status", "social.list_posts",
 ]);
 
 /** Effective risk: explicit spec value, else name-based classification (reads are low). */

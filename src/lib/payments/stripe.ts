@@ -106,6 +106,18 @@ export const stripeProvider: PaymentProvider = {
     if (!v.ok) return v;
     return parseStripeEvent(rawBody);
   },
+  async createCustomer() {
+    throw new Error("Stripe saved payment methods are not configured");
+  },
+  async createSetupCheckout() {
+    throw new Error("Stripe saved payment methods are not configured");
+  },
+  async attachPaymentMethod() {
+    throw new Error("Stripe saved payment methods are not configured");
+  },
+  async chargeSaved() {
+    throw new Error("Stripe saved payment methods are not configured");
+  },
   async refund() {
     // Stub: Checkout Sessions must be refunded through the underlying PaymentIntent (POST /v1/refunds).
     throw new Error("Stripe refunds are not wired yet; refund from the Stripe dashboard and record it manually");

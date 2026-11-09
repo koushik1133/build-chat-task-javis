@@ -118,12 +118,36 @@ export async function deleteTaxRate(dataId: string, id: string): Promise<boolean
   return rows.length > 0;
 }
 
+export interface DocumentTaxOptions {
+  contactId?: string | null;
+  shipTo?: { country?: string | null; state?: string | null; postal_code?: string | null } | null;
+  docDate?: Date;
+  reverseCharge?: boolean;
+}
+
+export type DocumentTotals = TaxTotals & { compliance?: import("@/lib/tax-compliance/resolver").ComplianceMeta };
+
 /**
  * Totals for a document owned by `dataId`: resolves catalogue rates (incl.
  * inactive ones referenced by old documents) and applies the org's inclusive /
  * rounding preferences. Falls back to inline basis points when the table is missing.
+ *
+ * Optional compliance hook: only when the org has a tax profile (Phase 11,
+ * src/lib/tax-compliance) are lines re-pointed at regime component rates
+ * (CGST/SGST/IGST, destination VAT, ...). Without a profile this is exactly the
+ * historic behaviour.
  */
-export async function resolveDocumentTotals(dataId: string, items: readonly LineItem[]): Promise<TaxTotals> {
+export async function resolveDocumentTotals(dataId: string, items: readonly LineItem[], opts: DocumentTaxOptions = {}): Promise<DocumentTotals> {
   const [rates, settings] = await Promise.all([listTaxRates(dataId, { includeInactive: true }).catch(() => [] as TaxRateDTO[]), getBillingSettings(dataId)]);
-  return computeTaxTotals(items, rates, { inclusive: settings.prices_include_tax, rounding: settings.tax_rounding });
+  const base = { inclusive: settings.prices_include_tax, rounding: settings.tax_rounding };
+  if (await tableExists("tax_profiles")) {
+    try {
+      const { resolveDocumentTax } = await import("@/lib/tax-compliance/document");
+      const r = await resolveDocumentTax(dataId, items, opts);
+      if (r) return { ...computeTaxTotals(r.items, r.rates, base), compliance: r.meta };
+    } catch {
+      /* compliance is best-effort: fall through to the plain engine */
+    }
+  }
+  return computeTaxTotals(items, rates, base);
 }

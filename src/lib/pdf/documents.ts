@@ -2,6 +2,7 @@ import { query, queryOne } from "@/lib/dsql";
 import { getBranding } from "@/lib/branding";
 import { businessName, type QuoteDTO } from "@/lib/money/quotes";
 import type { InvoiceDTO } from "@/lib/money/invoices";
+import type { LineItem } from "@/lib/money/items";
 import { documentHash, renderInvoicePdf, renderQuotePdf, type DocParties, type SignatureStamp } from "./quote-document";
 import { renderCreditNotePdf, renderPurchaseOrderPdf, renderStatementPdf, renderSupplierBillPdf } from "./billing-documents";
 import { getBillingSettings } from "@/lib/money/settings";
@@ -74,7 +75,24 @@ async function docContext(dataId: string) {
 }
 
 /** Issuer tax id, the contact's tax number / billing address and labels for catalogue tax rates. */
-export async function docParties(dataId: string, contactId: string | null | undefined): Promise<DocParties> {
+/** Regime legends / issuer registration for orgs with a tax profile (invoices only; leaves signed-quote hashes untouched). */
+async function regimeParties(dataId: string, contactId: string | null | undefined, items: LineItem[]): Promise<Partial<DocParties>> {
+  try {
+    const [{ resolveDocumentTax }, { getTaxProfile }] = await Promise.all([import("@/lib/tax-compliance/document"), import("@/lib/tax-compliance/store")]);
+    const profile = await getTaxProfile(dataId);
+    if (!profile || profile.regime === "generic") return {};
+    const r = await resolveDocumentTax(dataId, items, { contactId });
+    const info = (await import("@/lib/tax-compliance/regimes")).REGIME_INFO[profile.regime];
+    return {
+      legends: r?.meta.legends ?? [], place_of_supply: r?.meta.place_of_supply ?? null,
+      ...(profile.registration_number ? { issuer_tax_label: info.tax_id_label, issuer_tax_number: profile.registration_number } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+export async function docParties(dataId: string, contactId: string | null | undefined, invoiceItems?: LineItem[]): Promise<DocParties> {
   const [settings, rates, contact] = await Promise.all([
     getBillingSettings(dataId).catch(() => null),
     listTaxRates(dataId, { includeInactive: true }).catch(() => []),
@@ -90,6 +108,7 @@ export async function docParties(dataId: string, contactId: string | null | unde
     contact_tax_number: contact?.tax_number ?? null,
     contact_billing_address: contact?.billing_address ?? null,
     rate_labels,
+    ...(invoiceItems ? await regimeParties(dataId, contactId, invoiceItems) : {}),
   };
 }
 
@@ -126,7 +145,7 @@ export async function buildQuotePdf(dataId: string, quote: QuoteDTO, opts: { red
 }
 
 export async function buildInvoicePdf(dataId: string, invoice: InvoiceDTO): Promise<BuiltPdf> {
-  const [{ branding, timezone, business }, parties] = await Promise.all([docContext(dataId), docParties(dataId, invoice.contact_id)]);
+  const [{ branding, timezone, business }, parties] = await Promise.all([docContext(dataId), docParties(dataId, invoice.contact_id, invoice.items)]);
   let quote_number: string | null = null;
   if (invoice.quote_id) {
     const q = await queryOne<{ number: string }>(`SELECT number FROM quotes WHERE id = $1`, [invoice.quote_id]).catch(() => null);

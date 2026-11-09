@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Loader2, Lock, Store, Truck } from "lucide-react";
@@ -9,10 +9,15 @@ import { Checkbox, Input, Textarea } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
 import { Banner, Empty, ErrorState } from "@/components/ui/feedback";
 import { CartSkeleton, money, PageState, readError, SHOP_WIDTH, ShopNav, StickyBar, TaxNote, Totals, useCart, useShop } from "@/components/shop/shop-ui";
+import { DiscountFields, refKey, type DiscountPreview, type DiscountSelection } from "@/components/shop/discount-fields";
 import { cn } from "@/lib/utils";
 
 type Delivery = "ship" | "pickup";
 const FORM_ID = "checkout-form";
+
+function readRef(org: string): string | undefined {
+  try { return window.sessionStorage.getItem(refKey(org)) ?? undefined; } catch { return undefined; }
+}
 
 export default function CheckoutPage() {
   const { org } = useParams<{ org: string }>();
@@ -21,10 +26,31 @@ export default function CheckoutPage() {
   const effective: Delivery = shop ? (shop.collect_shipping ? (shop.pickup_enabled ? delivery : "ship") : "pickup") : delivery;
   const cart = useCart(org, { pickup: effective === "pickup" });
   const [form, setForm] = useState({ name: "", email: "", phone: "", line1: "", line2: "", city: "", region: "", postal_code: "", country: "", notes: "", marketing: false, terms: false });
+  const [options, setOptions] = useState<Array<{ id: string; label: string; price_minor: number; days_min: number | null; days_max: number | null }> | null>(null);
+  const [optionId, setOptionId] = useState("");
+  const [taxBp, setTaxBp] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [termsError, setTermsError] = useState<string | null>(null);
+  const [disc, setDisc] = useState<{ sel: DiscountSelection; preview: DiscountPreview | null }>({ sel: { voucher_codes: [], points: 0, gift_card: "", portal_token: "" }, preview: null });
   const base = `/shop/${encodeURIComponent(org)}`;
+  const addrReady = effective === "ship" && form.line1.trim() !== "" && form.city.trim() !== "" && form.country.trim().length >= 2;
+  useEffect(() => {
+    if (!addrReady) { setOptions(null); return; }
+    const ctl = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/shop/${encodeURIComponent(org)}/shipping-quote`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", signal: ctl.signal, body: JSON.stringify({ address: { line1: form.line1, line2: form.line2 || undefined, city: form.city, region: form.region || undefined, postal_code: form.postal_code || undefined, country: form.country } }) });
+        if (!res.ok) return setOptions(null);
+        const j = (await res.json()) as { rules_active: boolean; shipping_tax_bp: number; options: NonNullable<typeof options> };
+        if (!j.rules_active) return setOptions(null);
+        setOptions(j.options);
+        setTaxBp(j.shipping_tax_bp);
+        setOptionId((cur) => (j.options.some((o) => o.id === cur) ? cur : j.options[0]?.id ?? ""));
+      } catch { /* aborted or offline: keep the flat charge display */ }
+    }, 500);
+    return () => { clearTimeout(t); ctl.abort(); };
+  }, [addrReady, org, form.line1, form.line2, form.city, form.region, form.postal_code, form.country]);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value }));
 
@@ -44,7 +70,7 @@ export default function CheckoutPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ name: form.name, email: form.email, phone: form.phone || undefined, shipping, consent: { marketing: form.marketing }, notes: form.notes || undefined }),
+        body: JSON.stringify({ name: form.name, email: form.email, phone: form.phone || undefined, shipping, consent: { marketing: form.marketing }, shipping_option_id: effective === "ship" && options && optionId ? optionId : undefined, notes: form.notes || undefined, discounts: disc.sel.voucher_codes.length || disc.sel.points || disc.sel.gift_card ? { voucher_codes: disc.sel.voucher_codes, points: disc.sel.points || undefined, gift_card: disc.sel.gift_card || undefined, portal_token: disc.sel.portal_token || undefined } : undefined, ref: readRef(org) }),
       });
       if (!res.ok) throw new Error(await readError(res, "Could not place the order"));
       const json = (await res.json()) as { pay_url: string; status_url: string };
@@ -57,7 +83,9 @@ export default function CheckoutPage() {
 
   if (shopLoading || cart.loading) return <CartSkeleton label="Loading checkout…" />;
   if (shopError || !shop) return <PageState><ErrorState message={shopError ?? "This shop is not available."} onRetry={reload} /></PageState>;
-  const c = cart.cart;
+  const chosen = options?.find((o) => o.id === optionId) ?? null;
+  const c0 = cart.cart;
+  const c = c0 && chosen ? (() => { const tax = Math.round((chosen.price_minor * taxBp) / 10000); return { ...c0, shipping_minor: chosen.price_minor, tax_minor: c0.tax_minor + tax, total_minor: c0.total_minor - c0.shipping_minor + chosen.price_minor + tax }; })() : c0;
   if (!c || c.items.length === 0) {
     return (
       <>
@@ -78,7 +106,9 @@ export default function CheckoutPage() {
   }
   const showDeliveryChoice = shop.collect_shipping && shop.pickup_enabled;
   const blocked = c.unavailable.length > 0;
-  const payLabel = `Pay ${money(c.total_minor, c.currency)}`;
+  const dp = disc.preview;
+  const payable = dp ? dp.payable_minor : c.total_minor;
+  const payLabel = payable === 0 ? "Place order" : `Pay ${money(payable, c.currency)}`;
   const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
 
   return (
@@ -141,6 +171,17 @@ export default function CheckoutPage() {
                     })}
                   </fieldset>
                 )}
+                {effective === "ship" && options && (
+                  <fieldset className="mb-4 space-y-2">
+                    <legend className="mb-1 text-sm font-medium">Shipping method</legend>
+                    {options.length === 0 ? <p className="text-sm text-muted-foreground">We do not ship to this address.</p> : options.map((o) => (
+                      <label key={o.id} className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-lg border border-border p-3 text-sm focus-within:ring-2 focus-within:ring-ring has-[:checked]:border-primary">
+                        <span className="flex min-w-0 items-center gap-2"><input type="radio" name="ship-option" aria-label={`${o.label}, ${o.price_minor === 0 ? "free" : money(o.price_minor, shop.currency)}`} checked={optionId === o.id} onChange={() => setOptionId(o.id)} className="h-4 w-4 accent-primary" /><span className="break-words font-medium">{o.label}</span>{o.days_min !== null && <span className="text-xs text-muted-foreground">{o.days_min === o.days_max ? `${o.days_min} days` : `${o.days_min}-${o.days_max} days`}</span>}</span>
+                        <span className="shrink-0 tabular-nums">{o.price_minor === 0 ? "Free" : money(o.price_minor, shop.currency)}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
                 {effective === "ship" && (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="Address line 1" required className="sm:col-span-2">
@@ -165,6 +206,8 @@ export default function CheckoutPage() {
                 )}
               </section>
             )}
+
+            <DiscountFields org={org} email={form.email} pickup={effective === "pickup"} onChange={(sel, preview) => setDisc({ sel, preview })} />
 
             <section className="rounded-xl border border-border bg-card p-4 sm:p-5" aria-labelledby="co-extra">
               <h2 id="co-extra" className="mb-3 text-sm font-semibold">
@@ -222,6 +265,13 @@ export default function CheckoutPage() {
               ))}
             </ul>
             <Totals cart={c} showShipping={shop.collect_shipping} />
+            {dp && (dp.discount_minor > 0 || dp.gift_card) && (
+              <dl className="mt-2 space-y-1 border-t border-border pt-2 text-sm">
+                {dp.discount_minor > 0 && <div className="flex justify-between"><dt>Discounts</dt><dd className="tabular-nums text-emerald-700 dark:text-emerald-400">-{money(dp.discount_minor, dp.currency)}</dd></div>}
+                {dp.gift_card && <div className="flex justify-between"><dt>Gift card</dt><dd className="tabular-nums text-emerald-700 dark:text-emerald-400">-{money(dp.gift_card.applied_minor, dp.currency)}</dd></div>}
+                <div className="flex justify-between font-semibold"><dt>To pay</dt><dd className="tabular-nums">{money(dp.payable_minor, dp.currency)}</dd></div>
+              </dl>
+            )}
             <TaxNote inclusive={c.prices_include_tax} className="mt-2" />
             {error && (
               <Banner tone="error" className="mb-0 mt-3">
@@ -243,7 +293,7 @@ export default function CheckoutPage() {
       <StickyBar>
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">Total</p>
-          <p className="text-base font-semibold tabular-nums">{money(c.total_minor, c.currency)}</p>
+          <p className="text-base font-semibold tabular-nums">{money(payable, c.currency)}</p>
         </div>
         <Button type="submit" form={FORM_ID} size="lg" className="shrink-0" disabled={submitting || blocked} aria-busy={submitting || undefined}>
           {submitting ? spinner : <Lock className="h-4 w-4" aria-hidden />}

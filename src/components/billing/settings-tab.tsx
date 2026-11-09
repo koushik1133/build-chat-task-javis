@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, Percent, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/ui/pill";
@@ -236,6 +237,7 @@ function PreferencesCard({ settings, canEdit, onSaved }: { settings: BillingSett
     <Card title="Tax ID, numbering & payment terms" description="Your tax registration prints on every document. Prefixes apply to new numbers only. Reminder days are relative to the due date (negative = before).">
       <form onSubmit={save} className="space-y-3">
         {err && <Banner tone="error" onDismiss={() => setErr(null)}>{err}</Banner>}
+        <p className="text-xs text-muted-foreground">Need GST, VAT or sales-tax rules, filing reports or e-invoices? See <Link href="/tax" className="underline">Tax &amp; compliance</Link>.</p>
         <div className="grid gap-2 sm:grid-cols-2">
           <Field label="Tax ID label" hint='e.g. "VAT ID", "GSTIN"'><Input maxLength={40} value={form.tax_id_label} disabled={!canEdit} onChange={(e) => set("tax_id_label", e.target.value)} /></Field>
           <Field label="Tax number"><Input maxLength={64} value={form.tax_number} disabled={!canEdit} onChange={(e) => set("tax_number", e.target.value)} /></Field>

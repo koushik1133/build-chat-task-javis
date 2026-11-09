@@ -60,6 +60,38 @@ export interface RefundResult {
   status: "succeeded" | "pending";
 }
 
+export interface CreateCustomerInput {
+  contactId: string;
+  email: string | null;
+  name: string;
+}
+export interface AttachPaymentMethodInput {
+  customerRef: string;
+  /** Simulated provider only: which kind of test card to put on file. */
+  simulate?: "ok" | "decline";
+  /** Real providers: id of the completed setup session. */
+  setupRef?: string;
+}
+export interface SetupCheckoutInput {
+  customerRef: string;
+  successUrl: string;
+  cancelUrl: string;
+}
+export interface ChargeSavedInput {
+  paymentRef: string;
+  amountMinor: number;
+  currency: string;
+  invoiceId: string;
+  description: string;
+  /** Stable per (subscription, period, attempt) so a retried call never double-charges. */
+  idempotencyKey: string;
+}
+export interface ChargeSavedResult {
+  status: "succeeded" | "failed";
+  providerRef: string;
+  error?: string | null;
+}
+
 export interface PaymentProvider {
   id: PaymentProviderId;
   /** True when the env vars this provider needs are present. */
@@ -68,4 +100,12 @@ export interface PaymentProvider {
   verifyWebhook(rawBody: string, headers: Headers): Promise<VerifyWebhookResult>;
   /** Return money to the payer. Throws when the provider cannot refund (not configured / unsupported). */
   refund(input: RefundInput): Promise<RefundResult>;
+  /** Create the provider-side customer that saved payment methods hang off. Throws "not configured" on stubs. */
+  createCustomer(input: CreateCustomerInput): Promise<{ customerRef: string }>;
+  /** Hosted page where the customer enters a payment method to keep on file. */
+  createSetupCheckout(input: SetupCheckoutInput): Promise<{ url: string; setupRef: string }>;
+  /** Store a payment method on the customer; returns the reference `chargeSaved` charges later. */
+  attachPaymentMethod(input: AttachPaymentMethodInput): Promise<{ paymentRef: string }>;
+  /** Off-session charge against a saved method. A decline is a `failed` result, not an exception. */
+  chargeSaved(input: ChargeSavedInput): Promise<ChargeSavedResult>;
 }

@@ -12,7 +12,7 @@ export type TicketPriority = (typeof TICKET_PRIORITIES)[number];
 export const TICKET_STATUSES = ["open", "pending", "resolved", "closed"] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
-export const TICKET_SOURCES = ["portal", "widget", "email", "sms", "whatsapp", "manual", "agent"] as const;
+export const TICKET_SOURCES = ["portal", "widget", "email", "sms", "whatsapp", "manual", "agent", "survey"] as const;
 export type TicketSource = (typeof TICKET_SOURCES)[number];
 
 export function isTicketPriority(v: unknown): v is TicketPriority {

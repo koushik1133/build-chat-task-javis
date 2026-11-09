@@ -1,4 +1,5 @@
 import { query } from "@/lib/dsql";
+import { tableExists } from "@/lib/table-exists";
 import { createPurchaseOrder, type PurchaseOrderDTO } from "./purchase-orders";
 import { groupBySupplier, suggestReorderQty, type ReorderGroup, type ReorderSuggestion } from "./pure";
 
@@ -34,6 +35,25 @@ export async function reorderSuggestions(dataId: string, limit = 200): Promise<{
       LIMIT $2`,
     [dataId, Math.min(Math.max(limit, 1), 1000)]
   );
+  // Per-location reorder points: a product also needs restocking when any location with a reorder point is at/below it.
+  if (await tableExists("stock_levels")) {
+    const seen = new Set(rows.map((r) => r.id));
+    const perLoc = await query<LowRow>(
+      `SELECT p.id, p.name, p.sku, s.on_hand AS stock_on_hand, s.reserved AS stock_reserved, s.reorder_point, p.cost_minor, p.last_cost_minor, p.currency,
+              p.preferred_supplier_id, sp.name AS supplier_name
+         FROM stock_levels s JOIN products p ON p.id = s.product_id AND p.user_id = s.user_id
+         LEFT JOIN suppliers sp ON sp.id = p.preferred_supplier_id AND sp.deleted_at IS NULL
+        WHERE s.user_id = $1 AND s.reorder_point IS NOT NULL AND p.deleted_at IS NULL AND p.active = TRUE AND p.track_stock = TRUE
+          AND (s.on_hand - s.reserved) <= s.reorder_point
+        ORDER BY (s.on_hand - s.reserved - s.reorder_point) ASC LIMIT $2`,
+      [dataId, Math.min(Math.max(limit, 1), 1000)]
+    ).catch(() => [] as LowRow[]);
+    for (const r of perLoc) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      rows.push(r);
+    }
+  }
   const suggestions: ReorderSuggestion[] = rows.map((r) => {
     const stock = { stock_on_hand: Number(r.stock_on_hand), stock_reserved: Number(r.stock_reserved), reorder_point: Number(r.reorder_point) };
     return {

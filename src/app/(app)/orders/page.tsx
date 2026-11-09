@@ -18,6 +18,7 @@ import { LoadMore, usePagedList } from "@/components/ui/load-more";
 import { useDebouncedValue } from "@/components/ui/hooks";
 import { PageContainer } from "@/components/page-container";
 import { AttachmentPanel } from "@/components/attachments/attachment-panel";
+import { OrderShipping } from "@/components/shipping/order-shipping";
 import { api, fromMinor, toMinor } from "@/components/finance/shared";
 import { fmtDate, fmtMoney } from "@/lib/money/format";
 import { cn } from "@/lib/utils";
@@ -343,6 +344,7 @@ function OrderDrawer({ id, onClose, onChanged, notify }: { id: string; onClose: 
             )}
             {o.payment_ref && <p className="mt-1 break-all text-xs text-muted-foreground">Payment reference {o.payment_ref}</p>}
           </section>
+          <OrderShipping orderId={o.id} orderStatus={o.status} hasAddress={Boolean(o.shipping_address)} currency={o.currency} onNotice={notify} />
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Files</h3>
             <AttachmentPanel entityKind="order" entityId={o.id} compact />

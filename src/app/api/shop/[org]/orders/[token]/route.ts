@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { startCheckout } from "@/lib/storefront/checkout";
 import { NO_STORE, notFound, resolveShop, shopError, shopRateLimit } from "@/lib/storefront/http";
 import { resolveOrderToken, toPublicOrder } from "@/lib/storefront/orders";
+import { shipmentsForOrder } from "@/lib/shipping/shipments";
+import { publicReturnInfo } from "@/lib/shipping/returns";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +20,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const { token } = await ctx.params;
     const order = await resolveOrderToken(pub.dataId, token);
     if (!order) return notFound();
-    return NextResponse.json({ order: toPublicOrder(order), can_pay: order.status === "pending_payment" }, { headers: NO_STORE });
+    // Shipping is additive: a failure here must never hide the order itself.
+    const shipments = (await shipmentsForOrder(pub.dataId, order.id).catch(() => [])).filter((s) => !s.return_id && s.status !== "void").map((s) => ({ carrier: s.carrier, tracking_number: s.tracking_number, status: s.status, status_label: s.status_label }));
+    const returns = order.status === "paid" || order.status === "fulfilled" ? await publicReturnInfo(pub.dataId, order).catch(() => null) : null;
+    return NextResponse.json({ order: toPublicOrder(order), can_pay: order.status === "pending_payment", shipments, returns }, { headers: NO_STORE });
   } catch (err) {
     return shopError(err, "shop.order.GET");
   }

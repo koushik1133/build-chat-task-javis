@@ -28,6 +28,8 @@ import "./credits";
 import "./optimize";
 import "./accounting";
 import "./privacy";
+import "./memberships";
+import "./shipping";
 import "./plans";
 import "./voice";
 import "./inventory";
@@ -44,6 +46,8 @@ import "./chat";
 import "./marketing";
 import "./projects";
 import "./orders";
+import "./tax";
+import "./engagement";
 // END tool-module imports
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -79,6 +79,31 @@ export function unsubscribeContactToken(dataId: string, contactId: string, chann
 
 const ID_RE = /^[A-Za-z0-9_.:-]{1,120}$/;
 
+/** Sign an arbitrary opaque payload with the tracking key (survey links etc.). Verify with `verifySignedPayload`. */
+export function signOpaque(payload: string): string {
+  return sign(payload);
+}
+
+/** Verify the HMAC of a token and return its raw payload string (constant-time compare), or null. */
+export function verifySignedPayload(token: string | null | undefined): string | null {
+  if (!token || token.length > 600) return null;
+  const dot = token.indexOf(".");
+  if (dot <= 0) return null;
+  let payload: string;
+  let given: Buffer;
+  try {
+    payload = Buffer.from(token.slice(0, dot), "base64url").toString("utf8");
+    given = Buffer.from(token.slice(dot + 1), "base64url");
+  } catch {
+    return null;
+  }
+  const valid = verifyKeys().some((k) => {
+    const expected = createHmac("sha256", k).update(payload).digest();
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  });
+  return valid ? payload : null;
+}
+
 /** Verify and decode a token. Returns null on any mismatch — never throws. */
 export function verifyToken(token: string | null | undefined): TrackingPayload | null {
   if (!token || token.length > 600) return null;

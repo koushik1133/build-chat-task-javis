@@ -140,7 +140,7 @@ describeDb("team flow", () => {
     const exp = await import("@/app/api/export/[entity]/route");
     await api(exp.GET, "/api/export/contacts", { query: { format: "json" }, params: { entity: "contacts" }, expect: 200 });
 
-    const rows = await waitForRows<{ action: string; entity: string; entity_id: string | null; actor_id: string | null }>(`SELECT action, entity, entity_id, actor_id FROM audit_log WHERE user_id = $1 ORDER BY created_at ASC`, [org.dataId], 2);
+    const rows = await waitForRows<{ action: string; entity: string; entity_id: string | null; actor_id: string | null }>(`SELECT action, entity, entity_id, actor_id FROM audit_log WHERE user_id = $1 AND entity IN ('crew_link', 'contacts') ORDER BY created_at ASC`, [org.dataId], 2);
     expect(rows).toEqual(expect.arrayContaining([
       expect.objectContaining({ action: "create", entity: "crew_link", entity_id: c.body.id, actor_id: org.userId }),
       expect.objectContaining({ action: "export", entity: "contacts" }),

@@ -242,3 +242,49 @@ export function renderSupplierBillPdf(bill: SupplierBillDocInput, branding: DocB
   drawFooters(doc, [brand, branding.support_email ?? null, `Supplier bill ${bill.number}`].filter(Boolean).join("  ·  "), 48);
   return doc.render();
 }
+
+/* ── packing slip ───────────────────────────────────────────────────────── */
+
+export interface PackingSlipInput {
+  order_number: string;
+  created_at: string;
+  customer_name: string;
+  ship_to: string[];
+  carrier: string | null;
+  service: string | null;
+  tracking_number: string | null;
+  items: Array<{ description: string; qty: number }>;
+  notes?: string | null;
+}
+
+/** Packing slip: what is in the box, no prices. Letter size, same look as the other documents. */
+export function renderPackingSlipPdf(slip: PackingSlipInput, branding: DocBranding, opts: RenderOptions = {}): Uint8Array {
+  const brand = branding.brand_name?.trim() || opts.business?.trim() || "Packing slip";
+  const accent = hexColor(branding.primary_color) ?? [0.97, 0.45, 0.09];
+  const doc = new PdfDocument({ title: `Packing slip ${slip.order_number}`, author: brand, subject: `Packing slip ${slip.order_number}` });
+  const meta: Array<[string, string]> = [["Order date", fmtDateOnly(slip.created_at)]];
+  if (slip.carrier) meta.push(["Carrier", [slip.carrier, slip.service].filter(Boolean).join(" ")]);
+  if (slip.tracking_number) meta.push(["Tracking", slip.tracking_number]);
+  const flow = new Flow(doc, (p) => drawHeader(p, { brand, kindLabel: "PACKING SLIP", number: slip.order_number, accent, meta }, 48));
+  drawParty(flow, "Ship to", [slip.customer_name, ...slip.ship_to]);
+  flow.ensure(30);
+  flow.page.rect(flow.margin, flow.y - 10, flow.width, 18, { fill: PANEL });
+  flow.page.text(flow.margin + 6, flow.y + 3, "Item", { size: 9, font: "Helvetica-Bold", color: INK });
+  flow.page.text(flow.right - 6, flow.y + 3, "Qty", { size: 9, font: "Helvetica-Bold", color: INK, align: "right" });
+  flow.gap(22);
+  for (const it of slip.items) {
+    flow.ensure(18);
+    flow.page.text(flow.margin + 6, flow.y, it.description.slice(0, 90), { size: 10, color: INK });
+    flow.page.text(flow.right - 6, flow.y, String(it.qty), { size: 10, color: INK, align: "right" });
+    flow.page.line(flow.margin, flow.y + 6, flow.right, flow.y + 6, { color: RULE });
+    flow.gap(18);
+  }
+  if (slip.notes) {
+    flow.gap(6);
+    drawSection(flow, "Notes", slip.notes);
+  }
+  flow.gap(10);
+  drawSection(flow, "Returns", "Need to send something back? Use the link in your order confirmation email to start a return.");
+  drawFooters(doc, [brand, branding.support_email ?? null, `Packing slip ${slip.order_number}`].filter(Boolean).join("  ·  "), 48);
+  return doc.render();
+}

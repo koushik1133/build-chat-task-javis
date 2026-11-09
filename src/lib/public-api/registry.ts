@@ -1,6 +1,7 @@
 import type { ZodTypeAny } from "zod";
 import type { ApiScope } from "./scopes";
 import * as S from "./schemas";
+import * as TX from "./tax-schemas";
 
 /**
  * Typed route registry for /api/v1.
@@ -73,6 +74,8 @@ export const ROUTES = {
   recordPayment: def({ id: "recordInvoicePayment", method: "POST", path: "/invoices/{id}/payments", summary: "Record a payment", description: "Records an external/manual payment and recomputes the invoice status. Emits `invoice.paid` when settled.", tag: "Invoices", scope: "write:billing", params: S.IdParams, body: S.PaymentCreate, response: S.PaymentResult, status: 201, emits: ["invoice.paid"] }),
 
   /* billing depth */
+  getTaxReport: def({ id: "getTaxReport", method: "GET", path: "/tax/reports", summary: "Filing-ready tax report (GST / VAT / US sales tax) for a period", description: "Preparation aid only; verify with your accountant before filing. Requires the tax_compliance plan feature.", tag: "Invoices", scope: "read:billing", query: TX.TaxReportQuery, response: TX.TaxReport, tools: ["tax.report"] }),
+  listEInvoices: def({ id: "listEInvoices", method: "GET", path: "/e-invoices", summary: "List generated e-invoices", tag: "Invoices", scope: "read:billing", query: TX.EInvoiceListQuery, response: TX.EInvoice, list: true }),
   listTaxRates: def({ id: "listTaxRates", method: "GET", path: "/tax-rates", summary: "List tax rates", tag: "Invoices", scope: "read:billing", query: S.TaxRateListQuery, response: S.TaxRate, list: true }),
   getTaxRate: def({ id: "getTaxRate", method: "GET", path: "/tax-rates/{id}", summary: "Get a tax rate", tag: "Invoices", scope: "read:billing", params: S.IdParams, response: S.TaxRate }),
   listInvoiceSchedules: def({ id: "listInvoiceSchedules", method: "GET", path: "/invoice-schedules", summary: "List recurring invoice schedules", tag: "Invoices", scope: "read:billing", query: S.InvoiceScheduleListQuery, response: S.InvoiceSchedule, list: true, emits: ["invoice.scheduled_created"] }),
@@ -100,6 +103,14 @@ export const ROUTES = {
   getRecord: def({ id: "getRecord", method: "GET", path: "/records/{type}/{id}", summary: "Get a record", tag: "Records", scope: "read:crm", params: S.RecordParams, response: S.RecordItem }),
   updateRecord: def({ id: "updateRecord", method: "PATCH", path: "/records/{type}/{id}", summary: "Update a record", tag: "Records", scope: "write:crm", params: S.RecordParams, body: S.RecordPatch, response: S.RecordItem }),
   moveRecord: def({ id: "moveRecord", method: "POST", path: "/records/{type}/{id}/move", summary: "Move a record to a stage", tag: "Records", scope: "write:crm", params: S.RecordParams, body: S.RecordMove, response: S.RecordItem, emits: ["record.moved"] }),
+
+  /* locations */
+  listLocations: def({ id: "listLocations", method: "GET", path: "/locations", summary: "List stock locations", tag: "Locations", scope: "read:billing", query: S.LocationListQuery, response: S.Location, list: true, tools: ["inventory.locations"] }),
+  getLocation: def({ id: "getLocation", method: "GET", path: "/locations/{id}", summary: "Get a stock location", tag: "Locations", scope: "read:billing", params: S.IdParams, response: S.Location }),
+  listStockLevels: def({ id: "listStockLevels", method: "GET", path: "/stock/levels", summary: "List stock levels per product and location", tag: "Locations", scope: "read:billing", query: S.StockLevelQuery, response: S.StockLevel, list: true, tools: ["inventory.levels"] }),
+  listTransfers: def({ id: "listTransfers", method: "GET", path: "/transfers", summary: "List stock transfers", tag: "Locations", scope: "read:billing", query: S.TransferListQuery, response: S.Transfer, list: true }),
+  getTransfer: def({ id: "getTransfer", method: "GET", path: "/transfers/{id}", summary: "Get a stock transfer", tag: "Locations", scope: "read:billing", params: S.IdParams, response: S.Transfer }),
+  createTransfer: def({ id: "createTransfer", method: "POST", path: "/transfers", summary: "Create a draft stock transfer between two locations", description: "Ship and receive it from the app; totals per product are unchanged by transfers.", tag: "Locations", scope: "write:billing", body: S.TransferCreate, response: S.Transfer, status: 201, tools: ["inventory.transfer_stock"] }),
 
   /* inventory */
   listProducts: def({ id: "listProducts", method: "GET", path: "/products", summary: "List products", tag: "Products", scope: "read:billing", query: S.ProductListQuery, response: S.Product, list: true }),
@@ -295,6 +306,27 @@ export const ROUTES = {
   cancelOrder: def({ id: "cancelOrder", method: "POST", path: "/orders/{id}/cancel", summary: "Cancel an order", description: "Pending orders release their stock reservation and void the invoice; paid orders are refunded through the payment provider (`restock` receives the goods back).", tag: "Orders", scope: "write:billing", params: S.IdParams, body: S.OrderCancel, response: S.OrderCancelResult, emits: ["order.cancelled"] }),
   listStorefrontProducts: def({ id: "listStorefrontProducts", method: "GET", path: "/storefront/products", summary: "List products with storefront visibility", tag: "Orders", scope: "read:billing", response: S.StorefrontProduct, list: true, tools: ["storefront.catalog"] }),
   putStorefrontProduct: def({ id: "putStorefrontProduct", method: "PATCH", path: "/storefront/products", summary: "Set a product's storefront visibility, order, description or image", tag: "Orders", scope: "write:billing", body: S.StorefrontProductPut, response: S.StorefrontProduct }),
+  /* ── Phase 11 lane E: customer engagement ─────────────────────────────── */
+  listSurveys: def({ id: "listSurveys", method: "GET", path: "/surveys", summary: "List surveys", tag: "Engagement", scope: "read:crm", response: S.EngagementSurvey, list: true }),
+  getSurveyResults: def({ id: "getSurveyResults", method: "GET", path: "/surveys/{id}/results", summary: "NPS / CSAT results for a survey (last 90 days)", tag: "Engagement", scope: "read:crm", params: S.IdParams, response: S.EngagementSurveyResults, tools: ["engagement.nps"] }),
+  listVouchers: def({ id: "listVouchers", method: "GET", path: "/vouchers", summary: "List vouchers", tag: "Engagement", scope: "read:billing", query: S.EngagementListQuery, response: S.EngagementVoucher, list: true }),
+  getVoucher: def({ id: "getVoucher", method: "GET", path: "/vouchers/{id}", summary: "Get a voucher", tag: "Engagement", scope: "read:billing", params: S.IdParams, response: S.EngagementVoucher }),
+  createVoucher: def({ id: "createVoucher", method: "POST", path: "/vouchers", summary: "Create a voucher", description: "Percent vouchers use basis points (1000 = 10%); fixed vouchers use minor units and need a currency.", tag: "Engagement", scope: "write:billing", body: S.EngagementVoucherCreate, response: S.EngagementVoucher, status: 201, emits: ["voucher.redeemed"], tools: ["engagement.issue_voucher"] }),
+  listGiftCards: def({ id: "listGiftCards", method: "GET", path: "/gift-cards", summary: "List gift cards (balances and last four characters only)", tag: "Engagement", scope: "read:billing", query: S.EngagementListQuery, response: S.EngagementGiftCard, list: true }),
+  issueGiftCard: def({ id: "issueGiftCard", method: "POST", path: "/gift-cards", summary: "Issue a gift card", description: "The full code is returned in this response only; it is stored as a hash and cannot be retrieved later.", tag: "Engagement", scope: "write:billing", body: S.EngagementGiftCardIssue, response: S.EngagementGiftCardIssued, status: 201, emits: ["gift_card.issued"] }),
+  listLoyaltyAccounts: def({ id: "listLoyaltyAccounts", method: "GET", path: "/loyalty/accounts", summary: "List loyalty accounts", tag: "Engagement", scope: "read:crm", query: S.EngagementListQuery, response: S.EngagementLoyaltyAccount, list: true, tools: ["engagement.loyalty_balance"] }),
+  /* ── Phase 11 lane C: shipping and returns ───────────────────────────── */
+  listShipments: def({ id: "listShipments", method: "GET", path: "/shipments", summary: "List shipments", tag: "Shipping", scope: "read:billing", query: S.ShipmentListQuery, response: S.Shipment, list: true, tools: ["shipping.track"] }),
+  getShipment: def({ id: "getShipment", method: "GET", path: "/shipments/{id}", summary: "Get a shipment", tag: "Shipping", scope: "read:billing", params: S.IdParams, response: S.Shipment, tools: ["shipping.track"] }),
+  createShipment: def({ id: "createShipment", method: "POST", path: "/shipments", summary: "Create a shipment for a paid order", description: "Buys a carrier label (spends money on the connected carrier account) unless `manual` tracking details are supplied. Requires the Shipping plan feature for label purchases.", tag: "Shipping", scope: "write:billing", body: S.ShipmentCreate, response: S.ShipmentCreateResult, status: 201, emits: ["shipment.created"], tools: ["shipping.create_shipment"] }),
+  listReturns: def({ id: "listReturns", method: "GET", path: "/returns", summary: "List return requests", tag: "Shipping", scope: "read:billing", query: S.ReturnListQuery, response: S.ReturnRequestObj, list: true, tools: ["shipping.returns"] }),
+  getReturn: def({ id: "getReturn", method: "GET", path: "/returns/{id}", summary: "Get a return request", tag: "Shipping", scope: "read:billing", params: S.IdParams, response: S.ReturnRequestObj, tools: ["shipping.returns"] }),
+  /* ── Phase 11 lane B: memberships ───────────────────────────────────── */
+  listMembershipPlans: def({ id: "listMembershipPlans", method: "GET", path: "/membership-plans", summary: "List membership plans", tag: "Memberships", scope: "read:billing", query: S.MembershipPlanListQuery, response: S.MembershipPlan, list: true }),
+  getMembershipPlan: def({ id: "getMembershipPlan", method: "GET", path: "/membership-plans/{id}", summary: "Get a membership plan", tag: "Memberships", scope: "read:billing", params: S.IdParams, response: S.MembershipPlan }),
+  listSubscriptions: def({ id: "listSubscriptions", method: "GET", path: "/subscriptions", summary: "List customer subscriptions", description: "Memberships your customers hold. Filter by `status`, `plan_id` or `contact_id`.", tag: "Memberships", scope: "read:billing", query: S.SubscriptionListQuery, response: S.Subscription, list: true, tools: ["memberships.status"] }),
+  getSubscription: def({ id: "getSubscription", method: "GET", path: "/subscriptions/{id}", summary: "Get a customer subscription", tag: "Memberships", scope: "read:billing", params: S.IdParams, response: S.Subscription, tools: ["memberships.status"] }),
+  cancelSubscription: def({ id: "cancelSubscription", method: "POST", path: "/subscriptions/{id}/cancel", summary: "Cancel a customer subscription", description: "Ends at the close of the paid period unless `at_period_end` is false, which ends it now and voids any unpaid invoice.", tag: "Memberships", scope: "write:billing", params: S.IdParams, body: S.SubscriptionCancel, response: S.Subscription, emits: ["membership.cancelled"], tools: ["memberships.cancel"] }),
 } as const;
 
 export type RouteId = keyof typeof ROUTES;
@@ -315,6 +347,7 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Webhooks", description: "Outbound webhook subscriptions (REST hooks)." },
   { name: "Expenses", description: "Cash out, optionally tied to a job." },
   { name: "Time", description: "Time entries and running timers." },
+  { name: "Locations", description: "Stock locations, per-location levels and transfers." },
   { name: "Equipment", description: "Equipment checkouts against the pricebook." },
   { name: "Change orders", description: "Priced scope changes against quotes and invoices." },
   { name: "Knowledge", description: "Knowledge-base articles and search." },
@@ -335,7 +368,11 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Reports", description: "Saved reports, report runs and dashboards." },
   { name: "Procurement", description: "Suppliers, purchase orders, receiving and supplier bills (accounts payable)." },
   { name: "Orders", description: "Public storefront orders and catalog visibility." },
+  { name: "Engagement", description: "Surveys, vouchers, gift cards and loyalty accounts." },
+  { name: "Engagement", description: "Surveys, vouchers, gift cards and loyalty accounts." },
+  { name: "Memberships", description: "Recurring membership plans and the customer subscriptions on them." },
   { name: "Portal", description: "Customer portal conversations." },
+  { name: "Shipping", description: "Shipments, tracking and customer returns." },
   { name: "Projects", description: "Projects, milestones and project tasks (assignees, due dates, budgets)." },
 ];
 

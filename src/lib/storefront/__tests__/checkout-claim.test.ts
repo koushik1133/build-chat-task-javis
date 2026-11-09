@@ -37,7 +37,7 @@ import { CheckoutError, createOrderFromCart } from "@/lib/storefront/checkout";
 const pub = {
   dataId: "org",
   orgName: "Org",
-  storefront: { enabled: true, slug: "org", title: null, intro_md: null, currency: "USD", collect_shipping: false, shipping_flat_minor: 0, pickup_enabled: true, terms_md: null, settings: { max_qty_per_line: 20, cart_ttl_hours: 72 }, configured: true, updated_at: null },
+  storefront: { enabled: true, slug: "org", title: null, intro_md: null, currency: "USD", collect_shipping: false, shipping_flat_minor: 0, pickup_enabled: true, terms_md: null, settings: { max_qty_per_line: 20, cart_ttl_hours: 72 }, fulfil_location_id: null, configured: true, updated_at: null },
 };
 const cart = { id: "cart1", user_id: "org", token_hash: "h", items: JSON.stringify([{ product_id: "p1", qty: 1 }]), email: null, reminded_at: null, order_id: null, created_at: "", updated_at: "", expires_at: new Date(Date.now() + 60_000).toISOString() };
 const input = { name: "A", email: "a@x.test" };

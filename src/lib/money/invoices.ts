@@ -8,6 +8,7 @@ import { getProvider } from "@/lib/payments";
 import type { PaymentEvent } from "@/lib/payments/types";
 import { formatMoney, parseItems, type LineItem } from "./items";
 import { resolveDocumentTotals } from "./tax-rates";
+import { saveComplianceMeta } from "./compliance-meta";
 import { getBillingSettings } from "./settings";
 import { parseBreakdown, type TaxBreakdownRow } from "./tax";
 import { businessName, getQuote } from "./quotes";
@@ -164,6 +165,9 @@ export interface CreateInvoiceInput {
   notes?: string | null;
   /** Recurring schedule that produced this invoice. */
   schedule_id?: string | null;
+  /** Ship-to / delivery address (drives place of supply and US nexus when a tax profile exists). */
+  ship_to?: { country?: string | null; state?: string | null; postal_code?: string | null } | null;
+  reverse_charge?: boolean;
 }
 
 export async function createInvoice(dataId: string, input: CreateInvoiceInput): Promise<InvoiceDTO> {
@@ -172,7 +176,7 @@ export async function createInvoice(dataId: string, input: CreateInvoiceInput): 
     if (!c) throw new Error("Contact not found");
   }
   const id = randomUUID();
-  const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, input.items)]);
+  const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, input.items, { contactId: input.contact_id ?? null, shipTo: input.ship_to ?? null, reverseCharge: input.reverse_charge })]);
   const number = await nextDocNumber(dataId, "invoice", settings.invoice_prefix);
   const terms = input.terms_days ?? (input.due_at ? null : settings.default_terms_days);
   await query(
@@ -186,6 +190,7 @@ export async function createInvoice(dataId: string, input: CreateInvoiceInput): 
       JSON.stringify(totals.breakdown), terms, input.schedule_id ?? null,
     ]
   );
+  await saveComplianceMeta("invoices", dataId, id, totals);
   const inv = await getInvoice(dataId, id);
   if (!inv) throw new Error("Invoice vanished after insert");
   void emitEvent(dataId, { type: "invoice.created", entity: "invoice", entityId: id, data: { number, total_minor: totals.total_minor, currency: inv.currency, contact_id: input.contact_id ?? null, quote_id: input.quote_id ?? null } });
@@ -231,6 +236,7 @@ export async function updateInvoice(dataId: string, id: string, input: UpdateInv
 
   const sets: string[] = ["updated_at = NOW()"];
   const params: unknown[] = [id, dataId];
+  let complianceTotals: Awaited<ReturnType<typeof resolveDocumentTotals>> | null = null;
   const push = (col: string, v: unknown) => {
     params.push(v);
     sets.push(`${col} = $${params.length}`);
@@ -241,7 +247,8 @@ export async function updateInvoice(dataId: string, id: string, input: UpdateInv
   if (input.terms_days !== undefined) push("terms_days", input.terms_days);
   if (input.notes !== undefined) push("notes", input.notes);
   if (input.items) {
-    const t = await resolveDocumentTotals(dataId, input.items);
+    const t = await resolveDocumentTotals(dataId, input.items, { contactId: input.contact_id !== undefined ? input.contact_id : inv.contact_id });
+    complianceTotals = t;
     push("items", JSON.stringify(input.items));
     push("subtotal_minor", t.subtotal_minor);
     push("tax_minor", t.tax_minor);
@@ -249,6 +256,7 @@ export async function updateInvoice(dataId: string, id: string, input: UpdateInv
     push("tax_breakdown", JSON.stringify(t.breakdown));
   }
   await query(`UPDATE invoices SET ${sets.join(", ")} WHERE id = $1 AND user_id = $2`, params);
+  if (complianceTotals) await saveComplianceMeta("invoices", dataId, id, complianceTotals);
   await recomputeInvoiceStatus(id);
   const out = await getInvoice(dataId, id);
   if (!out) throw new Error("Invoice not found");
@@ -298,6 +306,20 @@ export async function recomputeInvoiceStatus(id: string): Promise<InvoiceStatus 
       await markOrderPaidForInvoice(row.user_id, id);
     } catch (err) {
       console.error(`[invoices] order paid hook failed for ${id}:`, err);
+    }
+    try {
+      // Membership charges linked to this invoice: mark the charge paid, activate/renew the subscription.
+      const { onInvoicePaid } = await import("@/lib/memberships/billing");
+      await onInvoicePaid(row.user_id, id);
+    } catch (err) {
+      console.error(`[invoices] membership paid hook failed for ${id}:`, err);
+    }
+    try {
+      // Customer engagement: loyalty points, referral reward, gift-card issuance (all idempotent per invoice).
+      const { onPaidForEngagement } = await import("@/lib/engagement/listeners");
+      await onPaidForEngagement(row.user_id, id);
+    } catch (err) {
+      console.error(`[invoices] engagement hook failed for ${id}:`, err);
     }
     try {
       await consumeForInvoice(row.user_id, id, parseItems(row.items), { quoteId: row.quote_id });

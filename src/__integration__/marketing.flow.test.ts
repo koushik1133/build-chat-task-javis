@@ -197,10 +197,15 @@ describeDb("marketing flow", () => {
   it("delivery sync + stats + recipients listing", async (ctx) => {
     if (!ready) return ctx.skip();
     const { drainOutbox } = await import("@/lib/notifications/outbox");
-    await drainOutbox(50); // simulated providers → status simulated
+    // drainOutbox is global and other test files drain concurrently, so poll until this org's rows are delivered.
     const { syncDeliveryStatuses } = await import("@/lib/marketing/campaigns");
-    const s = await syncDeliveryStatuses(100);
-    expect(s.delivered).toBeGreaterThanOrEqual(1); // Dana; Casey already unsubscribed keeps her status
+    let delivered = 0;
+    for (let i = 0; i < 40 && delivered < 1; i++) {
+      await drainOutbox(200); // simulated providers → status simulated
+      delivered += (await syncDeliveryStatuses(200)).delivered;
+      if (delivered < 1) await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(delivered).toBeGreaterThanOrEqual(1); // Dana; Casey already unsubscribed keeps her status
     const stats = await import("@/app/api/marketing/campaigns/[id]/stats/route");
     const st = await api<{ stats: Stats; links: Array<{ url: string; clicks: number }> }>(stats.GET, `/api/marketing/campaigns/${campaignId}/stats`, { params: { id: campaignId }, expect: 200 });
     expect(st.body.stats).toMatchObject({ total: 3, skipped_no_consent: 1, delivered: 1, unsubscribed: 1, opened: 1, clicked: 1, queued: 0 });

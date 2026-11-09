@@ -1,0 +1,82 @@
+{
+  "Version": "1.1",
+  "TranDtls": {
+    "TaxSch": "GST",
+    "SupTyp": "B2B",
+    "RegRev": "N",
+    "IgstOnIntra": "N"
+  },
+  "DocDtls": {
+    "Typ": "INV",
+    "No": "INV-000007",
+    "Dt": "20/05/2026"
+  },
+  "SellerDtls": {
+    "Gstin": "27AAPFU0939F1ZV",
+    "LglNm": "Kernel Traders Pvt Ltd",
+    "Addr1": "12 MG Road",
+    "Loc": "Mumbai",
+    "Pin": 400001,
+    "Stcd": "27"
+  },
+  "BuyerDtls": {
+    "Gstin": "29AABCT1332L1ZA",
+    "LglNm": "Bharat Retail",
+    "Pos": "29",
+    "Addr1": "5 Brigade Road",
+    "Loc": "Bengaluru",
+    "Pin": 560001,
+    "Stcd": "29"
+  },
+  "ItemList": [
+    {
+      "SlNo": "1",
+      "PrdDesc": "Steel bolts",
+      "IsServc": "N",
+      "HsnCd": "73181500",
+      "Qty": 10,
+      "Unit": "OTH",
+      "UnitPrice": 100,
+      "TotAmt": 1000,
+      "Discount": 0,
+      "AssAmt": 1000,
+      "GstRt": 18,
+      "IgstAmt": 180,
+      "CgstAmt": 0,
+      "SgstAmt": 0,
+      "CesRt": 0,
+      "CesAmt": 0,
+      "TotItemVal": 1180
+    },
+    {
+      "SlNo": "2",
+      "PrdDesc": "Installation",
+      "IsServc": "Y",
+      "HsnCd": "9954",
+      "Qty": 1,
+      "Unit": "OTH",
+      "UnitPrice": 500,
+      "TotAmt": 500,
+      "Discount": 0,
+      "AssAmt": 500,
+      "GstRt": 18,
+      "IgstAmt": 90,
+      "CgstAmt": 0,
+      "SgstAmt": 0,
+      "CesRt": 0,
+      "CesAmt": 0,
+      "TotItemVal": 590
+    }
+  ],
+  "ValDtls": {
+    "AssVal": 1500,
+    "CgstVal": 0,
+    "SgstVal": 0,
+    "IgstVal": 270,
+    "CesVal": 0,
+    "Discount": 0,
+    "OthChrg": 0,
+    "RndOffAmt": 0,
+    "TotInvVal": 1770
+  }
+}

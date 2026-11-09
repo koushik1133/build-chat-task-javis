@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { FilesDialog, type FilesTarget } from "@/components/attachments/files-dialog";
 import { Button } from "@/components/ui/button";
+import { ContactTaxFields } from "@/components/tax/contact-tax-fields";
 import { LoadMore } from "@/components/ui/load-more";
 
 type Contact = {
@@ -478,6 +479,8 @@ export default function CrmPage() {
                 rows={2} placeholder="Key notes about this contact..."
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none resize-none" />
             </div>
+
+            {editingId && <ContactTaxFields contactId={editingId} />}
 
             <div className="flex gap-3 pt-2">
               <Button variant="outline" onClick={() => setShowAdd(false)} className="flex-1">Cancel</Button>

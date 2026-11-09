@@ -2,8 +2,11 @@ import { z } from "zod";
 import { AREAS } from "@/lib/auth/roles";
 import { EVENT_TYPES } from "@/lib/events/bus";
 import { LineItemSchema } from "@/lib/money/items";
+import { TransferCreateSchema } from "@/lib/inventory/transfers";
+import { LOCATION_KINDS } from "@/lib/inventory/locations-pure";
 import { ProductInputSchema, ProductPatchSchema, PRODUCT_KINDS } from "@/lib/inventory/products";
 import { TICKET_PRIORITIES, TICKET_SOURCES, TICKET_STATUSES } from "@/lib/helpdesk/sla";
+import { VoucherInputSchema } from "@/lib/engagement/pure";
 import { ChartConfigSchema, ReportSpecSchema } from "@/lib/reports/spec";
 import { LayoutItemSchema } from "@/lib/reports/store";
 import { StaffInputSchema } from "@/lib/workforce/staff";
@@ -455,6 +458,50 @@ export const ProductListQuery = SearchListQuery.extend({
   low: z.enum(["true", "false"]).optional().describe("Only products at/below their reorder point"),
   include_inactive: z.enum(["true", "false"]).optional(),
 });
+
+/* ─── Locations, stock levels, transfers ───────────────────────────────── */
+
+export const Location = z.object({
+  id: Id,
+  name: z.string(),
+  code: z.string().nullable(),
+  kind: z.enum(LOCATION_KINDS),
+  address: z.record(z.unknown()).nullable(),
+  active: z.boolean(),
+  is_default: z.boolean(),
+  created_at: Iso,
+  updated_at: Iso,
+});
+export const LocationListQuery = z.object({ include_inactive: z.enum(["true", "false"]).optional() });
+export const StockLevel = z.object({
+  product_id: Id,
+  product_name: z.string(),
+  product_sku: z.string().nullable(),
+  location_id: Id,
+  location_name: z.string(),
+  on_hand: z.number().int(),
+  reserved: z.number().int(),
+  available: z.number().int(),
+  reorder_point: z.number().int().nullable(),
+  low: z.boolean(),
+});
+export const StockLevelQuery = z.object({ product: Id.optional(), location: Id.optional() });
+export const Transfer = z.object({
+  id: Id,
+  number: z.string(),
+  from_location_id: Id,
+  to_location_id: Id,
+  from_name: z.string().nullable(),
+  to_name: z.string().nullable(),
+  status: z.enum(["draft", "in_transit", "received", "cancelled"]),
+  note: z.string().nullable(),
+  shipped_at: IsoOrNull,
+  received_at: IsoOrNull,
+  created_at: Iso,
+  lines: z.array(z.object({ id: Id, product_id: Id, product_name: z.string().nullable(), qty: z.number().int(), received_qty: z.number().int(), remaining: z.number().int() })),
+});
+export const TransferCreate = TransferCreateSchema;
+export const TransferListQuery = ListQuery.extend({ status: z.enum(["draft", "in_transit", "received", "cancelled"]).optional() });
 
 /* ─── Events / webhooks / me ───────────────────────────────────────────── */
 
@@ -1548,3 +1595,142 @@ export const PortalMessageListQuery = ListQuery.extend({ contact_id: Id.optional
 export const PortalMessageCreate = z
   .object({ contact_id: Id, body: z.string().trim().min(1).max(2000).describe("Plain text, up to 2000 characters") })
   .strict();
+
+/* ─── Phase 11 lane C: shipping and returns ───────────────────────────── */
+import { AddressSchema as ShipAddress, SHIPMENT_STATUSES, RETURN_STATUSES, RETURN_RESOLUTIONS } from "@/lib/shipping/types";
+import { CreateShipmentSchema } from "@/lib/shipping/shipments";
+import { ReturnRequestSchema } from "@/lib/shipping/returns";
+
+export const Shipment = z.object({
+  id: Id,
+  order_id: z.string().nullable(),
+  return_id: z.string().nullable(),
+  status: z.enum(SHIPMENT_STATUSES),
+  status_label: z.string(),
+  carrier: z.string().nullable(),
+  service: z.string().nullable(),
+  rate_minor: Money,
+  currency: Currency,
+  tracking_number: z.string().nullable(),
+  tracking_url: z.string().nullable(),
+  label_url: z.string().nullable(),
+  label_attachment_id: z.string().nullable(),
+  weight_grams: z.number().int().nullable(),
+  to_address: ShipAddress.nullable(),
+  from_address: ShipAddress.nullable(),
+  items: z.array(z.object({ product_id: z.string().nullable(), description: z.string(), qty: z.number().int() })),
+  insured_minor: Money,
+  provider: z.string().nullable(),
+  purchased_at: IsoOrNull,
+  delivered_at: IsoOrNull,
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const ShipmentListQuery = ListQuery.extend({ status: z.enum(SHIPMENT_STATUSES).optional(), order_id: Id.optional() });
+export const ShipmentCreate = CreateShipmentSchema.extend({ order_id: Id });
+export const ShipmentCreateResult = z.object({ shipments: z.array(Shipment) });
+
+export const ReturnRequestObj = z.object({
+  id: Id,
+  order_id: z.string(),
+  order_number: z.string().nullable(),
+  contact_id: z.string().nullable(),
+  status: z.enum(RETURN_STATUSES),
+  reason: z.string().nullable(),
+  items: z.array(z.object({ product_id: z.string().nullable().optional(), description: z.string(), qty: z.number().int() })),
+  resolution: z.enum(RETURN_RESOLUTIONS),
+  notes: z.string().nullable(),
+  refund_minor: Money,
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const ReturnListQuery = ListQuery.extend({ status: z.enum(RETURN_STATUSES).optional(), order_id: Id.optional() });
+export const ReturnCreate = ReturnRequestSchema.extend({ order_id: Id });
+
+/* ─── Phase 11 lane B: memberships ─────────────────────────────────────── */
+import { PLAN_INTERVALS, SUB_STATUSES } from "@/lib/memberships/pure";
+
+export const MembershipPlan = z.object({
+  id: Id,
+  slug: z.string(),
+  name: z.string(),
+  description_md: z.string().nullable(),
+  amount_minor: Money,
+  currency: Currency,
+  interval: z.enum(PLAN_INTERVALS),
+  interval_count: z.number().int(),
+  trial_days: z.number().int(),
+  setup_fee_minor: Money,
+  tax_rate_id: z.string().nullable(),
+  product_id: z.string().nullable(),
+  max_members: z.number().int().nullable(),
+  allow_pause: z.boolean(),
+  allow_quantity: z.boolean(),
+  benefits: z.array(z.object({ label: z.string() })),
+  visibility: z.enum(["public", "private"]),
+  active: z.boolean(),
+  sort: z.number().int(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const MembershipPlanListQuery = ListQuery.extend({ include_archived: z.enum(["true", "false"]).optional() });
+export const Subscription = z.object({
+  id: Id,
+  plan_id: Id,
+  plan_name: z.string(),
+  plan_slug: z.string(),
+  contact_id: Id,
+  contact_name: z.string().nullable(),
+  contact_email: z.string().nullable(),
+  status: z.enum(SUB_STATUSES),
+  quantity: z.number().int(),
+  amount_minor: Money,
+  currency: Currency,
+  interval: z.enum(PLAN_INTERVALS),
+  interval_count: z.number().int(),
+  start_at: MaybeIso,
+  trial_ends_at: MaybeIso.nullable(),
+  current_period_start: MaybeIso.nullable(),
+  current_period_end: MaybeIso.nullable(),
+  next_charge_at: MaybeIso.nullable(),
+  cancel_at_period_end: z.boolean(),
+  cancelled_at: MaybeIso.nullable(),
+  pause_until: MaybeIso.nullable(),
+  has_payment_method: z.boolean(),
+  failed_attempts: z.number().int(),
+  last_failure_at: MaybeIso.nullable(),
+  last_invoice_id: z.string().nullable(),
+  created_at: MaybeIso,
+  updated_at: MaybeIso,
+});
+export const SubscriptionListQuery = SearchListQuery.extend({ status: z.enum(SUB_STATUSES).optional(), plan_id: Id.optional(), contact_id: Id.optional() });
+export const SubscriptionCancel = z.object({ at_period_end: z.boolean().optional(), reason: z.string().trim().max(300).nullable().optional() }).strict();
+
+/* ═══ Phase 11 lane E: customer engagement ════════════════════════════════ */
+export const EngagementSurvey = z.object({
+  id: Id, name: z.string(), kind: z.enum(["nps", "csat", "custom"]), trigger_event: z.string().nullable(), delay_hours: z.number().int(),
+  channel: z.enum(["email", "sms", "link"]), active: z.boolean(), public_review_prompt: z.boolean(), created_at: MaybeIso,
+});
+export const EngagementSurveyResults = z.object({
+  survey: EngagementSurvey, responses: z.number().int(), sent: z.number().int(), response_rate: z.number().nullable(), average: z.number().nullable(),
+  nps: z.object({ total: z.number().int(), promoters: z.number().int(), passives: z.number().int(), detractors: z.number().int(), nps: z.number().nullable() }).nullable(),
+  csat: z.object({ total: z.number().int(), satisfied: z.number().int(), csat: z.number().nullable(), average: z.number().nullable() }).nullable(),
+  trend: z.array(z.object({ week: z.string(), responses: z.number().int(), value: z.number().nullable() })),
+}).passthrough();
+export const EngagementVoucher = z.object({
+  id: Id, code_upper: z.string(), name: z.string(), kind: z.enum(["percent", "fixed", "free_shipping"]), value: z.number().int().describe("percent: basis points; fixed: minor units"),
+  currency: z.string().nullable(), min_subtotal_minor: z.number().int(), max_uses: z.number().int().nullable(), per_contact_limit: z.number().int().nullable(), used_count: z.number().int(),
+  starts_at: z.string().nullable(), ends_at: z.string().nullable(), applies_to: z.enum(["all", "products", "categories"]), stackable: z.boolean(), active: z.boolean(), created_at: MaybeIso,
+});
+export const EngagementVoucherCreate = VoucherInputSchema;
+export const EngagementGiftCard = z.object({
+  id: Id, code_last4: z.string(), initial_minor: z.number().int(), balance_minor: z.number().int(), currency: z.string(), status: z.enum(["active", "redeemed", "void", "expired"]),
+  recipient_email: z.string().nullable(), expires_at: z.string().nullable(), issued_via: z.enum(["manual", "storefront"]), created_at: MaybeIso,
+});
+export const EngagementGiftCardIssue = z.object({
+  amount_minor: z.number().int().min(1).max(100_000_000), currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+  recipient_email: z.string().trim().email().max(200).nullable().optional(), message: z.string().trim().max(500).nullable().optional(), expires_at: z.string().datetime({ offset: true }).nullable().optional(),
+}).strict();
+export const EngagementGiftCardIssued = z.object({ gift_card: EngagementGiftCard, code: z.string().describe("The full code. Returned once and never retrievable again.") });
+export const EngagementLoyaltyAccount = z.object({ id: Id, contact_id: Id, balance: z.number().int(), lifetime_points: z.number().int(), tier: z.string().nullable(), full_name: z.string().nullable(), email: z.string().nullable(), updated_at: MaybeIso });
+export const EngagementListQuery = z.object({ limit: z.coerce.number().int().min(1).max(200).optional() });

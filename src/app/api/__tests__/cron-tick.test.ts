@@ -39,6 +39,12 @@ vi.mock("@/lib/attachments/store", () => ({ purgeDeletedAttachments: vi.fn(async
 vi.mock("@/lib/workforce/shifts", () => ({ remindUpcomingShifts: vi.fn(async () => ({ reminded: 0 })) }));
 vi.mock("@/lib/calsync/sync", () => ({ processCalendarEvents: vi.fn(async () => ({ pushed: 0 })), syncDue: vi.fn(async () => ({ synced: 0 })) }));
 vi.mock("@/lib/chatops/process", () => ({ processChatEvents: vi.fn(async () => ({ delivered: 0 })) }));
+vi.mock("@/lib/memberships/billing", () => ({ billDue: vi.fn(async () => ({})), sweepExpiring: vi.fn(async () => ({})) }));
+vi.mock("@/lib/shipping/tracking", () => ({ advanceSimulated: vi.fn(async () => ({})), syncTracking: vi.fn(async () => ({})) }));
+vi.mock("@/lib/tax-compliance/reminders", () => ({ taxFilingReminders: vi.fn(async () => ({})) }));
+vi.mock("@/lib/engagement/surveys", () => ({ processEngagementEvents: vi.fn(async () => ({})) }));
+vi.mock("@/lib/engagement/loyalty", () => ({ expirePoints: vi.fn(async () => ({})) }));
+vi.mock("@/lib/engagement/giftcards", () => ({ expireGiftCards: vi.fn(async () => ({})) }));
 vi.mock("@/lib/plans/cron", () => ({ renewDue: vi.fn(async () => ({ renewed: 0 })), grantMonthlyCredits: vi.fn(async () => ({ granted: 0 })) }));
 vi.mock("@/lib/alerts/process", () => ({ processAlerts: vi.fn(async () => ({ evaluated: 0 })) }));
 vi.mock("@/lib/projects/overdue", () => ({ markOverdueTasks: vi.fn(async () => ({ notified: 0 })) }));

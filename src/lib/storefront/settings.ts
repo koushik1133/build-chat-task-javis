@@ -12,6 +12,8 @@ import { CART_LIMITS } from "./pure";
 export interface StorefrontExtra {
   max_qty_per_line: number;
   cart_ttl_hours: number;
+  /** Tax rate (basis points) applied to the shipping charge; 0 = shipping is not taxed. */
+  shipping_tax_bp?: number;
 }
 
 export interface StorefrontDTO {
@@ -25,6 +27,8 @@ export interface StorefrontDTO {
   pickup_enabled: boolean;
   terms_md: string | null;
   settings: StorefrontExtra;
+  /** Location online orders reserve from first (null = default location). */
+  fulfil_location_id: string | null;
   /** False until the org saved the storefront at least once. */
   configured: boolean;
   updated_at: string | null;
@@ -42,12 +46,13 @@ interface Row {
   pickup_enabled: boolean;
   terms_md: string | null;
   settings: string | null;
+  fulfil_location_id: string | null;
   updated_at: string | Date | null;
 }
 
-const COLS = "user_id, enabled, slug, title, intro_md, currency, collect_shipping, shipping_flat_minor, pickup_enabled, terms_md, settings, updated_at";
+const COLS = "user_id, enabled, slug, title, intro_md, currency, collect_shipping, shipping_flat_minor, pickup_enabled, terms_md, settings, fulfil_location_id, updated_at";
 
-export const DEFAULT_EXTRA: StorefrontExtra = { max_qty_per_line: CART_LIMITS.maxQtyPerLine, cart_ttl_hours: 72 };
+export const DEFAULT_EXTRA: StorefrontExtra = { max_qty_per_line: CART_LIMITS.maxQtyPerLine, cart_ttl_hours: 72, shipping_tax_bp: 0 };
 
 export function parseExtra(raw: string | null | undefined): StorefrontExtra {
   if (!raw) return { ...DEFAULT_EXTRA };
@@ -56,9 +61,11 @@ export function parseExtra(raw: string | null | undefined): StorefrontExtra {
     const o = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
     const mq = Number(o.max_qty_per_line);
     const ttl = Number(o.cart_ttl_hours);
+    const stb = Number(o.shipping_tax_bp);
     return {
       max_qty_per_line: Number.isInteger(mq) && mq >= 1 && mq <= 1000 ? mq : DEFAULT_EXTRA.max_qty_per_line,
       cart_ttl_hours: Number.isInteger(ttl) && ttl >= 1 && ttl <= 24 * 30 ? ttl : DEFAULT_EXTRA.cart_ttl_hours,
+      shipping_tax_bp: Number.isInteger(stb) && stb >= 0 && stb <= 10_000 ? stb : 0,
     };
   } catch {
     return { ...DEFAULT_EXTRA };
@@ -77,6 +84,7 @@ function toDTO(r: Row): StorefrontDTO {
     pickup_enabled: Boolean(r.pickup_enabled),
     terms_md: r.terms_md,
     settings: parseExtra(r.settings),
+    fulfil_location_id: r.fulfil_location_id ?? null,
     configured: true,
     updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null,
   };
@@ -98,6 +106,7 @@ export function defaultStorefront(slug: string, title: string | null): Storefron
     pickup_enabled: true,
     terms_md: null,
     settings: { ...DEFAULT_EXTRA },
+    fulfil_location_id: null,
     configured: false,
     updated_at: null,
   };
@@ -126,8 +135,9 @@ export const StorefrontPatchSchema = z
     shipping_flat_minor: z.number().int().min(0).max(1_000_000_000).optional(),
     pickup_enabled: z.boolean().optional(),
     terms_md: z.string().max(40_000).nullable().optional(),
+    fulfil_location_id: z.string().min(1).max(100).nullable().optional(),
     settings: z
-      .object({ max_qty_per_line: z.number().int().min(1).max(1000).optional(), cart_ttl_hours: z.number().int().min(1).max(720).optional() })
+      .object({ max_qty_per_line: z.number().int().min(1).max(1000).optional(), cart_ttl_hours: z.number().int().min(1).max(720).optional(), shipping_tax_bp: z.number().int().min(0).max(10_000).optional() })
       .strict()
       .optional(),
   })
@@ -148,13 +158,17 @@ export async function updateStorefront(dataId: string, patch: StorefrontPatch): 
     const clashOrg = await queryOne<{ owner_user_id: string }>(`SELECT owner_user_id FROM organizations WHERE slug = $1 AND owner_user_id <> $2`, [patch.slug, dataId]);
     if (clashStore || clashOrg) throw new Error(`Slug "${patch.slug}" is already in use`);
   }
+  if (patch.fulfil_location_id) {
+    const loc = await queryOne<{ id: string }>(`SELECT id FROM locations WHERE id = $1 AND user_id = $2 AND active = TRUE`, [patch.fulfil_location_id, dataId]).catch(() => null);
+    if (!loc) throw new Error("Fulfilment location not found");
+  }
   await query(
-    `INSERT INTO storefronts (user_id, enabled, slug, title, intro_md, currency, collect_shipping, shipping_flat_minor, pickup_enabled, terms_md, settings, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+    `INSERT INTO storefronts (user_id, enabled, slug, title, intro_md, currency, collect_shipping, shipping_flat_minor, pickup_enabled, terms_md, settings, fulfil_location_id, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
      ON CONFLICT (user_id) DO UPDATE SET enabled = EXCLUDED.enabled, slug = EXCLUDED.slug, title = EXCLUDED.title, intro_md = EXCLUDED.intro_md,
        currency = EXCLUDED.currency, collect_shipping = EXCLUDED.collect_shipping, shipping_flat_minor = EXCLUDED.shipping_flat_minor,
-       pickup_enabled = EXCLUDED.pickup_enabled, terms_md = EXCLUDED.terms_md, settings = EXCLUDED.settings, updated_at = NOW()`,
-    [dataId, next.enabled, next.slug, next.title, next.intro_md, next.currency, next.collect_shipping, next.shipping_flat_minor, next.pickup_enabled, next.terms_md, JSON.stringify(next.settings)]
+       pickup_enabled = EXCLUDED.pickup_enabled, terms_md = EXCLUDED.terms_md, settings = EXCLUDED.settings, fulfil_location_id = EXCLUDED.fulfil_location_id, updated_at = NOW()`,
+    [dataId, next.enabled, next.slug, next.title, next.intro_md, next.currency, next.collect_shipping, next.shipping_flat_minor, next.pickup_enabled, next.terms_md, JSON.stringify(next.settings), next.fulfil_location_id]
   );
   return getStorefront(dataId);
 }

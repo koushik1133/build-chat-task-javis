@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Boxes, Loader2, Package, Pencil, Plus, RefreshCw, Trash2, Undo2, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,12 @@ import { LoadMore } from "@/components/ui/load-more";
 import { PageContainer } from "@/components/page-container";
 import { cn } from "@/lib/utils";
 import { fmtDate, fmtMoney } from "@/lib/money/format";
+import { LocationsTab } from "@/components/inventory/locations-tab";
+import { TransfersTab } from "@/components/inventory/transfers-tab";
+import { CountsTab } from "@/components/inventory/counts-tab";
+import { ProductTaxFields } from "@/components/tax/product-tax-fields";
+import { StockBreakdown } from "@/components/inventory/stock-breakdown";
+import type { LocationItem } from "@/components/inventory/types";
 import { api, Banner, Dialog, DialogFooter, Empty, Field, fromMinor, Loading, TabPanel, Tabs, toMinor } from "@/components/finance/shared";
 
 interface Product {
@@ -25,7 +31,10 @@ interface Checkout {
   due_back_at: string | null; returned_at: string | null; created_at: string; overdue: boolean;
 }
 
-type Tab = "products" | "equipment";
+type Tab = "products" | "equipment" | "locations" | "transfers" | "counts";
+const TABS: readonly Tab[] = ["products", "equipment", "locations", "transfers", "counts"];
+/** True once the org has at least one location (per-location breakdown + location pickers appear). */
+const LocationsOn = createContext(false);
 const KIND_TONE: Record<Product["kind"], Tone> = { product: "neutral", service: "info", rental: "violet" };
 const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
 
@@ -33,6 +42,7 @@ export default function InventoryPage() {
   const [tab, setTab] = useState<Tab>("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
+  const [locations, setLocations] = useState<LocationItem[]>([]);
   const [q, setQ] = useState("");
   const query = useDebouncedValue(q.trim(), 250);
   const [lowOnly, setLowOnly] = useState(false);
@@ -52,10 +62,12 @@ export default function InventoryPage() {
     setLoading(true);
     setError(null);
     try {
-      const [p, c] = await Promise.all([
+      const [p, c, l] = await Promise.all([
         api<{ products: Product[]; next_cursor: string | null }>(`/api/products?inactive=1&order=created&limit=50${query ? `&q=${encodeURIComponent(query)}` : ""}${lowOnly ? "&low=1" : ""}`, { signal }),
         api<{ checkouts: Checkout[] }>("/api/equipment", { signal }),
+        api<{ locations: LocationItem[] }>("/api/locations", { signal }).catch(() => ({ locations: [] as LocationItem[] })),
       ]);
+      setLocations(l.locations);
       setProducts(p.products);
       setCursor(p.next_cursor ?? null);
       setCheckouts(c.checkouts);
@@ -69,6 +81,10 @@ export default function InventoryPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t && (TABS as readonly string[]).includes(t)) setTab(t as Tab);
+  }, []);
 
   const loadMore = useCallback(async () => {
     if (!cursor || loadingMore) return;
@@ -148,11 +164,11 @@ export default function InventoryPage() {
             <Button touch onClick={() => setEditing("new")}>
               <Plus className="h-4 w-4" aria-hidden /> New product
             </Button>
-          ) : (
+          ) : tab === "equipment" ? (
             <Button touch onClick={() => setCheckingOut(true)}>
               <Plus className="h-4 w-4" aria-hidden /> Check out
             </Button>
-          )}
+          ) : null}
         </>
       }
     >
@@ -165,6 +181,9 @@ export default function InventoryPage() {
           tabs={[
             { id: "products", label: "Products", count: products.length },
             { id: "equipment", label: "Equipment out", count: openCheckouts.length },
+            { id: "locations", label: "Locations", count: locations.length },
+            { id: "transfers", label: "Transfers" },
+            { id: "counts", label: "Counts" },
           ]}
         />
       </div>
@@ -192,6 +211,7 @@ export default function InventoryPage() {
         </Banner>
       )}
 
+      <LocationsOn.Provider value={locations.length > 0}>
       {tab === "products" ? (
         <TabPanel id="inventory" value="products">
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -230,7 +250,7 @@ export default function InventoryPage() {
             </>
           )}
         </TabPanel>
-      ) : (
+      ) : tab === "equipment" ? (
         <TabPanel id="inventory" value="equipment">
           {loading && checkouts.length === 0 ? (
             <Loading label="Loading equipment…" />
@@ -238,7 +258,20 @@ export default function InventoryPage() {
             <EquipmentList checkouts={checkouts} busyId={busyId} onCheckin={onCheckin} onCheckout={() => setCheckingOut(true)} />
           )}
         </TabPanel>
+      ) : tab === "locations" ? (
+        <TabPanel id="inventory" value="locations">
+          <LocationsTab locations={locations} loading={loading} onChanged={() => void load()} onNotice={setNotice} />
+        </TabPanel>
+      ) : tab === "transfers" ? (
+        <TabPanel id="inventory" value="transfers">
+          <TransfersTab locations={locations} products={products} onChanged={() => void load()} onNotice={setNotice} />
+        </TabPanel>
+      ) : (
+        <TabPanel id="inventory" value="counts">
+          <CountsTab locations={locations} onChanged={() => void load()} onNotice={setNotice} />
+        </TabPanel>
       )}
+      </LocationsOn.Provider>
 
       {editing && (
         <ProductDialog
@@ -254,6 +287,7 @@ export default function InventoryPage() {
       {adjusting && (
         <StockDialog
           product={adjusting}
+          locations={locations}
           onClose={() => setAdjusting(null)}
           onSaved={(msg) => {
             setAdjusting(null);
@@ -287,6 +321,7 @@ function KindPill({ kind }: { kind: Product["kind"] }) {
 }
 
 function StockCell({ p }: { p: Product }) {
+  const multi = useContext(LocationsOn);
   if (!p.track_stock) return <span className="text-muted-foreground">—</span>;
   return (
     <span className={cn("tabular-nums", p.low_stock && "font-semibold text-amber-800 dark:text-amber-300")}>
@@ -302,6 +337,7 @@ function StockCell({ p }: { p: Product }) {
           <span className="sr-only"> Low stock</span>
         </>
       )}
+      {multi && <StockBreakdown productId={p.id} productName={p.name} />}
     </span>
   );
 }
@@ -559,6 +595,7 @@ function ProductDialog({ product, onClose, onSaved }: { product: Product | null;
             </div>
           )}
         </fieldset>
+        {product && <ProductTaxFields productId={product.id} />}
         {product && <Checkbox checked={form.active} onChange={(e) => set("active", e.target.checked)} label="Active (shown in the pricebook)" />}
         {error && (
           <Banner tone="error" onDismiss={() => setError(null)} className="mb-0">
@@ -578,7 +615,8 @@ function ProductDialog({ product, onClose, onSaved }: { product: Product | null;
   );
 }
 
-function StockDialog({ product, onClose, onSaved }: { product: Product; onClose: () => void; onSaved: (msg: string) => void }) {
+function StockDialog({ product, locations, onClose, onSaved }: { product: Product; locations: LocationItem[]; onClose: () => void; onSaved: (msg: string) => void }) {
+  const [locationId, setLocationId] = useState(locations.find((l) => l.is_default)?.id ?? locations[0]?.id ?? "");
   const [kind, setKind] = useState<"receive" | "consume" | "adjust">("receive");
   const [qty, setQty] = useState("1");
   const [note, setNote] = useState("");
@@ -592,7 +630,9 @@ function StockDialog({ product, onClose, onSaved }: { product: Product; onClose:
     try {
       const n = Math.trunc(Number(qty));
       if (!n) throw new Error("Enter a quantity other than zero.");
-      const r = await api<{ product: Product }>(`/api/products/${product.id}/stock`, { method: "POST", body: JSON.stringify({ kind, qty: n, note: note.trim() || null }) });
+      const r = locations.length > 0
+        ? await api<{ product: Product }>("/api/stock/adjust", { method: "POST", body: JSON.stringify({ product_id: product.id, location_id: locationId, kind, qty: n, note: note.trim() || null }) })
+        : await api<{ product: Product }>(`/api/products/${product.id}/stock`, { method: "POST", body: JSON.stringify({ kind, qty: n, note: note.trim() || null }) });
       onSaved(`${product.name}: ${r.product.stock_available} available (${r.product.stock_on_hand} on hand).`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not update stock.");
@@ -608,6 +648,18 @@ function StockDialog({ product, onClose, onSaved }: { product: Product; onClose:
           On hand {product.stock_on_hand} · held {product.stock_reserved} · available {product.stock_available}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
+          {locations.length > 0 && (
+            <Field label="Location" className="sm:col-span-2">
+              <Select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                    {l.is_default ? " (default)" : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <Field label="Movement">
             <Select data-autofocus value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
               <option value="receive">Receive (stock in)</option>

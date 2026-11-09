@@ -24,6 +24,9 @@ export const InvoiceBodySchema = z.object({
   due_at: z.string().datetime({ offset: true }).nullable().optional(),
   terms_days: z.number().int().min(0).max(365).nullable().optional(),
   notes: z.string().max(4000).nullable().optional(),
+  /** Delivery address; drives place of supply / nexus when the org has a tax profile. */
+  ship_to: z.object({ country: z.string().max(60).nullable().optional(), state: z.string().max(60).nullable().optional(), postal_code: z.string().max(20).nullable().optional() }).nullable().optional(),
+  reverse_charge: z.boolean().optional(),
 });
 
 export const SendBodySchema = z.object({

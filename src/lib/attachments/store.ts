@@ -250,6 +250,7 @@ export async function entityExists(dataId: string, kind: AttachmentEntityKind, i
     document: ["documents", "id"],
     project: ["projects", "id"],
     order: ["orders", "id"],
+    shipment: ["shipments", "id"],
   };
   const t = table[kind];
   if (!t) return false;

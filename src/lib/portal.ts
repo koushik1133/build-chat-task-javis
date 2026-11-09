@@ -9,6 +9,8 @@ import { getOrder, issueOrderLink } from "@/lib/storefront/orders";
 import { listProjects, listMilestones } from "@/lib/projects/store";
 import { projectProgress } from "@/lib/projects/progress";
 import { listDocuments } from "@/lib/documents/documents";
+import { portalMemberships, type PortalMembership } from "@/lib/memberships/portal";
+import { portalLoyalty, type PortalLoyalty } from "@/lib/engagement/portal";
 
 /**
  * Client portal read model. Only whitelisted fields leave this module so a
@@ -96,6 +98,10 @@ export interface PortalData {
   /** Documents awaiting this contact's signature. */
   documents: PortalDocumentItem[];
   unreadMessages: number;
+  /** Phase 11: customer memberships (additive). */
+  memberships: PortalMembership[];
+  /** Phase 11: loyalty points + referral code (null when the program is off). */
+  loyalty: PortalLoyalty | null;
   statement: { balances: StatementBalance[]; hasStatement: boolean };
 }
 
@@ -131,7 +137,7 @@ export async function getPortalData(dataId: string, contactId: string, opts: Opt
   };
 
   const windowHours = await bookingChangeWindowHours(dataId).catch(() => 24);
-  const [quotes, invoices, bookings, cards, firstType, cal, balances, orders, projects, documents, unreadMessages] = await Promise.all([
+  const [quotes, invoices, bookings, cards, firstType, cal, balances, orders, projects, documents, unreadMessages, memberships, loyalty] = await Promise.all([
     safe(async () => {
       const rows = await query<{ id: string; number: string; status: string; currency: string; total_minor: string | number; valid_until: string | null; created_at: string }>(
         `SELECT id, number, status, currency, total_minor, valid_until, created_at FROM quotes
@@ -236,6 +242,8 @@ export async function getPortalData(dataId: string, contactId: string, opts: Opt
       return out;
     }, [] as PortalDocumentItem[]),
     safe(() => unreadForContact(dataId, contactId), 0),
+    safe(() => portalMemberships(dataId, contactId, opts), [] as PortalMembership[]),
+    safe(() => portalLoyalty(dataId, contactId), null as PortalLoyalty | null),
   ]);
   const main = [...balances].sort((a, b) => Math.abs(b.closing_minor) - Math.abs(a.closing_minor))[0] ?? null;
 
@@ -257,6 +265,8 @@ export async function getPortalData(dataId: string, contactId: string, opts: Opt
     changeWindowHours: windowHours,
     documents,
     unreadMessages,
+    memberships,
+    loyalty,
     statement: { balances, hasStatement: balances.length > 0 },
   };
 }

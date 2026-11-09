@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Banner, ErrorState, Skeleton } from "@/components/ui/feedback";
 import { money, PageState, readError, SHOP_WIDTH, ShopNav, Totals, useShop } from "@/components/shop/shop-ui";
 import { cn } from "@/lib/utils";
+import { CustomerReturns, type ReturnInfo } from "@/components/shipping/customer-returns";
 import type { OrderStatus } from "@/lib/storefront/pure";
 
 interface PublicOrder {
@@ -52,6 +53,8 @@ export default function OrderStatusPage() {
   const { shop } = useShop(org);
   const [order, setOrder] = useState<PublicOrder | null>(null);
   const [canPay, setCanPay] = useState(false);
+  const [shipments, setShipments] = useState<Array<{ carrier: string | null; tracking_number: string | null; status_label: string }>>([]);
+  const [returnInfo, setReturnInfo] = useState<ReturnInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
@@ -65,9 +68,11 @@ export default function OrderStatusPage() {
       const res = await fetch(url, { cache: "no-store" });
       if (res.status === 404) throw new Error("This order link is invalid or has expired. Check the link in your confirmation email.");
       if (!res.ok) throw new Error(await readError(res, "Could not load the order"));
-      const json = (await res.json()) as { order: PublicOrder; can_pay: boolean };
+      const json = (await res.json()) as { order: PublicOrder; can_pay: boolean; shipments?: Array<{ carrier: string | null; tracking_number: string | null; status_label: string }>; returns?: ReturnInfo | null };
       setOrder(json.order);
       setCanPay(json.can_pay);
+      setShipments(json.shipments ?? []);
+      setReturnInfo(json.returns ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the order.");
     } finally {
@@ -158,6 +163,24 @@ export default function OrderStatusPage() {
             </ul>
             <h2 className="mb-2 mt-6 text-sm font-semibold">Delivery</h2>
             <p className="whitespace-pre-line break-words text-sm text-muted-foreground">{order.shipping_text || "Collection in person"}</p>
+            {shipments.length > 0 && (
+              <>
+                <h2 className="mb-2 mt-6 text-sm font-semibold">Tracking</h2>
+                <ul className="space-y-1 text-sm">
+                  {shipments.map((sh, i) => (
+                    <li key={i}>
+                      <Link href={`/track/${encodeURIComponent(token)}`} className="rounded text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        {[sh.carrier, sh.tracking_number].filter(Boolean).join(" ") || "Track package"}
+                      </Link>{" "}
+                      <span className="text-muted-foreground">· {sh.status_label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {returnInfo && (returnInfo.eligible || returnInfo.existing.length > 0) && (
+              <CustomerReturns infoUrl={`${url}/returns`} postUrl={`${url}/returns`} initial={returnInfo} onDone={() => void load()} />
+            )}
             {order.notes && (
               <>
                 <h2 className="mb-2 mt-6 text-sm font-semibold">Your notes</h2>

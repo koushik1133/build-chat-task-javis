@@ -55,6 +55,8 @@ export async function emitEvent(userId: string, evt: EventRecord): Promise<void>
 
 /** Well-known event types. Keep additions here so triggers can offer a picker. */
 export const EVENT_TYPES = [
+  "tax.filing_due",
+  "einvoice.accepted",
   "crm.contact.created",
   "crm.contact.stage_changed",
   "lead.captured",
@@ -86,6 +88,8 @@ export const EVENT_TYPES = [
   "invoice.overdue",
   "product.created",
   "product.stock_changed",
+  "stock.transfer_shipped",
+  "stock.transfer_received",
   "expense.created",
   "accounting.synced",
   "accounting.sync_failed",
@@ -129,6 +133,26 @@ export const EVENT_TYPES = [
   "subscription.past_due",
   "subscription.cancelled",
   "subscription.plan_changed",
+  "membership.subscribed",
+  "membership.renewed",
+  "membership.payment_failed",
+  "membership.paused",
+  "membership.cancelled",
+  "membership.trial_ending",
+  "order.delivered",
+  "shipment.created",
+  "shipment.shipped",
+  "shipment.delivered",
+  "shipment.exception",
+  "return.requested",
+  "return.approved",
+  "return.refunded",
+  "survey.completed",
+  "survey.detractor",
+  "loyalty.tier_changed",
+  "gift_card.issued",
+  "voucher.redeemed",
+  "referral.rewarded",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

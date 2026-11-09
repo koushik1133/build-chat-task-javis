@@ -115,8 +115,8 @@ describe("reserveForQuote", () => {
     const r = await reserveForQuote("o1", "q1", [{ description: "x", qty: 3, unit_minor: 1, tax_rate_bp: 0, product_id: "p1" }]);
     expect(r).toEqual({ reserved: [{ product_id: "p1", qty: 3 }], alreadyReserved: false });
     const upd = query.mock.calls.find(([sql]) => String(sql).startsWith("UPDATE products"));
-    expect(String(upd?.[0])).toContain("stock_on_hand - stock_reserved >= $3");
-    expect(upd?.[1]).toEqual(["p1", "o1", 3]);
+    expect(String(upd?.[0])).toContain("stock_on_hand + $3 - GREATEST(stock_reserved + $4, 0) >= 0");
+    expect(upd?.[1]).toEqual(["p1", "o1", 0, 3, false, true]);
     const ins = query.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO stock_movements"));
     expect(ins?.[1]).toEqual(expect.arrayContaining(["p1", "reserve", 3, "quote", "q1"]));
   });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import {
+  ArrowLeftRight,
   ArrowRight,
   Archive,
   BookOpen,
@@ -36,6 +37,7 @@ import {
   UserPlus,
   UserRound,
   Users,
+  Warehouse,
   Wallet,
   Workflow,
   X,
@@ -70,7 +72,7 @@ const ICONS: Record<string, LucideIcon> = {
   booking: CalendarDays, ticket: LifeBuoy, record: Boxes, article: BookOpen, order: ShoppingCart, project: FolderKanban,
   supplier: Truck, purchase_order: Package, bill: Receipt, staff: UserRound, document: FileSignature, campaign: Send,
   audience: Users, sequence: Workflow, product: Boxes, expense: Wallet, message: MessageSquare, automation: Zap,
-  report: PieChart, snapshot: Archive, booking_type: CalendarClock, workspace: Building2, pinned: Pin, recent: Search,
+  report: PieChart, snapshot: Archive, booking_type: CalendarClock, location: Warehouse, transfer: ArrowLeftRight, shipment: Truck, return: Package, workspace: Building2, pinned: Pin, recent: Search,
   receipt: Receipt, "user-plus": UserPlus, "list-todo": ListTodo, "life-buoy": LifeBuoy, "calendar-days": CalendarDays,
   wallet: Wallet, package: Package, "folder-kanban": FolderKanban, send: Send,
 };

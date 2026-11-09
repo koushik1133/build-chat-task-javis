@@ -232,7 +232,7 @@ export async function resolvePublicBranding(pathname: string | null | undefined)
       const org = await queryOne<{ owner_user_id: string }>(`SELECT owner_user_id FROM organizations WHERE slug = $1`, [parts[1]]);
       return org ? getBranding(org.owner_user_id) : DEFAULT_BRANDING;
     }
-    if (parts[0] === "help" && parts[1]) {
+    if ((parts[0] === "help" || parts[0] === "join") && parts[1]) {
       const org = await queryOne<{ owner_user_id: string }>(`SELECT owner_user_id FROM organizations WHERE slug = $1`, [
         parts[1],
       ]);

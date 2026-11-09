@@ -13,7 +13,7 @@ import { PER_KIND, capResults, likePatterns, parseSearchQuery, rankItems, type R
 export type SearchKind =
   | "page" | "contact" | "lead" | "task" | "quote" | "invoice" | "booking" | "ticket" | "record" | "article"
   | "order" | "project" | "supplier" | "purchase_order" | "bill" | "staff" | "document" | "campaign" | "audience"
-  | "sequence" | "product" | "expense" | "message" | "automation" | "report" | "snapshot" | "booking_type";
+  | "sequence" | "product" | "expense" | "message" | "automation" | "report" | "snapshot" | "booking_type" | "location" | "transfer" | "tax_filing" | "shipment" | "return" | "membership_plan" | "member" | "voucher" | "gift_card" | "survey";
 
 export interface SearchItem extends Rankable {
   kind: SearchKind;
@@ -92,6 +92,28 @@ function parseLead(data: string | null): Record<string, unknown> {
 const money = (minor: unknown, cur: unknown, locale: string) => formatMoney(Number(minor) || 0, s(cur) || "USD", locale);
 
 export const KIND_DEFS: KindDef[] = [
+  make<{ id: string; tracking_number: string | null; carrier: string | null; status: string; created_at: string }>({
+    kind: "shipment", area: "billing", table: "shipments", icon: "truck",
+    select: "id, tracking_number, carrier, status, created_at", cols: ["COALESCE(tracking_number, '')", "COALESCE(carrier, '')"], order: "created_at DESC",
+    map: (r) => ({ id: r.id, title: r.tracking_number ?? "Shipment (no tracking)", subtitle: join(r.carrier, r.status.replace(/_/g, " ")), href: `/shipping?shipment=${enc(r.id)}`, at: r.created_at }),
+  }),
+  make<{ id: string; reason: string | null; status: string; number: string | null; created_at: string }>({
+    kind: "return", area: "billing", table: "return_requests", icon: "package",
+    select: "r.id AS id, r.reason, r.status, o.number, r.created_at", from: "return_requests r LEFT JOIN orders o ON o.id = r.order_id AND o.user_id = r.user_id", userCol: "r.user_id", cols: ["o.number", "COALESCE(r.reason, '')"], order: "r.created_at DESC",
+    map: (r) => ({ id: r.id, title: `Return ${r.number ?? r.id.slice(0, 8)}`, subtitle: join(r.status.replace(/_/g, " "), r.reason), href: `/shipping?tab=returns&return=${enc(r.id)}`, at: r.created_at }),
+  }),
+  make<{ id: string; name: string; slug: string; active: boolean; amount_minor: string | number; currency: string; interval: string; updated_at: string }>({
+    kind: "membership_plan", area: "billing", table: "membership_plans", icon: "id-card",
+    select: "id, name, slug, active, amount_minor, currency, interval, updated_at", cols: ["name", "slug"], order: "updated_at DESC",
+    map: (r, ctx) => ({ id: r.id, title: r.name, subtitle: join(`${money(r.amount_minor, r.currency, ctx.locale)} / ${r.interval}`, r.active ? null : "archived"), href: `/memberships?plan=${enc(r.id)}`, at: r.updated_at }),
+  }),
+  make<{ id: string; full_name: string | null; email: string | null; status: string; plan_name: string; created_at: string }>({
+    kind: "member", area: "billing", table: "customer_subscriptions", icon: "id-card",
+    select: "s.id AS id, c.full_name, c.email, s.status, p.name AS plan_name, s.created_at",
+    from: "customer_subscriptions s JOIN membership_plans p ON p.id = s.plan_id LEFT JOIN crm_contacts c ON c.id = s.contact_id", userCol: "s.user_id",
+    cols: ["COALESCE(c.full_name, '')", "COALESCE(c.email, '')", "p.name"], order: "s.created_at DESC",
+    map: (r) => ({ id: r.id, title: r.full_name ?? r.email ?? "Member", subtitle: join(r.plan_name, r.status.replace(/_/g, " ")), href: `/memberships?tab=members&member=${enc(r.id)}`, at: r.created_at }),
+  }),
   make<{ id: string; full_name: string; email: string | null; company: string | null; updated_at: string }>({
     kind: "contact", area: "crm", table: "crm_contacts", icon: "users", where: "deleted_at IS NULL",
     select: "id, full_name, email, company, updated_at", cols: ["full_name", "email", "company"], order: "updated_at DESC",
@@ -227,6 +249,17 @@ export const KIND_DEFS: KindDef[] = [
     select: "id, name, status, updated_at", cols: ["name"], order: "updated_at DESC",
     map: (r) => ({ id: r.id, title: r.name, subtitle: `Sequence · ${r.status}`, href: `/marketing?tab=sequences`, at: r.updated_at }),
   }),
+  make<{ id: string; name: string; code: string | null; kind: string; updated_at: string }>({
+    kind: "location", area: "billing", table: "locations", icon: "warehouse",
+    select: "id, name, code, kind, updated_at", where: "active = TRUE", cols: ["name", "code"], order: "updated_at DESC",
+    map: (r) => ({ id: r.id, title: r.code ? `${r.name} (${r.code})` : r.name, subtitle: `Location · ${r.kind}`, href: `/inventory?tab=locations&q=${enc(r.name)}`, at: r.updated_at }),
+  }),
+  make<{ id: string; number: string; status: string; from_name: string | null; to_name: string | null; created_at: string }>({
+    kind: "transfer", area: "billing", table: "stock_transfers", icon: "arrow-left-right",
+    select: "t.id, t.number, t.status, lf.name AS from_name, lt.name AS to_name, t.created_at",
+    from: "stock_transfers t LEFT JOIN locations lf ON lf.id = t.from_location_id LEFT JOIN locations lt ON lt.id = t.to_location_id", userCol: "t.user_id", cols: ["t.number", "lf.name", "lt.name"], order: "t.created_at DESC",
+    map: (r) => ({ id: r.id, title: r.number, subtitle: `${r.from_name ?? "?"} → ${r.to_name ?? "?"} · ${r.status.replace(/_/g, " ")}`, href: `/inventory?tab=transfers&q=${enc(r.number)}`, at: r.created_at }),
+  }),
   make<{ id: string; sku: string | null; name: string; stock_on_hand: number; updated_at: string }>({
     kind: "product", area: "billing", table: "products", icon: "boxes",
     select: "id, sku, name, stock_on_hand, updated_at", where: "deleted_at IS NULL", cols: ["sku", "name"], order: "updated_at DESC",
@@ -236,6 +269,12 @@ export const KIND_DEFS: KindDef[] = [
     kind: "expense", area: "billing", table: "expenses", icon: "wallet",
     select: "id, vendor, description, amount_minor, currency, spent_at", cols: ["vendor", "description"], order: "spent_at DESC",
     map: (r, ctx) => ({ id: r.id, title: r.vendor || r.description || "Expense", subtitle: join(money(r.amount_minor, r.currency, ctx.locale), r.vendor ? r.description : null), href: `/finance?expense=${enc(r.id)}`, at: r.spent_at }),
+  }),
+  make<{ id: string; regime: string; period_start: string; period_end: string; status: string; filed_ref: string | null; created_at: string }>({
+    kind: "tax_filing", area: "billing", table: "tax_filings", icon: "receipt",
+    where: "(notes IS NULL OR notes NOT LIKE 'reminder:%')",
+    select: "id, regime, period_start, period_end, status, filed_ref, created_at", cols: ["regime", "filed_ref", "notes"], order: "period_start DESC",
+    map: (r) => ({ id: r.id, title: `${r.regime.replace(/_/g, " ")} ${String(r.period_start).slice(0, 10)} to ${String(r.period_end).slice(0, 10)}`, subtitle: join(r.status, r.filed_ref), href: "/tax?tab=filings", at: r.created_at }),
   }),
   {
     kind: "message", area: "crm", table: "portal_messages", icon: "message-square",
@@ -280,6 +319,21 @@ export const KIND_DEFS: KindDef[] = [
     kind: "booking_type", area: "calendar", table: "booking_types", icon: "calendar-clock",
     select: "id, name, duration_minutes, created_at", cols: ["name"], order: "created_at DESC",
     map: (r) => ({ id: r.id, title: r.name, subtitle: `${r.duration_minutes} min`, href: `/calendar?tab=booking-types`, at: r.created_at }),
+  }),
+  make<{ id: string; code_upper: string; name: string; used_count: number; created_at: string }>({
+    kind: "voucher", area: "billing", table: "vouchers", icon: "tag",
+    select: "id, code_upper, name, used_count, created_at", cols: ["code_upper", "name"], order: "created_at DESC",
+    map: (r) => ({ id: r.id, title: r.code_upper, subtitle: join(r.name, `${r.used_count} used`), href: `/engagement?tab=vouchers`, at: r.created_at }),
+  }),
+  make<{ id: string; code_last4: string; status: string; balance_minor: string | number; currency: string; created_at: string }>({
+    kind: "gift_card", area: "billing", table: "gift_cards", icon: "gift",
+    select: "id, code_last4, status, balance_minor, currency, created_at", cols: ["code_last4"], order: "created_at DESC",
+    map: (r, ctx) => ({ id: r.id, title: `Gift card •••• ${r.code_last4}`, subtitle: join(r.status, formatMoney(Number(r.balance_minor), r.currency, ctx.locale)), href: `/engagement?tab=gift-cards`, at: r.created_at }),
+  }),
+  make<{ id: string; name: string; kind: string; created_at: string }>({
+    kind: "survey", area: "crm", table: "surveys", icon: "heart-handshake",
+    select: "id, name, kind, created_at", cols: ["name"], order: "created_at DESC",
+    map: (r) => ({ id: r.id, title: r.name, subtitle: r.kind.toUpperCase(), href: `/engagement?tab=feedback`, at: r.created_at }),
   }),
 ];
 

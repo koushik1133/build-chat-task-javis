@@ -78,6 +78,38 @@ export const STATIC_DATASETS: Record<string, Dataset> = {
     key: "orders", label: "Orders", description: "Storefront orders by status, customer and value.", from: "orders", table: "orders", scopeColumn: "user_id", area: "billing", defaultDate: "created_at", currencyColumn: "currency",
     fields: [dim("id", "Order"), dim("number", "Number"), dim("status", "Status"), dim("customer_email", "Customer email"), dim("customer_name", "Customer"), dim("contact_id", "Contact"), dim("invoice_id", "Invoice"), dim("currency", "Currency"), money("subtotal_minor", "Subtotal"), money("tax_minor", "Tax"), money("shipping_minor", "Shipping"), money("total_minor", "Total"), date("created_at", "Created"), date("paid_at", "Paid at"), date("fulfilled_at", "Fulfilled at"), date("cancelled_at", "Cancelled at")],
   },
+  shipments: {
+    key: "shipments", label: "Shipments", description: "Shipments by carrier, service and delivery status.", from: "shipments", table: "shipments", scopeColumn: "user_id", area: "billing", defaultDate: "created_at", currencyColumn: "currency",
+    fields: [dim("id", "Shipment"), dim("order_id", "Order"), dim("status", "Status"), dim("carrier", "Carrier"), dim("service", "Service"), dim("tracking_number", "Tracking number"), dim("currency", "Currency"), money("rate_minor", "Label cost"), num("weight_grams", "Weight (g)"), date("created_at", "Created"), date("purchased_at", "Label purchased"), date("delivered_at", "Delivered")],
+  },
+  return_requests: {
+    key: "return_requests", label: "Returns", description: "Customer return requests by status, resolution and refund value.", from: "return_requests", table: "return_requests", scopeColumn: "user_id", area: "billing", defaultDate: "created_at",
+    fields: [dim("id", "Return"), dim("order_id", "Order"), dim("contact_id", "Contact"), dim("status", "Status"), dim("resolution", "Resolution"), money("refund_minor", "Refund"), date("created_at", "Requested"), date("updated_at", "Updated")],
+  },
+  membership_plans: {
+    key: "membership_plans", label: "Membership plans", description: "Recurring plans by price, interval and visibility.", from: "membership_plans", table: "membership_plans", scopeColumn: "user_id", area: "billing", defaultDate: "created_at", currencyColumn: "currency",
+    fields: [dim("id", "Plan"), dim("slug", "Link name"), dim("name", "Name"), dim("interval", "Interval"), dim("visibility", "Visibility"), dim("active", "Active", "active::text"), dim("currency", "Currency"), money("amount_minor", "Price"), money("setup_fee_minor", "Setup fee"), num("trial_days", "Trial days", "trial_days", "number"), num("max_members", "Max members", "max_members", "number"), date("created_at", "Created")],
+  },
+  customer_subscriptions: {
+    key: "customer_subscriptions", label: "Customer subscriptions", description: "Memberships by plan, status and renewal date.", from: "customer_subscriptions", table: "customer_subscriptions", scopeColumn: "user_id", area: "billing", defaultDate: "created_at",
+    fields: [dim("id", "Subscription"), dim("plan_id", "Plan"), dim("contact_id", "Contact"), dim("status", "Status"), dim("cancel_at_period_end", "Ending", "cancel_at_period_end::text"), num("quantity", "Quantity", "quantity", "number"), num("failed_attempts", "Failed attempts", "failed_attempts", "number"), date("created_at", "Joined"), date("start_at", "Started"), date("trial_ends_at", "Trial ends"), date("next_charge_at", "Next charge"), date("current_period_end", "Period ends"), date("cancelled_at", "Ended")],
+  },
+  survey_responses: {
+    key: "survey_responses", label: "Survey responses", description: "NPS / CSAT scores and comments by survey and contact.", from: "survey_responses", table: "survey_responses", scopeColumn: "user_id", area: "crm", defaultDate: "created_at",
+    fields: [dim("id", "Response"), dim("survey_id", "Survey"), dim("contact_id", "Contact"), dim("public", "Public OK", "public::text"), num("score", "Score"), date("created_at", "Received")],
+  },
+  loyalty_accounts: {
+    key: "loyalty_accounts", label: "Loyalty accounts", description: "Points balance, lifetime points and tier per member.", from: "loyalty_accounts", table: "loyalty_accounts", scopeColumn: "user_id", area: "crm", defaultDate: "created_at",
+    fields: [dim("id", "Account"), dim("contact_id", "Contact"), dim("tier", "Tier"), num("balance", "Balance (points)"), num("lifetime_points", "Lifetime points"), date("created_at", "Joined"), date("updated_at", "Updated")],
+  },
+  gift_cards: {
+    key: "gift_cards", label: "Gift cards", description: "Gift cards issued, outstanding balance and status (codes are never included).", from: "gift_cards", table: "gift_cards", scopeColumn: "user_id", area: "billing", defaultDate: "created_at", currencyColumn: "currency",
+    fields: [dim("id", "Card"), dim("code_last4", "Last 4"), dim("status", "Status"), dim("issued_via", "Issued via"), dim("currency", "Currency"), money("initial_minor", "Initial value"), money("balance_minor", "Balance"), date("created_at", "Issued"), date("expires_at", "Expires")],
+  },
+  vouchers: {
+    key: "vouchers", label: "Vouchers", description: "Discount codes with usage counts.", from: "vouchers", table: "vouchers", scopeColumn: "user_id", area: "billing", defaultDate: "created_at",
+    fields: [dim("id", "Voucher"), dim("code_upper", "Code"), dim("name", "Name"), dim("kind", "Type"), dim("active", "Active", "active::text"), num("value", "Value"), num("used_count", "Times used"), num("max_uses", "Max uses"), date("created_at", "Created"), date("ends_at", "Ends")],
+  },
   payments: {
     key: "payments", label: "Payments", description: "Payments received against invoices.", from: "invoice_payments p JOIN invoices i ON i.id = p.invoice_id", table: "invoice_payments", scopeColumn: "i.user_id", area: "billing", defaultDate: "created_at", currencyColumn: "p.currency",
     fields: [dim("id", "Payment", "p.id"), dim("invoice_id", "Invoice", "p.invoice_id"), dim("invoice_number", "Invoice number", "i.number"), dim("contact_id", "Contact", "i.contact_id"), dim("provider", "Provider", "p.provider"), dim("status", "Status", "p.status"), dim("currency", "Currency", "p.currency"), money("amount_minor", "Amount", "p.amount_minor"), money("refunded_minor", "Refunded", "COALESCE(p.refunded_minor, 0)"), money("net_minor", "Net", "(p.amount_minor - COALESCE(p.refunded_minor, 0))"), date("created_at", "Received", "p.created_at"), date("refunded_at", "Refunded at", "p.refunded_at")],
@@ -85,6 +117,15 @@ export const STATIC_DATASETS: Record<string, Dataset> = {
   expenses: {
     key: "expenses", label: "Expenses", description: "Cash out by category, vendor and job.", from: "expenses", table: "expenses", scopeColumn: "user_id", area: "billing", defaultDate: "spent_at", currencyColumn: "currency",
     fields: [dim("id", "Expense"), dim("category", "Category"), dim("vendor", "Vendor"), dim("ref_kind", "Job kind"), dim("ref_id", "Job"), dim("billable", "Billable", "billable::text"), dim("currency", "Currency"), money("amount_minor", "Amount"), money("tax_minor", "Tax"), date("spent_at", "Spent"), date("created_at", "Logged")],
+  },
+  tax_filings: {
+    key: "tax_filings", label: "Tax filings", description: "Prepared and filed tax periods by regime and status.", from: "tax_filings", table: "tax_filings", scopeColumn: "user_id", area: "billing", defaultDate: "period_start",
+    where: "(notes IS NULL OR notes NOT LIKE 'reminder:%')",
+    fields: [dim("id", "Filing"), dim("regime", "Regime"), dim("status", "Status"), dim("filed_ref", "Filing reference"), date("period_start", "Period start"), date("period_end", "Period end"), date("filed_at", "Filed"), date("created_at", "Prepared")],
+  },
+  e_invoices: {
+    key: "e_invoices", label: "E-invoices", description: "Generated e-invoices by format and status.", from: "e_invoices", table: "e_invoices", scopeColumn: "user_id", area: "billing", defaultDate: "created_at",
+    fields: [dim("id", "E-invoice"), dim("invoice_id", "Invoice"), dim("format", "Format"), dim("status", "Status"), dim("provider_ref", "Provider reference"), date("created_at", "Generated"), date("updated_at", "Updated")],
   },
   time_entries: {
     key: "time_entries", label: "Time entries", description: "Logged time by member and job.", from: "time_entries", table: "time_entries", scopeColumn: "user_id", area: "billing", defaultDate: "started_at", currencyColumn: "currency",
@@ -109,6 +150,18 @@ export const STATIC_DATASETS: Record<string, Dataset> = {
   stock_movements: {
     key: "stock_movements", label: "Stock movements", description: "Stock in/out by product and reason.", from: "stock_movements", table: "stock_movements", scopeColumn: "user_id", area: "billing", defaultDate: "created_at",
     fields: [dim("id", "Movement"), dim("product_id", "Product"), dim("kind", "Kind"), dim("ref_kind", "Reference kind"), dim("ref_id", "Reference"), num("qty", "Quantity"), date("created_at", "Recorded")],
+  },
+  stock_levels: {
+    key: "stock_levels", label: "Stock levels by location", description: "On hand, reserved and reorder point per product and location.", from: "stock_levels s JOIN products p ON p.id = s.product_id JOIN locations l ON l.id = s.location_id", table: "stock_levels", scopeColumn: "s.user_id", area: "billing", defaultDate: "updated_at",
+    fields: [dim("product_id", "Product", "s.product_id"), dim("product_name", "Product name", "p.name"), dim("sku", "SKU", "p.sku"), dim("location_id", "Location", "s.location_id"), dim("location_name", "Location name", "l.name"), dim("location_kind", "Location kind", "l.kind"), num("on_hand", "On hand", "s.on_hand"), num("reserved", "Reserved", "s.reserved"), num("available", "Available", "(s.on_hand - s.reserved)"), num("reorder_point", "Reorder point", "s.reorder_point"), date("updated_at", "Updated", "s.updated_at")],
+  },
+  stock_transfers: {
+    key: "stock_transfers", label: "Stock transfers", description: "Transfers between locations by status and quantity.", from: "stock_transfers t JOIN stock_transfer_lines tl ON tl.transfer_id = t.id", table: "stock_transfers", scopeColumn: "t.user_id", area: "billing", defaultDate: "created_at",
+    fields: [dim("id", "Transfer", "t.id"), dim("number", "Number", "t.number"), dim("status", "Status", "t.status"), dim("from_location_id", "From location", "t.from_location_id"), dim("to_location_id", "To location", "t.to_location_id"), dim("product_id", "Product", "tl.product_id"), num("qty", "Quantity", "tl.qty"), num("received_qty", "Received", "tl.received_qty"), date("created_at", "Created", "t.created_at"), date("shipped_at", "Shipped", "t.shipped_at"), date("received_at", "Received at", "t.received_at")],
+  },
+  locations: {
+    key: "locations", label: "Locations", description: "Stock locations by kind.", from: "locations", table: "locations", scopeColumn: "user_id", area: "billing", defaultDate: "created_at",
+    fields: [dim("id", "Location"), dim("name", "Name"), dim("code", "Code"), dim("kind", "Kind"), dim("active", "Active", "active::text"), dim("is_default", "Default", "is_default::text"), date("created_at", "Created")],
   },
   agent_runs: {
     key: "agent_runs", label: "Agent runs", description: "Agent executions, status and token spend.", from: "agent_runs", table: "agent_runs", scopeColumn: "user_id", area: "agents", defaultDate: "created_at",

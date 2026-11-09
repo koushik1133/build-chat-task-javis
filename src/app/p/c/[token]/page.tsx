@@ -14,8 +14,10 @@ import { OverviewTab } from "@/components/portal/overview-tab";
 import { BookingsTab } from "@/components/portal/bookings-tab";
 import { InvoicesTab } from "@/components/portal/invoices-tab";
 import { OrdersTab } from "@/components/portal/orders-tab";
+import { MembershipTab } from "@/components/portal/membership-tab";
 import { ProjectsTab } from "@/components/portal/projects-tab";
 import { MessagesTab } from "@/components/portal/messages-tab";
+import { RewardsTab } from "@/components/portal/rewards-tab";
 import { PORTAL_TAB_LABELS, PORTAL_TABS, type PortalTabId } from "@/components/portal/portal-tabs";
 import type { PortalData } from "@/lib/portal";
 
@@ -61,7 +63,7 @@ export default function ClientPortalPage() {
 
   const tabs = useMemo<TabDef<PortalTabId>[]>(
     () =>
-      PORTAL_TABS.map((id) => ({
+      PORTAL_TABS.filter((id) => (id !== "rewards" || Boolean(data?.loyalty)) && (id !== "memberships" || (data?.memberships?.length ?? 0) > 0)).map((id) => ({
         id,
         label: PORTAL_TAB_LABELS[id],
         count:
@@ -101,12 +103,14 @@ export default function ClientPortalPage() {
         {tab === "overview" && <OverviewTab data={data} go={setTab} />}
         {tab === "bookings" && <BookingsTab data={data} token={token} onChanged={load} />}
         {tab === "invoices" && <InvoicesTab data={data} token={token} />}
-        {tab === "orders" && <OrdersTab data={data} />}
+        {tab === "orders" && <OrdersTab data={data} token={token} />}
+        {tab === "memberships" && <MembershipTab data={data} token={token} onChanged={load} />}
         {tab === "projects" && <ProjectsTab data={data} />}
         {tab === "documents" && <DocumentsTab token={token} signLinks={data.documents} />}
         {tab === "files" && <FilesTab token={token} />}
         {tab === "support" && <SupportTab token={token} />}
         {tab === "messages" && <MessagesTab token={token} onRead={() => setUnread(0)} />}
+        {tab === "rewards" && data.loyalty && <RewardsTab loyalty={data.loyalty} token={token} />}
         {tab === "privacy" && <PrivacyTab token={token} />}
       </div>
     </div>

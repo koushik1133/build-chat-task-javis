@@ -63,6 +63,9 @@ import {
   DatabaseBackup,
   MailOpen,
   Layers,
+  IdCard,
+  HeartHandshake,
+  PackageCheck,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -113,6 +116,8 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/knowledge", label: "Knowledge Base", icon: BookOpen },
       { href: "/documents", label: "Documents", icon: FileSignature },
       { href: "/marketing", label: "Marketing", icon: Send },
+      { href: "/memberships", label: "Memberships", icon: IdCard },
+      { href: "/engagement", label: "Loyalty & feedback", icon: HeartHandshake },
     ],
   },
   {
@@ -134,6 +139,8 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/inventory", label: "Inventory", icon: Package },
       { href: "/procurement", label: "Procurement", icon: Truck },
       { href: "/workforce", label: "Workforce", icon: CalendarClock },
+      { href: "/shipping", label: "Shipping & returns", icon: PackageCheck },
+      { href: "/tax", label: "Tax & compliance", icon: Scale },
       { href: "/projects", label: "Projects", icon: FolderKanban },
       { href: "/orders", label: "Orders & storefront", icon: ShoppingCart },
       { href: "/finance", label: "Finance", icon: Wallet },

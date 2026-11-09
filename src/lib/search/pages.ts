@@ -37,6 +37,7 @@ const AREA_BY_PREFIX: Array<[string, Area]> = [
   ["/settings/privacy", "settings"],
   ["/voice", "messaging"],
   ["/marketing", "crm"],
+  ["/engagement", "crm"],
   ["/documents", "crm"],
   ["/crm", "crm"],
   ["/leads", "leads"],
@@ -104,6 +105,7 @@ const EXTRA: Array<{ href: string; label: string }> = [
   { href: "/procurement", label: "Procurement" },
   { href: "/projects", label: "Projects" },
   { href: "/orders", label: "Orders & storefront" },
+  { href: "/memberships", label: "Memberships" },
   { href: "/reports", label: "Reports" },
 ];
 

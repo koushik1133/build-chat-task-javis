@@ -6,7 +6,7 @@ import type { Area } from "@/lib/auth/roles";
  * file before uploading what the server would reject anyway.
  */
 
-export const ATTACHMENT_ENTITY_KINDS = ["contact", "lead", "quote", "invoice", "ticket", "record", "booking", "task", "product", "purchase_order", "document", "order", "project"] as const;
+export const ATTACHMENT_ENTITY_KINDS = ["contact", "lead", "quote", "invoice", "ticket", "record", "booking", "task", "product", "purchase_order", "document", "order", "project", "shipment"] as const;
 export type AttachmentEntityKind = (typeof ATTACHMENT_ENTITY_KINDS)[number];
 
 export const ATTACHMENT_VISIBILITIES = ["internal", "portal"] as const;
@@ -113,4 +113,5 @@ export const AREA_FOR_ENTITY: Record<AttachmentEntityKind, Area> = {
   document: "crm",
   order: "billing",
   project: "tasks",
+  shipment: "billing",
 };

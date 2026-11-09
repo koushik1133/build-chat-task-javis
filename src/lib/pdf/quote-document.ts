@@ -38,6 +38,10 @@ export interface DocParties {
   contact_billing_address?: string | null;
   /** Labels for tax rates referenced by line items (id → "GST 10%"). */
   rate_labels?: Record<string, string>;
+  /** Regime legends (reverse charge, composition, exemption...) printed under the totals. */
+  legends?: string[];
+  /** Place of supply (e.g. state code / country) printed with the legends. */
+  place_of_supply?: string | null;
 }
 
 /** Turn a stored billing address (JSON object or plain text) into printable lines. */
@@ -443,6 +447,7 @@ export function renderQuotePdf(quote: QuoteDocInput, stamp: SignatureStamp | nul
     ...taxRows(quote.tax_minor, quote.currency, quote.tax_breakdown),
     ["Total", fmtMinor(quote.total_minor, quote.currency), true],
   ]);
+  if (quote.parties?.legends?.length) drawSection(flow, "Tax", quote.parties.legends.join("\n"), { size: 8.5 });
   if (quote.notes) drawSection(flow, "Notes", quote.notes);
   if (quote.terms_text) drawSection(flow, `Terms${quote.terms_version ? ` (${quote.terms_version})` : ""}`, quote.terms_text, { size: 8.5 });
   if (stamp) drawSignature(flow, stamp, opts.timezone, opts.redactEvidence === true);
@@ -487,6 +492,7 @@ export function renderInvoicePdf(invoice: InvoiceDocInput, branding: DocBranding
     flow.page.text(flow.margin, flow.y, `Paid in full on ${fmtDateOnly(invoice.paid_at)}. Thank you.`, { size: 10, font: "Helvetica-Bold", color: [0.05, 0.45, 0.25] });
     flow.gap(20);
   }
+  if (invoice.parties?.legends?.length || invoice.parties?.place_of_supply) drawSection(flow, "Tax", [...(invoice.parties.place_of_supply ? [`Place of supply: ${invoice.parties.place_of_supply}`] : []), ...(invoice.parties.legends ?? [])].join("\n"), { size: 8.5 });
   if (invoice.notes) drawSection(flow, "Notes", invoice.notes);
   const footer = [brand, branding.support_email ?? null, `Invoice ${invoice.number}`].filter(Boolean).join("  ·  ");
   drawFooters(doc, footer, 48);

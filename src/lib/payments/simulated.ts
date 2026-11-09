@@ -61,6 +61,21 @@ export const simulatedProvider: PaymentProvider = {
   async verifyWebhook(rawBody, headers) {
     return verifySimulatedWebhook(rawBody, headers);
   },
+  async createCustomer(input) {
+    return { customerRef: `simcus_${input.contactId.replace(/[^a-z0-9]/gi, "").slice(0, 16)}` };
+  },
+  async createSetupCheckout(input) {
+    return { url: input.successUrl, setupRef: `simsetup_${Date.now().toString(36)}` };
+  },
+  async attachPaymentMethod(input) {
+    // The outcome is baked into the reference so chargeSaved is deterministic (test cards only; no money moves).
+    return { paymentRef: `simpm_${input.simulate === "decline" ? "decline" : "ok"}_${input.customerRef}` };
+  },
+  async chargeSaved(input) {
+    if (!input.paymentRef.startsWith("simpm_")) return { status: "failed", providerRef: `simch_${input.idempotencyKey.slice(0, 24)}`, error: "unknown_payment_method" };
+    if (input.paymentRef.startsWith("simpm_decline_")) return { status: "failed", providerRef: `simch_${input.idempotencyKey.slice(0, 24)}`, error: "card_declined" };
+    return { status: "succeeded", providerRef: `simch_${input.idempotencyKey.slice(0, 24)}`, error: null };
+  },
   async refund(input) {
     if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) throw new Error("Refund amount must be a positive integer");
     return { refundRef: `simrf_${input.providerRef.slice(0, 20)}_${Date.now().toString(36)}`, status: "succeeded" };

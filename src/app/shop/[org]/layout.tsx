@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { resolveStorefrontBySlug } from "@/lib/storefront/settings";
+import { RefCapture } from "@/components/shop/ref-capture";
 
 export const dynamic = "force-dynamic";
 
@@ -8,5 +9,10 @@ export default async function ShopOrgLayout({ children, params }: { children: Re
   const { org } = await params;
   const pub = await resolveStorefrontBySlug(org).catch(() => null);
   if (!pub) notFound();
-  return <>{children}</>;
+  return (
+    <>
+      <RefCapture org={org} />
+      {children}
+    </>
+  );
 }

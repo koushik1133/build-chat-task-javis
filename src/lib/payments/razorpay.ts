@@ -79,6 +79,18 @@ export const razorpayProvider: PaymentProvider = {
     }
     return parseRazorpayEvent(rawBody, headers.get("x-razorpay-event-id") ?? "");
   },
+  async createCustomer() {
+    throw new Error("Razorpay saved payment methods are not configured");
+  },
+  async createSetupCheckout() {
+    throw new Error("Razorpay saved payment methods are not configured");
+  },
+  async attachPaymentMethod() {
+    throw new Error("Razorpay saved payment methods are not configured");
+  },
+  async chargeSaved() {
+    throw new Error("Razorpay saved payment methods are not configured");
+  },
   async refund() {
     // Stub: payment links map to a payment id that POST /v1/payments/:id/refund would need.
     throw new Error("Razorpay refunds are not wired yet; refund from the Razorpay dashboard and record it manually");

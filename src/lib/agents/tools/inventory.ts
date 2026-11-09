@@ -2,6 +2,9 @@ import { z } from "zod";
 import { registerTool } from "@/lib/agents/registry";
 import type { ToolResult } from "@/lib/agents/types";
 import { getProduct } from "@/lib/inventory/products";
+import { listLocations, type LocationDTO } from "@/lib/inventory/locations";
+import { listLevels } from "@/lib/inventory/levels";
+import { createTransfer, receiveTransfer, shipTransfer } from "@/lib/inventory/transfers";
 import { adjustStock, checkinEquipment, checkoutEquipment, isInsufficientStock, listCheckouts } from "@/lib/inventory/stock";
 
 /** Inventory tools: stock adjustments and equipment checkouts (products.search / products.low_stock live in finance.ts). */
@@ -130,6 +133,98 @@ registerTool<z.infer<typeof ListCheckoutsInput>>({
       return { ok: true, data, summary: `${rows.length} checkout(s)${overdue ? `, ${overdue} overdue` : ""}` };
     } catch (err) {
       return fail(`List failed: ${errMsg(err)}`);
+    }
+  },
+});
+
+/* ---------- inventory.locations ---------- */
+const LocationsInput = z.object({ include_inactive: z.boolean().optional() });
+registerTool<z.infer<typeof LocationsInput>>({
+  name: "inventory.locations",
+  module: "inventory",
+  description: "List stock locations (warehouses, stores, vans) with their ids and which one is the default.",
+  input: LocationsInput,
+  parameters: { type: "object", properties: { include_inactive: { type: "boolean" } } },
+  scope: "read",
+  preview: () => "List stock locations",
+  async run(ctx, input) {
+    try {
+      const rows = await listLocations(ctx.userId, { includeInactive: input.include_inactive ?? false });
+      return { ok: true, data: rows.map((l) => ({ id: l.id, name: l.name, code: l.code, kind: l.kind, is_default: l.is_default, active: l.active })), summary: `${rows.length} location(s)` };
+    } catch (err) {
+      return fail(`List failed: ${errMsg(err)}`);
+    }
+  },
+});
+
+/* ---------- inventory.levels ---------- */
+const LevelsInput = z.object({ product_id: z.string().max(100).optional(), location_id: z.string().max(100).optional(), limit: z.number().int().min(1).max(200).optional() });
+registerTool<z.infer<typeof LevelsInput>>({
+  name: "inventory.levels",
+  module: "inventory",
+  description: "Stock on hand / reserved / available per product and location. Filter by product_id or location_id.",
+  input: LevelsInput,
+  parameters: { type: "object", properties: { product_id: { type: "string" }, location_id: { type: "string" }, limit: { type: "integer" } } },
+  scope: "read",
+  preview: () => "Read stock levels by location",
+  async run(ctx, input) {
+    try {
+      const rows = (await listLevels(ctx.userId, { productId: input.product_id ?? null, locationId: input.location_id ?? null })).slice(0, input.limit ?? 50);
+      return { ok: true, data: rows.map((r) => ({ product: r.product_name, sku: r.product_sku, location: r.location_name, on_hand: r.on_hand, reserved: r.reserved, available: r.available, low: r.low })), summary: `${rows.length} level row(s)` };
+    } catch (err) {
+      return fail(`Levels failed: ${errMsg(err)}`);
+    }
+  },
+});
+
+/* ---------- inventory.transfer_stock ---------- */
+const TransferInput = z.object({
+  product_id: z.string().min(1).max(100),
+  qty: z.number().int().min(1).max(1_000_000),
+  from_location: z.string().min(1).max(100).describe("Location id, name or code"),
+  to_location: z.string().min(1).max(100).describe("Location id, name or code"),
+  receive_now: z.boolean().optional().describe("Also receive at the destination straight away"),
+  note: z.string().max(500).optional(),
+});
+function pickLocation(all: LocationDTO[], ref: string): LocationDTO | null {
+  const r = ref.trim().toLowerCase();
+  return all.find((l) => l.id === ref) ?? all.find((l) => l.code?.toLowerCase() === r) ?? all.find((l) => l.name.toLowerCase() === r) ?? null;
+}
+registerTool<z.infer<typeof TransferInput>>({
+  name: "inventory.transfer_stock",
+  module: "inventory",
+  description: "Move stock of a product from one location to another (creates the transfer and ships it; optionally receives it immediately).",
+  input: TransferInput,
+  parameters: {
+    type: "object",
+    properties: {
+      product_id: { type: "string" },
+      qty: { type: "integer" },
+      from_location: { type: "string", description: "Location id, name or code" },
+      to_location: { type: "string", description: "Location id, name or code" },
+      receive_now: { type: "boolean" },
+      note: { type: "string" },
+    },
+    required: ["product_id", "qty", "from_location", "to_location"],
+  },
+  scope: "write",
+  requiresApproval: true,
+  risk: "medium",
+  preview: (i) => `Transfer ${i.qty} × ${i.product_id} from ${i.from_location} to ${i.to_location}${i.receive_now ? " (receive immediately)" : ""}`,
+  async run(ctx, input) {
+    try {
+      const all = await listLocations(ctx.userId);
+      const from = pickLocation(all, input.from_location);
+      const to = pickLocation(all, input.to_location);
+      if (!from) return fail(`Location not found: ${input.from_location}`);
+      if (!to) return fail(`Location not found: ${input.to_location}`);
+      let t = await createTransfer(ctx.userId, { from_location_id: from.id, to_location_id: to.id, lines: [{ product_id: input.product_id, qty: input.qty }], note: input.note ?? null }, actor(ctx));
+      t = await shipTransfer(ctx.userId, t.id, actor(ctx));
+      if (input.receive_now) t = await receiveTransfer(ctx.userId, t.id, {}, actor(ctx));
+      return { ok: true, data: { id: t.id, number: t.number, status: t.status }, summary: `${t.number}: ${input.qty} moved ${from.name} → ${to.name} (${t.status.replace("_", " ")})` };
+    } catch (err) {
+      if (isInsufficientStock(err)) return fail(`Not enough stock at the source: ${errMsg(err)}`);
+      return fail(`Transfer failed: ${errMsg(err)}`);
     }
   },
 });

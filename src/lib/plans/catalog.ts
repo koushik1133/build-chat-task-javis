@@ -15,10 +15,12 @@ export const LIMIT_KEYS = [
   "storage_mb",
   "api_rate_limit_per_min",
   "api_keys",
+  "locations",
 ] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
 
 export const FEATURE_KEYS = [
+  "tax_compliance",
   "automations_v2",
   "marketplace_publish",
   "sso_scim",
@@ -29,11 +31,16 @@ export const FEATURE_KEYS = [
   "voice_campaigns",
   "custom_domain",
   "priority_support",
+  "memberships",
+  "surveys",
+  "loyalty",
+  "gift_cards",
+  "shipping",
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
 /** Measured quantities. Metrics that map to a limit are enforceable. */
-export const METRICS = ["contacts", "seats", "child_workspaces", "storage_mb", "api_keys", "ai_credits_used", "api_calls"] as const;
+export const METRICS = ["contacts", "seats", "child_workspaces", "storage_mb", "api_keys", "ai_credits_used", "api_calls", "locations"] as const;
 export type Metric = (typeof METRICS)[number];
 
 export const METRIC_LIMIT: Record<Metric, LimitKey> = {
@@ -44,6 +51,7 @@ export const METRIC_LIMIT: Record<Metric, LimitKey> = {
   api_keys: "api_keys",
   ai_credits_used: "ai_credits_included_per_month",
   api_calls: "api_rate_limit_per_min",
+  locations: "locations",
 };
 
 export const METRIC_LABEL: Record<Metric, string> = {
@@ -54,9 +62,11 @@ export const METRIC_LABEL: Record<Metric, string> = {
   api_keys: "API keys",
   ai_credits_used: "AI credits this month",
   api_calls: "API calls this month",
+  locations: "Stock locations",
 };
 
 export const FEATURE_LABEL: Record<FeatureKey, string> = {
+  tax_compliance: "Tax compliance and e-invoicing",
   automations_v2: "Visual automations",
   marketplace_publish: "Publish to marketplace",
   sso_scim: "SSO and SCIM",
@@ -67,6 +77,11 @@ export const FEATURE_LABEL: Record<FeatureKey, string> = {
   voice_campaigns: "Voice campaigns",
   custom_domain: "Custom domain",
   priority_support: "Priority support",
+  shipping: "Shipping labels and returns",
+  memberships: "Customer memberships and subscriptions",
+  surveys: "Surveys and reviews",
+  loyalty: "Loyalty program",
+  gift_cards: "Gift cards",
 };
 
 export type CurrencyCode = "USD" | "INR" | "EUR" | "GBP";
@@ -117,7 +132,7 @@ export const PLANS: Readonly<Record<PlanKey, PlanDef>> = {
     price: P(0, 0, 0, 0),
     currencyPrices: {},
     entitlements: {
-      limits: { seats: 2, child_workspaces: 0, contacts: 250, ai_credits_included_per_month: 0, storage_mb: 250, api_rate_limit_per_min: 30, api_keys: 1 },
+      limits: { seats: 2, child_workspaces: 0, contacts: 250, ai_credits_included_per_month: 0, storage_mb: 250, api_rate_limit_per_min: 30, api_keys: 1, locations: 1 },
       features: feats(["webchat_widget"]),
       trial_days: 0,
     },
@@ -135,8 +150,8 @@ export const PLANS: Readonly<Record<PlanKey, PlanDef>> = {
       GBP: P(2300, 23000, 400, 4000),
     },
     entitlements: {
-      limits: { seats: 5, child_workspaces: 0, contacts: 2_500, ai_credits_included_per_month: 5_000, storage_mb: 2_048, api_rate_limit_per_min: 60, api_keys: 5 },
-      features: feats(["automations_v2", "webchat_widget", "accounting_sync"]),
+      limits: { seats: 5, child_workspaces: 0, contacts: 2_500, ai_credits_included_per_month: 5_000, storage_mb: 2_048, api_rate_limit_per_min: 60, api_keys: 5, locations: 3 },
+      features: feats(["memberships", "automations_v2", "webchat_widget", "accounting_sync", "surveys", "gift_cards", "shipping"]),
       trial_days: 0,
     },
   },
@@ -153,8 +168,8 @@ export const PLANS: Readonly<Record<PlanKey, PlanDef>> = {
       GBP: P(6300, 63000, 800, 8000),
     },
     entitlements: {
-      limits: { seats: 15, child_workspaces: 3, contacts: 25_000, ai_credits_included_per_month: 25_000, storage_mb: 20_480, api_rate_limit_per_min: 300, api_keys: 20 },
-      features: feats(["automations_v2", "marketplace_publish", "accounting_sync", "advanced_reports", "webchat_widget", "voice_campaigns", "custom_domain"]),
+      limits: { seats: 15, child_workspaces: 3, contacts: 25_000, ai_credits_included_per_month: 25_000, storage_mb: 20_480, api_rate_limit_per_min: 300, api_keys: 20, locations: 10 },
+      features: feats(["memberships", "tax_compliance", "automations_v2", "marketplace_publish", "accounting_sync", "advanced_reports", "webchat_widget", "voice_campaigns", "custom_domain", "surveys", "gift_cards", "loyalty", "shipping"]),
       trial_days: 14,
     },
   },
@@ -171,7 +186,7 @@ export const PLANS: Readonly<Record<PlanKey, PlanDef>> = {
       GBP: P(15900, 159000, 1200, 12000),
     },
     entitlements: {
-      limits: { seats: 50, child_workspaces: 25, contacts: 250_000, ai_credits_included_per_month: 100_000, storage_mb: 204_800, api_rate_limit_per_min: 1_200, api_keys: 100 },
+      limits: { seats: 50, child_workspaces: 25, contacts: 250_000, ai_credits_included_per_month: 100_000, storage_mb: 204_800, api_rate_limit_per_min: 1_200, api_keys: 100, locations: null },
       features: feats([...FEATURE_KEYS]),
       trial_days: 0,
     },
@@ -185,7 +200,7 @@ export const PLANS: Readonly<Record<PlanKey, PlanDef>> = {
     price: P(0, 0, 0, 0),
     currencyPrices: {},
     entitlements: {
-      limits: { seats: null, child_workspaces: null, contacts: null, ai_credits_included_per_month: null, storage_mb: null, api_rate_limit_per_min: 6_000, api_keys: null },
+      limits: { seats: null, child_workspaces: null, contacts: null, ai_credits_included_per_month: null, storage_mb: null, api_rate_limit_per_min: 6_000, api_keys: null, locations: null },
       features: feats([...FEATURE_KEYS]),
       trial_days: 0,
     },

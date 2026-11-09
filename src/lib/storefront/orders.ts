@@ -343,7 +343,7 @@ export async function markOrderPaidForInvoice(dataId: string, invoiceId: string)
   return fresh;
 }
 
-export async function fulfillOrder(dataId: string, id: string, actorId?: string | null): Promise<OrderDTO> {
+export async function fulfillOrder(dataId: string, id: string, actorId?: string | null, opts: { notify?: boolean } = {}): Promise<OrderDTO> {
   const order = await getOrder(dataId, id);
   if (!order) throw new Error("Order not found");
   if (order.status === "fulfilled") return order;
@@ -352,6 +352,7 @@ export async function fulfillOrder(dataId: string, id: string, actorId?: string 
   if (!moved) throw new Error("Order changed while fulfilling; reload and try again");
   const fresh = (await getOrder(dataId, id)) ?? order;
   void emitEvent(dataId, { type: "order.fulfilled", entity: "order", entityId: id, data: { number: order.number, customer_email: order.customer_email, contact_id: order.contact_id, actor: actorId ?? null } });
+  if (opts.notify === false) return fresh; // shipping lane sends its own dispatch email with the tracking link
   try {
     const from = await shopName(dataId);
     const link = await issueOrderLink(dataId, fresh);

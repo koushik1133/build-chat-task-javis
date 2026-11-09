@@ -168,7 +168,7 @@ export async function createCreditNote(dataId: string, input: CreditNoteInput): 
   }
   if (!items || items.length === 0) throw new Error("Add at least one line item or reference an invoice");
 
-  const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, items)]);
+  const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, items, { contactId })]);
   if (inv) {
     // Credits against an invoice can never exceed what was invoiced.
     const prior = await creditedAgainstInvoice(dataId, inv.id);
@@ -280,7 +280,13 @@ export async function refundPayment(dataId: string, invoiceId: string, body: Ref
 
   let result: Awaited<ReturnType<typeof provider.refund>>;
   try {
-    result = await provider.refund({ providerRef: p.provider_ref ?? p.id, amountMinor: body.amount_minor, currency: p.currency, invoiceId, reason: body.reason ?? null });
+    if (p.provider === "gift_card") {
+      // Gift-card payments are refunded back onto the card, never through a payment provider.
+      const { refundGiftCardPayment } = await import("@/lib/engagement/giftcards");
+      result = { refundRef: await refundGiftCardPayment(dataId, p.provider_ref ?? "", body.amount_minor, invoiceId), status: "succeeded" };
+    } else {
+      result = await provider.refund({ providerRef: p.provider_ref ?? p.id, amountMinor: body.amount_minor, currency: p.currency, invoiceId, reason: body.reason ?? null });
+    }
   } catch (err) {
     // Provider refused: release the claim (only our own increment) so the amount stays refundable.
     await query(

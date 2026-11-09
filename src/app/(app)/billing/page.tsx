@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Ban, Copy, FileCheck2, FileDown, FileMinus, Link2, Loader2, Paperclip, Plus, Receipt, RefreshCw, RotateCcw, Send, Sparkles, Trash2, XCircle } from "lucide-react";
+import { Ban, Copy, FileCheck2, FileDown, FileMinus, Link2, Loader2, Paperclip, Plus, Receipt, RefreshCw, RotateCcw, Send, Sparkles, Tag, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import { BLANK_ITEM, LineItemsEditor, StatusPill, TotalsSummary, useDocTotals, u
 import { RecurringTab } from "@/components/billing/recurring-tab";
 import { SettingsTab } from "@/components/billing/settings-tab";
 import { CreditNoteDialog, CreditNoteList, RefundDialog, type CreditNote } from "@/components/billing/credit-notes";
+import { InvoiceDiscountDialog } from "@/components/engagement/invoice-discount";
 import { FilesDialog, type FilesTarget } from "@/components/attachments/files-dialog";
 
 interface Contact { id: string; full_name: string; email: string | null; company: string | null }
@@ -55,6 +56,7 @@ export default function BillingPage() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [dialog, setDialog] = useState<null | "quote" | "invoice">(null);
   const [creditFor, setCreditFor] = useState<Invoice | null>(null);
+  const [discountFor, setDiscountFor] = useState<Invoice | null>(null);
   const [refundFor, setRefundFor] = useState<Invoice | null>(null);
   const [filesFor, setFilesFor] = useState<FilesTarget | null>(null);
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
@@ -290,6 +292,7 @@ export default function BillingPage() {
               onNew={() => setDialog("invoice")}
               onCopy={copy}
               onCreditNote={(i) => setCreditFor(i)}
+              onDiscount={(i) => setDiscountFor(i)}
               onRefund={(i) => setRefundFor(i)}
               onSend={(i) =>
                 act(i.id, async () => {
@@ -328,6 +331,17 @@ export default function BillingPage() {
             setCreditFor(null);
             setNotice({ tone: "success", text: msg });
             setInvoiceView("credit_notes");
+            void load();
+          }}
+        />
+      )}
+      {discountFor && (
+        <InvoiceDiscountDialog
+          invoice={discountFor}
+          onClose={() => setDiscountFor(null)}
+          onDone={(msg) => {
+            setDiscountFor(null);
+            setNotice({ tone: "success", text: msg });
             void load();
           }}
         />
@@ -454,10 +468,10 @@ const QuoteRow = memo(function QuoteRow({ q, busy, onSend, onConvert, onDelete, 
   );
 });
 
-function InvoiceList({ focusId, invoices, syncState, busyId, onNew, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles }: {
+function InvoiceList({ focusId, invoices, syncState, busyId, onNew, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles, onDiscount }: {
   focusId?: string | null; invoices: Invoice[]; syncState: Record<string, SyncState> | null; busyId: string | null; onNew: () => void; onFiles: (i: Invoice) => void;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
-  onCreditNote: (i: Invoice) => void; onRefund: (i: Invoice) => void;
+  onCreditNote: (i: Invoice) => void; onRefund: (i: Invoice) => void; onDiscount: (i: Invoice) => void;
 }) {
   if (invoices.length === 0) {
     return (
@@ -476,16 +490,16 @@ function InvoiceList({ focusId, invoices, syncState, busyId, onNew, onSend, onPa
   return (
     <ul className="divide-y divide-border rounded-xl border border-border bg-card" aria-label="Invoices">
       {invoices.map((i) => (
-        <InvoiceRow key={i.id} i={i} focused={focusId === i.id} sync={syncState ? (syncState[i.id] ?? (i.status === "draft" || i.status === "void" ? null : "pending")) : null} busy={busyId === i.id} onFiles={onFiles} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} onCreditNote={onCreditNote} onRefund={onRefund} />
+        <InvoiceRow key={i.id} i={i} focused={focusId === i.id} sync={syncState ? (syncState[i.id] ?? (i.status === "draft" || i.status === "void" ? null : "pending")) : null} busy={busyId === i.id} onFiles={onFiles} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} onCreditNote={onCreditNote} onRefund={onRefund} onDiscount={onDiscount} />
       ))}
     </ul>
   );
 }
 
-const InvoiceRow = memo(function InvoiceRow({ i, focused, sync, busy, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles }: {
+const InvoiceRow = memo(function InvoiceRow({ i, focused, sync, busy, onSend, onPayLink, onVoid, onCopy, onCreditNote, onRefund, onFiles, onDiscount }: {
   i: Invoice; focused?: boolean; sync: SyncState | null; busy: boolean; onFiles: (i: Invoice) => void;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
-  onCreditNote: (i: Invoice) => void; onRefund: (i: Invoice) => void;
+  onCreditNote: (i: Invoice) => void; onRefund: (i: Invoice) => void; onDiscount: (i: Invoice) => void;
 }) {
   const open = !["paid", "void"].includes(i.status);
   const issued = !["draft", "void"].includes(i.status);
@@ -517,6 +531,11 @@ const InvoiceRow = memo(function InvoiceRow({ i, focused, sync, busy, onSend, on
         {open && (
           <Button size="sm" variant="outline" touch disabled={busy} onClick={() => onPayLink(i)} title="Create and copy a payment link">
             <Link2 className="h-3.5 w-3.5" aria-hidden /> Pay link
+          </Button>
+        )}
+        {open && (
+          <Button size="sm" variant="outline" touch disabled={busy} onClick={() => onDiscount(i)} title="Apply a voucher, points or a gift card">
+            <Tag className="h-3.5 w-3.5" aria-hidden /> Discount
           </Button>
         )}
         {issued && (

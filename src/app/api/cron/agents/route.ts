@@ -31,6 +31,12 @@ import { processCalendarEvents, syncDue as calendarSyncDue } from "@/lib/calsync
 import { processChatEvents } from "@/lib/chatops/process";
 import { processAlerts } from "@/lib/alerts/process";
 import { grantMonthlyCredits, renewDue } from "@/lib/plans/cron";
+import { billDue, sweepExpiring } from "@/lib/memberships/billing";
+import { advanceSimulated, syncTracking } from "@/lib/shipping/tracking";
+import { taxFilingReminders } from "@/lib/tax-compliance/reminders";
+import { processEngagementEvents } from "@/lib/engagement/surveys";
+import { expirePoints } from "@/lib/engagement/loyalty";
+import { expireGiftCards } from "@/lib/engagement/giftcards";
 import { withRequestContext } from "@/lib/log/context";
 import { logger } from "@/lib/log/logger";
 import { recordCronMetrics } from "@/lib/metrics/registry";
@@ -128,7 +134,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, report_schedules: 0, digests: 0, documents_expired: 0, tasks_overdue: 0, carts_abandoned: 0, marketing_sent: 0, marketing_delivery: 0, sequence_steps: 0, sequence_joins: 0, attachments_purged: 0, shift_reminders: 0, calsync_events: 0, calsync_synced: 0, chat_events: 0, alerts: 0, plans_renewed: 0, plan_credits: 0, hourly_ran: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, report_schedules: 0, digests: 0, documents_expired: 0, tasks_overdue: 0, carts_abandoned: 0, marketing_sent: 0, marketing_delivery: 0, sequence_steps: 0, sequence_joins: 0, attachments_purged: 0, shift_reminders: 0, calsync_events: 0, calsync_synced: 0, chat_events: 0, alerts: 0, plans_renewed: 0, plan_credits: 0, memberships_billed: 0, memberships_swept: 0, shipments_advanced: 0, shipments_synced: 0, tax_reminders: 0, engagement_events: 0, points_expired: 0, gift_cards_expired: 0, hourly_ran: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -211,6 +217,14 @@ async function handleTick(req: Request) {
   try { counts.chat_events = (await processChatEvents(200)).sent; } catch (err) { console.error("[cron/agents] chat events failed:", err); }
   try { counts.plans_renewed = (await renewDue(100)).renewed; } catch (err) { console.error("[cron/agents] plan renewals failed:", err); }
   try { counts.plan_credits = (await grantMonthlyCredits(100)).granted; } catch (err) { console.error("[cron/agents] plan credit grants failed:", err); }
+  try { await billDue(100); counts.memberships_billed = 1; } catch (err) { console.error("[cron/agents] membership billing failed:", err); }
+  try { await sweepExpiring(100); counts.memberships_swept = 1; } catch (err) { console.error("[cron/agents] membership sweep failed:", err); }
+  try { await advanceSimulated(100); counts.shipments_advanced = 1; } catch (err) { console.error("[cron/agents] simulated shipping failed:", err); }
+  try { await syncTracking(50); counts.shipments_synced = 1; } catch (err) { console.error("[cron/agents] tracking sync failed:", err); }
+  try { await processEngagementEvents(200); counts.engagement_events = 1; } catch (err) { console.error("[cron/agents] engagement events failed:", err); }
+  try { await expirePoints(200); counts.points_expired = 1; } catch (err) { console.error("[cron/agents] points expiry failed:", err); }
+  try { await expireGiftCards(100); counts.gift_cards_expired = 1; } catch (err) { console.error("[cron/agents] gift card expiry failed:", err); }
+  if (counts.hourly_ran) { try { await taxFilingReminders(100); counts.tax_reminders = 1; } catch (err) { console.error("[cron/agents] tax reminders failed:", err); } }
   try { counts.alerts = (await processAlerts(50)).evaluated; } catch (err) { console.error("[cron/agents] alerts failed:", err); }
   try { counts.documents_expired = (await expireDocuments(200)).expired; } catch (err) { console.error("[cron/agents] document expiry failed:", err); }
   try { counts.invoices_overdue = (await markOverdue(200)).marked; } catch (err) { console.error("[cron/agents] overdue sweep failed:", err); }

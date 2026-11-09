@@ -3530,3 +3530,609 @@ CREATE INDEX ASYNC IF NOT EXISTS idx_favorites_member ON favorites (user_id, mem
 
 ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMPTZ;
 
+
+-- ==== PHASE 11 LANE A ====
+-- Phase 11 lane A: multi-location inventory, transfers and stock counts.
+-- DSQL rules: no FKs, JSON as TEXT, CREATE INDEX ASYNC, one DDL per statement.
+
+CREATE TABLE IF NOT EXISTS locations (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  code        TEXT,
+  kind        TEXT NOT NULL DEFAULT 'warehouse',   -- store|warehouse|van|virtual
+  address     TEXT,                                 -- JSON
+  active      BOOLEAN NOT NULL DEFAULT TRUE,
+  is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_locations_user ON locations (user_id, active);
+
+CREATE TABLE IF NOT EXISTS stock_levels (
+  user_id        TEXT NOT NULL,
+  product_id     TEXT NOT NULL,
+  location_id    TEXT NOT NULL,
+  on_hand        INTEGER NOT NULL DEFAULT 0,
+  reserved       INTEGER NOT NULL DEFAULT 0,
+  reorder_point  INTEGER,                           -- per-location override (NULL = none)
+  updated_at     TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, product_id, location_id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_stock_levels_location ON stock_levels (user_id, location_id);
+
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS location_id TEXT;
+
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS transfer_id TEXT;
+
+CREATE TABLE IF NOT EXISTS stock_transfers (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  number            TEXT NOT NULL,                  -- TRF-000001 via doc_counters kind transfer
+  from_location_id  TEXT NOT NULL,
+  to_location_id    TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'draft',  -- draft|in_transit|received|cancelled
+  note              TEXT,
+  created_by        TEXT,
+  shipped_at        TIMESTAMPTZ,
+  received_at       TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_stock_transfers_user ON stock_transfers (user_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS stock_transfer_lines (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  transfer_id   TEXT NOT NULL,
+  product_id    TEXT NOT NULL,
+  qty           INTEGER NOT NULL,
+  received_qty  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_stock_transfer_lines_transfer ON stock_transfer_lines (user_id, transfer_id);
+
+CREATE TABLE IF NOT EXISTS stock_counts (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  location_id  TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'open',        -- open|counted|applied
+  created_by   TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  applied_at   TIMESTAMPTZ
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_stock_counts_user ON stock_counts (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS stock_count_lines (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  count_id      TEXT NOT NULL,
+  product_id    TEXT NOT NULL,
+  expected_qty  INTEGER NOT NULL DEFAULT 0,
+  counted_qty   INTEGER
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_stock_count_lines_count ON stock_count_lines (user_id, count_id);
+
+ALTER TABLE storefronts ADD COLUMN IF NOT EXISTS fulfil_location_id TEXT;
+
+
+-- ==== PHASE 11 LANE B ====
+-- ==== PHASE 11 LANE B: customer subscriptions & memberships ====
+CREATE TABLE IF NOT EXISTS membership_plans (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  slug            TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  description_md  TEXT,
+  amount_minor    BIGINT NOT NULL DEFAULT 0,
+  currency        TEXT NOT NULL DEFAULT 'USD',
+  interval        TEXT NOT NULL DEFAULT 'month',      -- week|month|quarter|year
+  interval_count  INTEGER NOT NULL DEFAULT 1,
+  trial_days      INTEGER NOT NULL DEFAULT 0,
+  setup_fee_minor BIGINT NOT NULL DEFAULT 0,
+  tax_rate_id     TEXT,
+  product_id      TEXT,
+  max_members     INTEGER,
+  allow_pause     BOOLEAN NOT NULL DEFAULT TRUE,
+  allow_quantity  BOOLEAN NOT NULL DEFAULT FALSE,
+  benefits        TEXT,                                -- JSON [{label}]
+  visibility      TEXT NOT NULL DEFAULT 'public',      -- public|private
+  active          BOOLEAN NOT NULL DEFAULT TRUE,
+  sort            INTEGER NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_membership_plans_user_slug ON membership_plans (user_id, slug);
+CREATE INDEX ASYNC IF NOT EXISTS idx_membership_plans_user_sort ON membership_plans (user_id, sort);
+
+CREATE TABLE IF NOT EXISTS customer_subscriptions (
+  id                    TEXT PRIMARY KEY,
+  user_id               TEXT NOT NULL,
+  plan_id               TEXT NOT NULL,
+  contact_id            TEXT NOT NULL,
+  status                TEXT NOT NULL,                 -- incomplete|trialing|active|past_due|paused|cancelled|expired
+  quantity              INTEGER NOT NULL,
+  start_at              TIMESTAMPTZ NOT NULL,
+  trial_ends_at         TIMESTAMPTZ,
+  current_period_start  TIMESTAMPTZ,
+  current_period_end    TIMESTAMPTZ,
+  next_charge_at        TIMESTAMPTZ,
+  cancel_at_period_end  BOOLEAN NOT NULL DEFAULT FALSE,
+  cancelled_at          TIMESTAMPTZ,
+  pause_until           TIMESTAMPTZ,
+  payment_ref           TEXT,
+  provider              TEXT,
+  failed_attempts       INTEGER NOT NULL DEFAULT 0,
+  last_failure_at       TIMESTAMPTZ,
+  last_invoice_id       TEXT,
+  pending_adjustment_minor BIGINT NOT NULL DEFAULT 0,
+  trial_reminder_at     TIMESTAMPTZ,
+  join_token_hash       TEXT,
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX ASYNC IF NOT EXISTS idx_customer_subs_user_status ON customer_subscriptions (user_id, status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_customer_subs_contact ON customer_subscriptions (user_id, contact_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_customer_subs_plan ON customer_subscriptions (plan_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_customer_subs_due ON customer_subscriptions (next_charge_at);
+
+CREATE TABLE IF NOT EXISTS subscription_charges (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  subscription_id  TEXT NOT NULL,
+  invoice_id       TEXT,
+  period_start     TIMESTAMPTZ NOT NULL,
+  period_end       TIMESTAMPTZ NOT NULL,
+  amount_minor     BIGINT NOT NULL DEFAULT 0,
+  currency         TEXT NOT NULL DEFAULT 'USD',
+  status           TEXT NOT NULL DEFAULT 'pending',    -- pending|paid|failed|void
+  attempt          INTEGER NOT NULL DEFAULT 0,
+  provider_ref     TEXT,
+  error            TEXT,
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_subscription_charges_period ON subscription_charges (subscription_id, period_start);
+CREATE INDEX ASYNC IF NOT EXISTS idx_subscription_charges_invoice ON subscription_charges (invoice_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_subscription_charges_user ON subscription_charges (user_id, created_at);
+
+
+-- ==== PHASE 11 LANE C ====
+-- Phase 11 lane C: shipping, tracking and returns
+
+CREATE TABLE IF NOT EXISTS shipping_connections (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  provider         TEXT NOT NULL,                        -- easypost | shippo (simulated needs no row)
+  auth             TEXT,                                 -- secure-store encrypted JSON {api_key}
+  ship_from        TEXT,                                 -- JSON address
+  default_package  TEXT,                                 -- JSON {weight_grams,length_cm,width_cm,height_cm}
+  status           TEXT NOT NULL DEFAULT 'active',       -- active|disabled
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_shipping_connections_user_provider ON shipping_connections (user_id, provider);
+
+CREATE TABLE IF NOT EXISTS shipping_rules (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  kind        TEXT NOT NULL,                             -- flat|weight_tiers|free_over|carrier_calculated
+  config      TEXT NOT NULL DEFAULT '{}',                -- JSON per kind
+  countries   TEXT NOT NULL DEFAULT '[]',                -- JSON array of ISO-2 / names; empty = everywhere
+  active      BOOLEAN NOT NULL DEFAULT TRUE,
+  sort        INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_shipping_rules_user ON shipping_rules (user_id, sort);
+
+CREATE TABLE IF NOT EXISTS shipments (
+  id                     TEXT PRIMARY KEY,
+  user_id                TEXT NOT NULL,
+  order_id               TEXT,
+  return_id              TEXT,
+  status                 TEXT NOT NULL DEFAULT 'draft',  -- draft|label_purchased|in_transit|out_for_delivery|delivered|exception|returned|void
+  carrier                TEXT,
+  service                TEXT,
+  rate_minor             BIGINT NOT NULL DEFAULT 0,
+  currency               TEXT NOT NULL DEFAULT 'USD',
+  tracking_number        TEXT,
+  tracking_url           TEXT,
+  label_url_or_attachment_id TEXT,
+  weight_grams           INTEGER,
+  dimensions             TEXT,                           -- JSON {length_cm,width_cm,height_cm}
+  to_address             TEXT,
+  from_address           TEXT,
+  items                  TEXT NOT NULL DEFAULT '[]',     -- JSON [{product_id,description,qty}]
+  insured_minor          BIGINT NOT NULL DEFAULT 0,
+  provider_ref           TEXT,
+  purchased_at           TIMESTAMPTZ,
+  delivered_at           TIMESTAMPTZ,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_shipments_user_created ON shipments (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_shipments_order ON shipments (user_id, order_id);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_shipments_tracking ON shipments (user_id, carrier, tracking_number);
+
+CREATE TABLE IF NOT EXISTS shipment_events (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  shipment_id  TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  description  TEXT,
+  location     TEXT,
+  occurred_at  TIMESTAMPTZ NOT NULL,
+  raw_hash     TEXT
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_shipment_events_unique ON shipment_events (shipment_id, occurred_at, status);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_shipment_events_user ON shipment_events (user_id, shipment_id);
+
+CREATE TABLE IF NOT EXISTS return_requests (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  order_id    TEXT NOT NULL,
+  contact_id  TEXT,
+  status      TEXT NOT NULL DEFAULT 'requested',         -- requested|approved|rejected|label_sent|received|refunded|closed
+  reason      TEXT,
+  items       TEXT NOT NULL DEFAULT '[]',                -- JSON [{product_id,description,qty}]
+  resolution  TEXT NOT NULL DEFAULT 'refund',            -- refund|exchange|store_credit
+  notes       TEXT,
+  refund_minor BIGINT NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_return_requests_user ON return_requests (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_return_requests_order ON return_requests (user_id, order_id);
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS weight_grams INTEGER;
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS hs_code TEXT;
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_method TEXT;
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_quote TEXT;
+
+ALTER TABLE storefronts ADD COLUMN IF NOT EXISTS return_window_days INTEGER;
+
+
+-- ==== PHASE 11 LANE D ====
+-- Phase 11 lane D: country tax compliance (GST / VAT / US sales tax, e-invoicing, filings)
+CREATE TABLE IF NOT EXISTS tax_profiles (
+  user_id             TEXT PRIMARY KEY,
+  regime              TEXT NOT NULL DEFAULT 'generic',
+  country             TEXT,
+  state_province      TEXT,
+  registration_number TEXT,
+  registration_type   TEXT NOT NULL DEFAULT 'regular',
+  filing_frequency    TEXT NOT NULL DEFAULT 'quarterly',
+  e_invoicing_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  settings            TEXT NOT NULL DEFAULT '{}',
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS tax_country TEXT;
+
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS tax_state TEXT;
+
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS tax_registration_type TEXT;
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_sac_code TEXT;
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS tax_category TEXT;
+
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS place_of_supply TEXT;
+
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS reverse_charge BOOLEAN;
+
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS tax_regime TEXT;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS place_of_supply TEXT;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS reverse_charge BOOLEAN;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax_regime TEXT;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS e_invoice_ref TEXT;
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS e_invoice_status TEXT;
+
+CREATE TABLE IF NOT EXISTS tax_filings (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  regime        TEXT NOT NULL,
+  period_start  TIMESTAMPTZ NOT NULL,
+  period_end    TIMESTAMPTZ NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'draft',
+  totals        TEXT NOT NULL DEFAULT '{}',
+  report_hash   TEXT,
+  filed_ref     TEXT,
+  filed_at      TIMESTAMPTZ,
+  notes         TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_tax_filings_user_period ON tax_filings (user_id, period_start);
+
+CREATE TABLE IF NOT EXISTS e_invoices (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  invoice_id    TEXT NOT NULL,
+  format        TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'draft',
+  payload       TEXT,
+  payload_hash  TEXT,
+  provider_ref  TEXT,
+  error         TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_e_invoices_invoice_format ON e_invoices (invoice_id, format);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_e_invoices_user_created ON e_invoices (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS tax_exemptions (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  contact_id      TEXT NOT NULL,
+  jurisdiction    TEXT NOT NULL,
+  certificate_ref TEXT,
+  expires_at      TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_tax_exemptions_user_contact ON tax_exemptions (user_id, contact_id);
+
+
+-- ==== PHASE 11 LANE E ====
+-- Phase 11 / Lane E: customer engagement (surveys, reviews, loyalty, gift cards, vouchers, referrals).
+-- DSQL rules: no FKs/triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block.
+
+CREATE TABLE IF NOT EXISTS surveys (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  questions TEXT NOT NULL,
+  trigger_event TEXT,
+  delay_hours INTEGER NOT NULL,
+  channel TEXT NOT NULL,
+  active BOOLEAN NOT NULL,
+  thank_you_md TEXT,
+  public_review_prompt BOOLEAN NOT NULL,
+  review_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_surveys_user ON surveys (user_id, active);
+
+CREATE TABLE IF NOT EXISTS survey_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  survey_id TEXT NOT NULL,
+  contact_id TEXT,
+  entity_kind TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  send_after TIMESTAMPTZ,
+  sent_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_survey_requests_entity ON survey_requests (survey_id, entity_kind, entity_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_survey_requests_due ON survey_requests (status, send_after);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_survey_requests_user ON survey_requests (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS survey_responses (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  survey_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  contact_id TEXT,
+  score INTEGER,
+  answers TEXT NOT NULL,
+  comment TEXT,
+  public BOOLEAN NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_survey_responses_request ON survey_responses (request_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_survey_responses_user ON survey_responses (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_survey_responses_survey ON survey_responses (survey_id, created_at);
+
+CREATE TABLE IF NOT EXISTS testimonials (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  response_id TEXT NOT NULL,
+  quote TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  rating INTEGER,
+  featured BOOLEAN NOT NULL,
+  published BOOLEAN NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_testimonials_response ON testimonials (user_id, response_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_testimonials_user ON testimonials (user_id, published, created_at);
+
+CREATE TABLE IF NOT EXISTS engagement_cursors (
+  name TEXT PRIMARY KEY,
+  last_event_at TIMESTAMPTZ,
+  last_event_id TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS loyalty_programs (
+  user_id TEXT PRIMARY KEY,
+  enabled BOOLEAN NOT NULL,
+  earn_points INTEGER NOT NULL,
+  per_minor INTEGER NOT NULL,
+  redeem_value_minor_per_point INTEGER NOT NULL,
+  tiers TEXT NOT NULL,
+  expiry_months INTEGER,
+  min_redeem_points INTEGER NOT NULL,
+  max_redeem_pct_bp INTEGER NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS loyalty_accounts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  contact_id TEXT NOT NULL,
+  balance BIGINT NOT NULL,
+  lifetime_points BIGINT NOT NULL,
+  tier TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_loyalty_accounts_contact ON loyalty_accounts (user_id, contact_id);
+
+CREATE TABLE IF NOT EXISTS loyalty_ledger (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  points BIGINT NOT NULL,
+  balance_after BIGINT NOT NULL,
+  ref_kind TEXT,
+  ref_id TEXT,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_loyalty_ledger_ref ON loyalty_ledger (user_id, kind, ref_kind, ref_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_loyalty_ledger_account ON loyalty_ledger (account_id, created_at);
+
+CREATE TABLE IF NOT EXISTS gift_cards (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  code_last4 TEXT NOT NULL,
+  initial_minor BIGINT NOT NULL,
+  balance_minor BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL,
+  purchaser_contact_id TEXT,
+  recipient_email TEXT,
+  message TEXT,
+  expires_at TIMESTAMPTZ,
+  issued_via TEXT NOT NULL,
+  order_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_gift_cards_code ON gift_cards (user_id, code_hash);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_gift_cards_user ON gift_cards (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS gift_card_ledger (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  gift_card_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  amount_minor BIGINT NOT NULL,
+  balance_after BIGINT NOT NULL,
+  ref_kind TEXT,
+  ref_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_gift_card_ledger_ref ON gift_card_ledger (user_id, kind, ref_kind, ref_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_gift_card_ledger_card ON gift_card_ledger (gift_card_id, created_at);
+
+CREATE TABLE IF NOT EXISTS vouchers (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  code_upper TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  value INTEGER NOT NULL,
+  currency TEXT,
+  min_subtotal_minor BIGINT NOT NULL,
+  max_uses INTEGER,
+  per_contact_limit INTEGER,
+  used_count INTEGER NOT NULL,
+  starts_at TIMESTAMPTZ,
+  ends_at TIMESTAMPTZ,
+  applies_to TEXT NOT NULL,
+  applies_config TEXT,
+  stackable BOOLEAN NOT NULL,
+  active BOOLEAN NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_vouchers_code ON vouchers (user_id, code_upper);
+
+CREATE TABLE IF NOT EXISTS voucher_redemptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  voucher_id TEXT NOT NULL,
+  contact_id TEXT,
+  entity_kind TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  amount_minor BIGINT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_voucher_redemptions_entity ON voucher_redemptions (voucher_id, entity_kind, entity_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_voucher_redemptions_contact ON voucher_redemptions (voucher_id, contact_id);
+
+CREATE TABLE IF NOT EXISTS referral_codes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  contact_id TEXT NOT NULL,
+  code TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_referral_codes_code ON referral_codes (user_id, code);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_referral_codes_contact ON referral_codes (user_id, contact_id);
+
+CREATE TABLE IF NOT EXISTS referrals (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  referrer_contact_id TEXT NOT NULL,
+  code TEXT NOT NULL,
+  referee_contact_id TEXT,
+  status TEXT NOT NULL,
+  reward_points INTEGER NOT NULL,
+  reward_voucher_id TEXT,
+  qualified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_referrals_referee ON referrals (user_id, referee_contact_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_referrals_referrer ON referrals (user_id, referrer_contact_id, created_at);
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_gift_card BOOLEAN;
+
