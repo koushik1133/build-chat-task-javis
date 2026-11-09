@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { Input } from "@/components/ui/input";
@@ -53,13 +53,13 @@ export function PayrollTab({ notify }: { notify: (tone: Notice["tone"], text: st
           </Field>
         </div>
         <Button size="sm" touch onClick={download} disabled={!data || data.lines.length === 0}>
-          <Download className="h-4 w-4" /> Export CSV
+          <Download className="h-4 w-4" aria-hidden /> Export CSV
         </Button>
       </div>
       {error ? (
         <ErrorState message={error} onRetry={() => void load()} />
       ) : !data ? (
-        <Loading label="Calculating…" />
+        <SkeletonList count={5} itemClassName="h-12" label="Calculating payroll…" />
       ) : data.lines.length === 0 ? (
         <Empty icon={<Wallet className="h-6 w-6" aria-hidden />} title="Nothing to pay yet" text="Payroll lines appear once staff have scheduled shifts, clock-ins or approved leave in the range." />
       ) : (
@@ -74,16 +74,16 @@ export function PayrollTab({ notify }: { notify: (tone: Notice["tone"], text: st
             {data.weeks} week{data.weeks === 1 ? "" : "s"} · overtime above contracted hours × weeks at 1.5× · paid leave (vacation, sick) at the hourly rate · times in {data.timezone}.
           </p>
           <TableScroller label="Payroll">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[44rem] text-sm">
               <thead className={THEAD}>
                 <tr>
-                  <th className={TH}>Who</th>
-                  <th className={`${TH} text-right`}>Scheduled</th>
-                  <th className={`${TH} text-right`}>Attended</th>
-                  <th className={`${TH} text-right`}>Leave</th>
-                  <th className={`${TH} text-right`}>Overtime</th>
-                  <th className={`${TH} text-right`}>Rate</th>
-                  <th className={`${TH} text-right`}>Gross</th>
+                  <th scope="col" className={TH}>Who</th>
+                  <th scope="col" className={`${TH} text-right`}>Scheduled</th>
+                  <th scope="col" className={`${TH} text-right`}>Attended</th>
+                  <th scope="col" className={`${TH} text-right`}>Leave</th>
+                  <th scope="col" className={`${TH} text-right`}>Overtime</th>
+                  <th scope="col" className={`${TH} text-right`}>Rate</th>
+                  <th scope="col" className={`${TH} text-right`}>Gross</th>
                 </tr>
               </thead>
               <tbody>
@@ -108,7 +108,7 @@ export function PayrollTab({ notify }: { notify: (tone: Notice["tone"], text: st
                     <td className="px-3 py-2 text-right tabular-nums">
                       {l.paid_leave_hours}h{l.unpaid_leave_hours ? <span className="text-xs text-muted-foreground"> (+{l.unpaid_leave_hours}h unpaid)</span> : null}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.overtime_hours ? <span className="text-amber-600 dark:text-amber-400">{l.overtime_hours}h</span> : "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{l.overtime_hours ? <span className="text-amber-600 dark:text-amber-400"><span className="sr-only">Overtime </span>{l.overtime_hours}h</span> : "—"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{l.hourly_rate_minor ? money(l.hourly_rate_minor, l.currency) : "—"}</td>
                     <td className="px-3 py-2 text-right font-medium tabular-nums">{money(l.gross_minor, l.currency)}</td>
                   </tr>

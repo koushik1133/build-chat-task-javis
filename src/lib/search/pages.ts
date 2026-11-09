@@ -56,6 +56,7 @@ const AREA_BY_PREFIX: Array<[string, Area]> = [
   ["/helpdesk", "helpdesk"],
   ["/workforce", "team"],
   ["/analytics", "reports"],
+  ["/reports", "reports"],
 ];
 
 export function areaForHref(href: string): Area | null {
@@ -89,6 +90,7 @@ const EXTRA: Array<{ href: string; label: string }> = [
   { href: "/marketplace", label: "Marketplace" },
   { href: "/workforce", label: "Workforce" },
   { href: "/procurement", label: "Procurement" },
+  { href: "/reports", label: "Reports" },
 ];
 
 /** Static list of app routes (sidebar + a few settings pages), deduplicated by href. */

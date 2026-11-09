@@ -94,6 +94,11 @@ describeDb("procurement flow", () => {
     const s = await api<{ purchase_order: PO; to: string }>(send.POST, `/api/purchase-orders/${po.id}/send`, { json: {}, params: { id: po.id }, expect: 200 });
     expect(s.body.purchase_order.status).toBe("sent");
     expect(s.body.to).toBe("orders@acme.test");
+    // SEC: the PO (lines + totals) can only go to the supplier on record; a different `to` is refused.
+    const hijack = await api<{ detail: string }>(send.POST, `/api/purchase-orders/${po.id}/send`, { json: { to: "attacker@evil.test" }, params: { id: po.id }, expect: 400 });
+    expect(hijack.body.detail).toMatch(/supplier's email on record/);
+    expect(await sql(`SELECT id FROM notification_outbox WHERE user_id = $1 AND recipient = 'attacker@evil.test'`, [org.dataId])).toHaveLength(0);
+    await api(send.POST, `/api/purchase-orders/${po.id}/send`, { json: { to: "ORDERS@acme.test" }, params: { id: po.id }, expect: 200 });
     const mail = await waitForRows(`SELECT id FROM notification_outbox WHERE user_id = $1 AND recipient = 'orders@acme.test' AND subject LIKE '%' || $2 || '%'`, [org.dataId, po.number]);
     expect(mail.length).toBeGreaterThan(0);
     await expectEvent(org.dataId, "purchase_order.sent", po.id);
@@ -138,6 +143,29 @@ describeDb("procurement flow", () => {
     await api(cancel.POST, `/api/purchase-orders/${po.id}/cancel`, { method: "POST", params: { id: po.id }, expect: 400 });
   });
 
+  it("SEC: concurrent receipts for the remaining quantity cannot both land (claim is atomic)", async () => {
+    const pos = await import("@/app/api/purchase-orders/route");
+    const po2 = (await api<{ purchase_order: PO }>(pos.POST, "/api/purchase-orders", {
+      json: { supplier_id: supplier.id, items: [{ description: "Gadget", qty: 5, unit_minor: 500, tax_rate_bp: 0, product_id: gadget.id }] },
+      expect: 201,
+    })).body.purchase_order;
+    const send = await import("@/app/api/purchase-orders/[id]/send/route");
+    await api(send.POST, `/api/purchase-orders/${po2.id}/send`, { json: {}, params: { id: po2.id }, expect: 200 });
+    const before = Number((await sqlOne<{ stock_on_hand: number }>(`SELECT stock_on_hand FROM products WHERE id = $1`, [gadget.id]))?.stock_on_hand);
+    const receive = await import("@/app/api/purchase-orders/[id]/receive/route");
+    const results = await Promise.all(
+      [1, 2, 3].map(() => api(receive.POST, `/api/purchase-orders/${po2.id}/receive`, { json: { lines: [{ product_id: gadget.id, qty: 5 }] }, params: { id: po2.id } }))
+    );
+    const statuses = results.map((r) => r.status).sort();
+    // Exactly one wins; the others lose the claim and, on re-validation, see an over-receipt (409) or a completed order (400).
+    expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+    expect(statuses.every((s) => s === 200 || s === 409 || s === 400)).toBe(true);
+    const after = Number((await sqlOne<{ stock_on_hand: number }>(`SELECT stock_on_hand FROM products WHERE id = $1`, [gadget.id]))?.stock_on_hand);
+    expect(after - before).toBe(5);
+    expect(await sql(`SELECT id FROM po_receipts WHERE purchase_order_id = $1`, [po2.id])).toHaveLength(1);
+    expect((await sqlOne<{ status: string }>(`SELECT status FROM purchase_orders WHERE id = $1`, [po2.id]))?.status).toBe("received");
+  });
+
   it("bills the PO (idempotent), due date from supplier terms, BILL number, event", async () => {
     const bills = await import("@/app/api/supplier-bills/route");
     bill = (await api<{ bill: Bill }>(bills.POST, "/api/supplier-bills", { json: { from_purchase_order_id: po.id, supplier_ref: "ACME-889" }, expect: 201 })).body.bill;
@@ -171,6 +199,12 @@ describeDb("procurement flow", () => {
     const exp = await sqlOne<{ category: string; amount_minor: string; ref_kind: string; ref_id: string; vendor: string }>(`SELECT category, amount_minor, ref_kind, ref_id, vendor FROM expenses WHERE id = $1 AND user_id = $2`, [p1.body.payment.expense_id, org.dataId]);
     expect(exp).toMatchObject({ category: "purchases", ref_kind: "bill", ref_id: bill.id, vendor: "Acme Parts" });
     expect(Number(exp?.amount_minor)).toBe(2000);
+
+    // SEC: once paid against, the currency is frozen and a linked PO must be ours.
+    const billRoute = await import("@/app/api/supplier-bills/[id]/route");
+    const cur = await api<{ detail: string }>(billRoute.PATCH, `/api/supplier-bills/${bill.id}`, { json: { currency: "EUR" }, params: { id: bill.id }, expect: 400 });
+    expect(cur.body.detail).toMatch(/Currency cannot change/);
+    await api(billRoute.PATCH, `/api/supplier-bills/${bill.id}`, { json: { purchase_order_id: "00000000-0000-4000-8000-000000000000" }, params: { id: bill.id }, expect: 404 });
 
     const p2 = await api<{ bill: Bill }>(pay.POST, `/api/supplier-bills/${bill.id}/payments`, { json: { amount_minor: 3700 }, params: { id: bill.id }, expect: 201 });
     expect(p2.body.bill.status).toBe("paid");

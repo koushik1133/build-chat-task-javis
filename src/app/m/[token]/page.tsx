@@ -147,7 +147,7 @@ export default function CrewPage() {
                   clockedIn ? "border border-border bg-background" : "bg-primary text-primary-foreground"
                 )}
               >
-                {busy === "clock" ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <Clock className="h-5 w-5" aria-hidden />}
+                {busy === "clock" ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" aria-hidden /> : <Clock className="h-5 w-5" aria-hidden />}
                 {clockedIn ? "Clock out" : "Clock in"}
               </button>
             </section>
@@ -165,14 +165,14 @@ export default function CrewPage() {
                   {day.upcomingShifts.map((s) => (
                     <li key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold">{shortDay(s.starts_at, day.timezone)}</p>
+                        <p className="text-sm font-semibold"><time dateTime={s.starts_at}>{shortDay(s.starts_at, day.timezone)}</time></p>
                         <p className="text-sm text-muted-foreground">
                           {time(s.starts_at, day.timezone)} – {time(s.ends_at, day.timezone)}
                           {s.role_title ? ` · ${s.role_title}` : ""}
                           {s.location ? ` · ${s.location}` : ""}
                         </p>
                       </div>
-                      {s.status === "swapped" && <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium">Swapped</span>}
+                      {s.status === "swapped" && <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium">Swapped</span>}
                     </li>
                   ))}
                 </ul>
@@ -244,7 +244,7 @@ export default function CrewPage() {
                       )}
                     >
                       <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2", t.done ? "border-emerald-600 bg-emerald-600 text-white" : "border-border")} aria-hidden>
-                        {busy === t.id ? <Loader2 className="h-4 w-4 animate-spin" /> : t.done ? <Check className="h-4 w-4" /> : <Circle className="h-0 w-0" />}
+                        {busy === t.id ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : t.done ? <Check className="h-4 w-4" /> : <Circle className="h-0 w-0" />}
                       </span>
                       <span className={cn("min-w-0 flex-1 break-words text-base", t.done && "text-muted-foreground line-through")}>{t.title}</span>
                     </button>
@@ -285,7 +285,7 @@ export default function CrewPage() {
                 />
               </label>
               <button type="submit" disabled={busy === "note"} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
-                {busy === "note" ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <MessageSquarePlus className="h-5 w-5" aria-hidden />} Send note
+                {busy === "note" ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" aria-hidden /> : <MessageSquarePlus className="h-5 w-5" aria-hidden />} Send note
               </button>
             </form>
           </section>
@@ -325,7 +325,7 @@ export default function CrewPage() {
                   <input value={leave.note} onChange={(e) => setLeave((l) => ({ ...l, note: e.target.value }))} maxLength={2000} className="h-12 w-full rounded-lg border border-border bg-background px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </label>
                 <button type="submit" disabled={busy === "leave"} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background text-base font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
-                  {busy === "leave" ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <CalendarOff className="h-5 w-5" aria-hidden />} Send request
+                  {busy === "leave" ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" aria-hidden /> : <CalendarOff className="h-5 w-5" aria-hidden />} Send request
                 </button>
               </form>
             </section>

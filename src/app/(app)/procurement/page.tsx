@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, Ban, Download, FileText, Loader2, PackageCheck, Pencil, Plus, RefreshCw, Send, ShoppingCart, Truck, Wallet } from "lucide-react";
+import { Ban, Download, FileText, Loader2, PackageCheck, Pencil, Plus, RefreshCw, Send, ShoppingCart, Truck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Pill, type Tone } from "@/components/ui/pill";
@@ -14,6 +14,8 @@ import { PageContainer } from "@/components/page-container";
 import { cn } from "@/lib/utils";
 import { fmtDate, fmtMoney } from "@/lib/money/format";
 import { BLANK_ITEM, LineItemsEditor, TotalsSummary, useDocTotals, useTaxRates, type LineItem } from "@/components/billing/shared";
+import { SkeletonList } from "@/components/ui/feedback";
+import { PageSkeleton } from "@/components/ui/page-skeleton";
 import { api, Banner, Dialog, DialogFooter, Empty, Field, fromMinor, Loading, TabPanel, Tabs, toMinor } from "@/components/finance/shared";
 import { AGING_BUCKET_LABELS, AGING_BUCKETS, type AgingBucket, type AgingRow, type BillStatus, type PoStatus, type ReorderGroup, type ReorderSuggestion } from "@/lib/procurement/pure";
 
@@ -52,7 +54,7 @@ function StatusPill({ status, tone }: { status: string; tone: Tone }) {
 
 export default function ProcurementPage() {
   return (
-    <Suspense fallback={<Loading label="Loading procurement…" />}>
+    <Suspense fallback={<PageSkeleton wide rows={5} label="Loading procurement…" />}>
       <ProcurementInner />
     </Suspense>
   );
@@ -94,6 +96,8 @@ function ProcurementInner() {
   const [editingSupplier, setEditingSupplier] = useState<Supplier | "new" | null>(null);
   const [billingPo, setBillingPo] = useState<PurchaseOrder | null>(null);
   const [payingBill, setPayingBill] = useState<Bill | null>(null);
+  const [sendingPo, setSendingPo] = useState<PurchaseOrder | null>(null);
+  const [cancellingPo, setCancellingPo] = useState<PurchaseOrder | null>(null);
 
   const load = useCallback(async () => {
     const signal = nextSignal();
@@ -192,11 +196,9 @@ function ProcurementInner() {
     [load]
   );
 
-  const onSend = useCallback(
-    (po: PurchaseOrder) => {
-      if (!po.supplier_email && !window.confirm("The supplier has no email on file. Mark the order as sent anyway?")) return;
-      const to = po.supplier_email ? null : window.prompt("Send the purchase order to (email):");
-      if (!po.supplier_email && !to) return;
+  const sendPo = useCallback(
+    (po: PurchaseOrder, to: string | null) => {
+      setSendingPo(null);
       void act(po.id, async () => {
         await api(`/api/purchase-orders/${po.id}/send`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(to ? { to } : {}) });
         return `${po.number} sent to ${to ?? po.supplier_email}.`;
@@ -204,9 +206,11 @@ function ProcurementInner() {
     },
     [act]
   );
-  const onCancel = useCallback(
+  const onSend = useCallback((po: PurchaseOrder) => setSendingPo(po), []);
+  const onCancel = useCallback((po: PurchaseOrder) => setCancellingPo(po), []);
+  const cancelPo = useCallback(
     (po: PurchaseOrder) => {
-      if (!window.confirm(`Cancel ${po.number}? This cannot be undone.`)) return;
+      setCancellingPo(null);
       void act(po.id, async () => {
         await api(`/api/purchase-orders/${po.id}/cancel`, { method: "POST" });
         return `${po.number} cancelled.`;
@@ -309,13 +313,13 @@ function ProcurementInner() {
             </Field>
           </div>
           {loading && orders.length === 0 ? (
-            <Loading label="Loading purchase orders…" />
+            <SkeletonList count={5} itemClassName="h-14" label="Loading purchase orders…" />
           ) : orders.length === 0 ? (
             <Empty
               icon={<FileText className="h-5 w-5" />}
               title={poStatus ? "No orders with that status" : "No purchase orders yet"}
               text={poStatus ? "Try another status." : "Raise an order to a supplier; receiving it updates stock and product cost."}
-              action={poStatus ? <Button variant="outline" onClick={() => setPoStatus("")}>Clear filter</Button> : activeSuppliers.length > 0 ? <Button onClick={() => setEditingPo("new")}><Plus className="h-4 w-4" aria-hidden /> New purchase order</Button> : undefined}
+              action={poStatus ? <Button variant="outline" touch onClick={() => setPoStatus("")}>Clear filter</Button> : activeSuppliers.length > 0 ? <Button touch onClick={() => setEditingPo("new")}><Plus className="h-4 w-4" aria-hidden /> New purchase order</Button> : <Button touch onClick={() => setEditingSupplier("new")}><Plus className="h-4 w-4" aria-hidden /> Add a supplier</Button>}
             />
           ) : (
             <>
@@ -332,13 +336,13 @@ function ProcurementInner() {
             <SearchField value={q} onChange={setQ} label="Search suppliers" placeholder="Search name or email" className="sm:max-w-xs" />
           </div>
           {loading && suppliers.length === 0 ? (
-            <Loading label="Loading suppliers…" />
+            <SkeletonList count={3} itemClassName="h-24 rounded-lg" label="Loading suppliers…" />
           ) : suppliers.length === 0 ? (
             <Empty
               icon={<Truck className="h-5 w-5" />}
               title={q ? "No suppliers match" : "No suppliers yet"}
               text={q ? "Try a different search." : "Suppliers are who you buy from. Set payment terms so bill due dates fill in automatically."}
-              action={q ? <Button variant="outline" onClick={() => setQ("")}>Clear search</Button> : <Button onClick={() => setEditingSupplier("new")}><Plus className="h-4 w-4" aria-hidden /> Add a supplier</Button>}
+              action={q ? <Button variant="outline" touch onClick={() => setQ("")}>Clear search</Button> : <Button touch onClick={() => setEditingSupplier("new")}><Plus className="h-4 w-4" aria-hidden /> Add a supplier</Button>}
             />
           ) : (
             <SuppliersList suppliers={suppliers} onEdit={setEditingSupplier} />
@@ -359,13 +363,13 @@ function ProcurementInner() {
             </Field>
           </div>
           {loading && bills.length === 0 ? (
-            <Loading label="Loading bills…" />
+            <SkeletonList count={5} itemClassName="h-14" label="Loading bills…" />
           ) : bills.length === 0 ? (
             <Empty
               icon={<Wallet className="h-5 w-5" />}
               title={billFilter ? "No bills match" : "No supplier bills yet"}
               text={billFilter ? "Try another filter." : "Create a bill from a received purchase order, then record payments as you make them."}
-              action={billFilter ? <Button variant="outline" onClick={() => setBillFilter("")}>Clear filter</Button> : undefined}
+              action={billFilter ? <Button variant="outline" touch onClick={() => setBillFilter("")}>Clear filter</Button> : <Button variant="outline" touch onClick={() => setTab("orders")}>Go to purchase orders</Button>}
             />
           ) : (
             <>
@@ -378,14 +382,14 @@ function ProcurementInner() {
 
       {tab === "aging" && (
         <TabPanel id="procurement" value="aging">
-          {loading && !aging ? <Loading label="Loading aging…" /> : aging ? <AgingTable aging={aging} /> : null}
+          {loading && !aging ? <SkeletonList count={4} itemClassName="h-14" label="Loading aging…" /> : aging ? <AgingTable aging={aging} /> : null}
         </TabPanel>
       )}
 
       {tab === "reorder" && (
         <TabPanel id="procurement" value="reorder">
           {loading && !reorder ? (
-            <Loading label="Checking stock levels…" />
+            <SkeletonList count={3} itemClassName="h-24 rounded-lg" label="Checking stock levels…" />
           ) : !reorder || reorder.suggestions.length === 0 ? (
             <Empty icon={<PackageCheck className="h-5 w-5" />} title="Nothing to reorder" text="Every tracked product is above its reorder point." />
           ) : (
@@ -399,11 +403,53 @@ function ProcurementInner() {
       {editingSupplier && <SupplierDialog supplier={editingSupplier === "new" ? null : editingSupplier} onClose={() => setEditingSupplier(null)} onSaved={saved} />}
       {billingPo && <BillFromPoDialog po={billingPo} onClose={() => setBillingPo(null)} onSaved={saved} />}
       {payingBill && <PayBillDialog bill={payingBill} onClose={() => setPayingBill(null)} onSaved={saved} />}
+      {sendingPo && <SendPoDialog po={sendingPo} onClose={() => setSendingPo(null)} onSend={sendPo} />}
+      {cancellingPo && (
+        <Dialog title={`Cancel ${cancellingPo.number}?`} description="The order is marked cancelled and can no longer be sent, received or billed. This cannot be undone." onClose={() => setCancellingPo(null)} size="sm">
+          <DialogFooter>
+            <Button type="button" variant="outline" touch onClick={() => setCancellingPo(null)}>Keep order</Button>
+            <Button type="button" variant="destructive" touch onClick={() => cancelPo(cancellingPo)}>Cancel order</Button>
+          </DialogFooter>
+        </Dialog>
+      )}
     </PageContainer>
   );
 }
 
 /* ── Purchase orders ─────────────────────────────────────────────────────── */
+
+function SendPoDialog({ po, onClose, onSend }: { po: PurchaseOrder; onClose: () => void; onSend: (po: PurchaseOrder, to: string | null) => void }) {
+  const [to, setTo] = useState("");
+  const needsEmail = !po.supplier_email;
+  return (
+    <Dialog
+      title={`Send ${po.number}`}
+      description={needsEmail ? `${po.supplier_name ?? "This supplier"} has no email on file. Enter one to email the order, or mark it as sent without emailing.` : `Emails the purchase order PDF to ${po.supplier_email} and marks it as sent.`}
+      onClose={onClose}
+      size="sm"
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSend(po, needsEmail ? to.trim() || null : null);
+        }}
+      >
+        {needsEmail && (
+          <Field label="Send to (email)" hint="Leave blank to mark as sent without emailing.">
+            <Input type="email" inputMode="email" autoComplete="off" value={to} onChange={(e) => setTo(e.target.value)} placeholder="orders@supplier.com" autoFocus />
+          </Field>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" touch onClick={onClose}>Cancel</Button>
+          <Button type="submit" touch>
+            <Send className="h-4 w-4" aria-hidden /> {needsEmail && !to.trim() ? "Mark as sent" : "Send"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </Dialog>
+  );
+}
 
 type PoHandlers = { onEdit: (po: PurchaseOrder) => void; onSend: (po: PurchaseOrder) => void; onReceive: (po: PurchaseOrder) => void; onCancel: (po: PurchaseOrder) => void; onBill: (po: PurchaseOrder) => void };
 
@@ -449,7 +495,7 @@ function PoActions({ po, busy, onEdit, onSend, onReceive, onCancel, onBill }: { 
 function OrdersList({ orders, busyId, ...h }: { orders: PurchaseOrder[]; busyId: string | null } & PoHandlers) {
   return (
     <>
-      <ul className="space-y-2 sm:hidden">
+      <ul className="space-y-2 sm:hidden" aria-label="Purchase orders">
         {orders.map((po) => (
           <li key={po.id} className="rounded-lg border border-border p-3">
             <div className="flex items-start justify-between gap-2">
@@ -671,7 +717,7 @@ function ReceiveDialog({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: (
             {progress.map((p) => {
               const remaining = Math.max(p.ordered - p.received, 0);
               return (
-                <li key={p.product_id} className="grid grid-cols-[1fr_auto] items-end gap-3 rounded-lg border border-border p-3">
+                <li key={p.product_id} className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 rounded-lg border border-border p-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{nameOf.get(p.product_id) ?? p.product_id}</p>
                     <p className="text-xs text-muted-foreground">Ordered {p.ordered} · received {p.received} · {remaining} outstanding</p>
@@ -863,7 +909,7 @@ function BillsList({ bills, onPay }: { bills: Bill[]; onPay: (b: Bill) => void }
   const payable = (b: Bill) => b.status === "open" || b.status === "partially_paid";
   return (
     <>
-      <ul className="space-y-2 sm:hidden">
+      <ul className="space-y-2 sm:hidden" aria-label="Supplier bills">
         {bills.map((b) => (
           <li key={b.id} className="rounded-lg border border-border p-3">
             <div className="flex items-start justify-between gap-2">
@@ -1022,9 +1068,7 @@ function AgingTable({ aging }: { aging: Aging }) {
         ))}
       </div>
       {mixed && (
-        <Banner tone="warn">
-          <AlertTriangle className="mr-1 inline h-3.5 w-3.5" aria-hidden /> Bills are in more than one currency ({aging.currencies.join(", ")}); the totals above add them without conversion.
-        </Banner>
+        <Banner tone="warn">Bills are in more than one currency ({aging.currencies.join(", ")}); the totals above add them without conversion.</Banner>
       )}
       <TableScroller label="Aging by supplier">
         <table className="w-full min-w-[44rem] text-sm">
@@ -1053,7 +1097,7 @@ function AgingTable({ aging }: { aging: Aging }) {
           </tbody>
         </table>
       </TableScroller>
-      <p className="text-xs text-muted-foreground">As of {new Date(aging.as_of).toLocaleString()}.</p>
+      <p className="text-xs text-muted-foreground">As of <time dateTime={aging.as_of}>{new Date(aging.as_of).toLocaleString()}</time>.</p>
     </div>
   );
 }

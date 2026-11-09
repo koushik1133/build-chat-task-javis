@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, ChevronLeft, FlaskConical, Play, Plus, Save, Trash2, Zap } from "lucide-react";
 import { PageContainer } from "@/components/page-container";
 import { Button } from "@/components/ui/button";
-import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
+import { PageSkeleton } from "@/components/ui/page-skeleton";
 import { Field } from "@/components/ui/field";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Pill, StatusPill } from "@/components/ui/pill";
@@ -165,7 +166,7 @@ export function AutomationEditor({ id }: { id: string }) {
   };
 
   if (loadErr) return <PageContainer title="Automation"><ErrorState message={loadErr} onRetry={() => void load()} /></PageContainer>;
-  if (!auto || !catalog) return <PageContainer title="Automation"><Loading label="Loading automation…" /></PageContainer>;
+  if (!auto || !catalog) return <PageSkeleton wide rows={4} label="Loading automation…" />;
 
   const tabs = [
     { id: "build" as const, label: "Build" },
@@ -187,15 +188,15 @@ export function AutomationEditor({ id }: { id: string }) {
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Checkbox label="Enabled" checked={auto.enabled} onChange={(e) => update({ enabled: e.target.checked })} />
-          <Button type="button" variant="outline" onClick={test} disabled={testing}>
+          <Button type="button" variant="outline" touch onClick={test} disabled={testing}>
             <FlaskConical className="h-4 w-4" aria-hidden /> {testing ? "Testing…" : "Test"}
           </Button>
           {!isNew && (
-            <Button type="button" variant="outline" onClick={runNow} disabled={running || dirty} title={dirty ? "Save first" : "Queue a real run with the sample event"}>
+            <Button type="button" variant="outline" touch onClick={runNow} disabled={running || dirty} title={dirty ? "Save first" : "Queue a real run with the sample event"}>
               <Play className="h-4 w-4" aria-hidden /> {running ? "Running…" : "Run now"}
             </Button>
           )}
-          <Button type="button" onClick={save} disabled={saving || Boolean(validation) || (!dirty && !isNew)}>
+          <Button type="button" touch onClick={save} disabled={saving || Boolean(validation) || (!dirty && !isNew)}>
             <Save className="h-4 w-4" aria-hidden /> {saving ? "Saving…" : isNew ? "Create" : "Save"}
           </Button>
         </div>
@@ -236,7 +237,7 @@ export function AutomationEditor({ id }: { id: string }) {
 
           <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="sec-trigger">
             <h2 id="sec-trigger" className="mb-3 text-sm font-semibold">1. Trigger</h2>
-            <div className="grid gap-3 sm:grid-cols-[200px_1fr]">
+            <div className="grid gap-3 sm:grid-cols-[12.5rem_minmax(0,1fr)]">
               <Field label="Type">
                 <Select
                   value={auto.trigger_type}
@@ -322,8 +323,8 @@ export function AutomationEditor({ id }: { id: string }) {
                   </p>
                   <Field label="Shared token">
                     <div className="flex gap-2">
-                      <Input readOnly value={auto.trigger_config.webhook?.token ?? ""} aria-label="Webhook token" />
-                      <Button type="button" variant="outline" onClick={() => update({ trigger_config: { webhook: { token: cryptoToken() } } })}>
+                      <Input readOnly value={auto.trigger_config.webhook?.token ?? ""} aria-label="Webhook token" className="min-w-0 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+                      <Button type="button" variant="outline" touch onClick={() => update({ trigger_config: { webhook: { token: cryptoToken() } } })}>
                         Rotate
                       </Button>
                     </div>
@@ -342,20 +343,20 @@ export function AutomationEditor({ id }: { id: string }) {
 
           <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="sec-steps">
             <h2 id="sec-steps" className="mb-3 text-sm font-semibold">3. Steps</h2>
-            {auto.steps.length === 0 && <Empty title="No steps yet" text="Add a tool call, a notification, a delay or a branch." />}
+            {auto.steps.length === 0 && <Empty title="No steps yet" text="Add a tool call, a notification, a delay or a branch using the picker below." className="py-8" />}
             <ol className="space-y-2">
               {auto.steps.map((s, i) => {
                 const open = openStep === s.id;
                 return (
                   <li key={s.id} className="rounded-lg border border-border">
                     <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-                      <button type="button" onClick={() => setOpenStep(open ? null : s.id)} aria-expanded={open} className="flex min-h-11 flex-1 items-center gap-2 text-left text-sm sm:min-h-0">
+                      <button type="button" onClick={() => setOpenStep(open ? null : s.id)} aria-expanded={open} aria-controls={`step-${s.id}-body`} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-center gap-2 rounded-md text-start text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">
                         <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-medium">{i + 1}</span>
-                        <span className="font-medium">{stepTitle(s)}</span>
+                        <span className="min-w-0 break-words font-medium">{stepTitle(s)}</span>
                         <Pill>{STEP_KIND_LABELS[s.kind]}</Pill>
                         <span className="text-xs text-muted-foreground">#{s.id}</span>
                       </button>
-                      <div className="flex items-center gap-1">
+                      <div className="ms-auto flex items-center gap-1" role="group" aria-label={`Step ${i + 1} actions`}>
                         <Button type="button" variant="ghost" size="icon-sm" touch aria-label="Move up" disabled={i === 0} onClick={() => moveStep(i, -1)}>
                           <ArrowUp className="h-4 w-4" aria-hidden />
                         </Button>
@@ -368,7 +369,7 @@ export function AutomationEditor({ id }: { id: string }) {
                       </div>
                     </div>
                     {open && (
-                      <div className="space-y-3 border-t border-border p-3">
+                      <div id={`step-${s.id}-body`} className="space-y-3 border-t border-border p-3">
                         <div className="grid gap-3 sm:grid-cols-2">
                           <Field label="Step id" hint="Used by branches and {{steps.<id>}}">
                             <Input value={s.id} onChange={(e) => update({ steps: auto.steps.map((x) => (x.id === s.id ? ({ ...x, id: e.target.value.replace(/[^a-zA-Z0-9_-]/g, "") } as Step) : x)) })} />
@@ -397,6 +398,7 @@ export function AutomationEditor({ id }: { id: string }) {
               <Button
                 type="button"
                 variant="outline"
+                touch
                 disabled={auto.steps.length >= 25}
                 onClick={() => {
                   const s = defaultStep(addKind, auto.steps);
@@ -417,7 +419,7 @@ export function AutomationEditor({ id }: { id: string }) {
           <Banner tone="info">A test renders every step against the sample event and reports what would happen. Nothing is executed or sent.</Banner>
           {planErr && <Banner tone="error">{planErr}</Banner>}
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={test} disabled={testing}>
+            <Button type="button" touch onClick={test} disabled={testing}>
               <FlaskConical className="h-4 w-4" aria-hidden /> {testing ? "Testing…" : `Test with ${sampleEvent ? sampleEvent.type : "a synthetic event"}`}
             </Button>
           </div>
@@ -460,27 +462,27 @@ export function AutomationEditor({ id }: { id: string }) {
         ) : runsErr ? (
           <ErrorState message={runsErr} onRetry={() => void loadRuns()} />
         ) : runs === null ? (
-          <Loading label="Loading runs…" />
+          <SkeletonList count={5} itemClassName="h-10" label="Loading runs…" />
         ) : runs.length === 0 ? (
           <Empty title="No runs yet" text="Runs are created when the trigger fires, or from “Run now”." />
         ) : (
           <TableScroller label="Run history">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[40rem] text-sm">
               <thead className={THEAD}>
                 <tr>
-                  <th className={TH}>Started</th>
-                  <th className={TH}>Status</th>
-                  <th className={TH}>Event</th>
-                  <th className={TH}>Steps</th>
-                  <th className={TH}>Duration</th>
-                  <th className={TH}>Error</th>
+                  <th scope="col" className={TH}>Started</th>
+                  <th scope="col" className={TH}>Status</th>
+                  <th scope="col" className={TH}>Event</th>
+                  <th scope="col" className={TH}>Steps</th>
+                  <th scope="col" className={TH}>Duration</th>
+                  <th scope="col" className={TH}>Error</th>
                 </tr>
               </thead>
               <tbody>
                 {runs.map((r) => (
-                  <tr key={r.id} className="cursor-pointer border-t border-border hover:bg-secondary/40" onClick={() => setOpenRun(r)}>
+                  <tr key={r.id} className="border-t border-border hover:bg-secondary/40">
                     <td className="px-3 py-2">
-                      <button type="button" className="text-left underline-offset-2 hover:underline" onClick={() => setOpenRun(r)}>
+                      <button type="button" className="rounded text-start underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setOpenRun(r)} aria-label={`Open run from ${fmtDate(r.created_at)}`}>
                         {fmtDate(r.created_at)}
                       </button>
                     </td>

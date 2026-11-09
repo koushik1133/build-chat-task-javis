@@ -20,12 +20,23 @@ function zonedParts(date: Date, timeZone: string): Parts | null {
 
 /** Instant of local midnight on (y, m, d) in `timeZone`; m/d may overflow like Date.UTC. */
 export function zonedMidnight(y: number, m: number, d: number, timeZone: string): Date {
-  const guess = Date.UTC(y, m, d);
+  return zonedTime(y, m, d, 0, 0, timeZone);
+}
+
+/**
+ * Instant of local wall time (y, m, d, h, mi) in `timeZone`. Resolved by
+ * iteration so DST changes between midnight and `h` do not shift the hour
+ * (midnight + h*3600000 would be off by one on transition days). A wall time
+ * inside a spring-forward gap resolves to the instant after the gap.
+ */
+export function zonedTime(y: number, m: number, d: number, h: number, mi: number, timeZone: string): Date {
+  const guess = Date.UTC(y, m, d, h, mi);
   let instant = guess;
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 3; i++) {
     const p = zonedParts(new Date(instant), timeZone);
     if (!p) return new Date(guess);
     const wallAsUtc = Date.UTC(p.y, p.m, p.d, p.h, p.mi, p.s);
+    if (wallAsUtc === guess) break;
     instant = guess - (wallAsUtc - instant);
   }
   return new Date(instant);

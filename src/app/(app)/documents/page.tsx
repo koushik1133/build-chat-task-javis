@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
-import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Pill, StatusPill } from "@/components/ui/pill";
 import { SearchField } from "@/components/ui/search-field";
 import { TabPanel, Tabs } from "@/components/ui/tabs";
@@ -87,12 +87,15 @@ export default function DocumentsPage() {
   const [preview, setPreview] = useState<DocumentDTO | null>(null);
   const [editTemplate, setEditTemplate] = useState<DocumentTemplateDTO | "new" | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{ title: string; description: string; label: string; run: () => void } | null>(null);
   const nextSignal = useAbortable();
 
   const loadDocs = useCallback(
     async (cursor: string | null = null) => {
       const signal = nextSignal();
-      if (!cursor) setLoading(true);
+      if (cursor) setLoadingMore(true);
+      else setLoading(true);
       setError(null);
       try {
         const params = new URLSearchParams();
@@ -109,7 +112,10 @@ export default function DocumentsPage() {
         if (isAbortError(err)) return;
         setError(err instanceof Error ? err.message : "Could not load documents.");
       } finally {
-        setLoading(false);
+        if (!signal.aborted) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
     },
     [status, dq, nextSignal]
@@ -215,17 +221,17 @@ export default function DocumentsPage() {
               <label className="sr-only" htmlFor="doc-status">
                 Filter by status
               </label>
-              <Select id="doc-status" value={status} onChange={(e) => setStatus(e.target.value as DocumentStatus | "")} className="sm:w-44">
+              <Select id="doc-status" value={status} onChange={(e) => setStatus(e.target.value as DocumentStatus | "")} className="capitalize sm:w-44">
                 <option value="">All statuses</option>
                 {DOCUMENT_STATUSES.map((s) => (
-                  <option key={s} value={s}>
+                  <option key={s} value={s} className="capitalize">
                     {s}
                   </option>
                 ))}
               </Select>
             </div>
             {loading ? (
-              <Loading label="Loading documents…" />
+              <SkeletonList count={5} itemClassName="h-14" label="Loading documents…" />
             ) : error ? (
               <ErrorState message={error} onRetry={() => void loadDocs()} />
             ) : docs.length === 0 ? (
@@ -241,19 +247,19 @@ export default function DocumentsPage() {
                   <table className="w-full min-w-[720px] text-sm">
                     <thead className={THEAD}>
                       <tr>
-                        <th className={TH}>Title</th>
-                        <th className={TH}>Contact</th>
-                        <th className={TH}>Status</th>
-                        <th className={TH}>Signers</th>
-                        <th className={TH}>Sent</th>
-                        <th className={`${TH} text-right`}>Actions</th>
+                        <th scope="col" className={TH}>Title</th>
+                        <th scope="col" className={TH}>Contact</th>
+                        <th scope="col" className={TH}>Status</th>
+                        <th scope="col" className={TH}>Signers</th>
+                        <th scope="col" className={TH}>Sent</th>
+                        <th scope="col" className={`${TH} text-right`}><span className="sr-only">Actions</span></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/60">
                       {docs.map((d) => (
                         <tr key={d.id} className="align-top">
                           <td className="px-3 py-2">
-                            <button type="button" className="text-left font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded" onClick={() => setPreview(d)}>
+                            <button type="button" className="rounded text-start font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setPreview(d)} aria-label={`Preview ${d.title}`}>
                               {d.title}
                             </button>
                             <div className="text-[11px] capitalize text-muted-foreground">{d.kind}{d.signing_order === "sequential" ? " · in order" : ""}</div>
@@ -288,12 +294,12 @@ export default function DocumentsPage() {
                                 </Button>
                               )}
                               {canEdit && (d.status === "sent" || d.status === "viewed") && (
-                                <Button size="sm" variant="ghost" touch disabled={busyId === d.id} aria-label={`Void ${d.title}`} onClick={() => { if (confirm(`Void "${d.title}"? Signing links stop working.`)) void act(d.id, async () => { await api(`/api/documents/${d.id}/void`, { method: "POST", body: "{}" }); return "Document voided."; }); }}>
+                                <Button size="sm" variant="ghost" touch disabled={busyId === d.id} aria-label={`Void ${d.title}`} onClick={() => setConfirmAction({ title: `Void “${d.title}”?`, description: "Signing links stop working and signers are told the document was withdrawn. This cannot be undone.", label: "Void document", run: () => void act(d.id, async () => { await api(`/api/documents/${d.id}/void`, { method: "POST", body: "{}" }); return "Document voided."; }) })}>
                                   <Ban className="h-3.5 w-3.5" aria-hidden /> Void
                                 </Button>
                               )}
                               {canEdit && (d.status === "draft" || d.status === "void") && (
-                                <Button size="sm" variant="ghost" touch disabled={busyId === d.id} aria-label={`Delete ${d.title}`} onClick={() => { if (confirm(`Delete "${d.title}"?`)) void act(d.id, async () => { await api(`/api/documents/${d.id}`, { method: "DELETE" }); return "Document deleted."; }); }}>
+                                <Button size="sm" variant="ghost" touch disabled={busyId === d.id} aria-label={`Delete ${d.title}`} onClick={() => setConfirmAction({ title: `Delete “${d.title}”?`, description: "The draft and its attachments are removed. This cannot be undone.", label: "Delete document", run: () => void act(d.id, async () => { await api(`/api/documents/${d.id}`, { method: "DELETE" }); return "Document deleted."; }) })}>
                                   <Trash2 className="h-3.5 w-3.5" aria-hidden />
                                 </Button>
                               )}
@@ -304,7 +310,7 @@ export default function DocumentsPage() {
                     </tbody>
                   </table>
                 </TableScroller>
-                <LoadMore hasMore={Boolean(nextCursor)} loading={false} count={docs.length} noun="documents" onMore={() => loadDocs(nextCursor)} />
+                <LoadMore hasMore={Boolean(nextCursor)} loading={loadingMore} count={docs.length} noun="documents" onMore={() => loadDocs(nextCursor)} />
               </>
             )}
           </>
@@ -320,15 +326,24 @@ export default function DocumentsPage() {
             busy={busyId === "starters"}
             onInstall={() => void installStarters()}
             onEdit={(t) => setEditTemplate(t)}
-            onDelete={async (t) => {
-              if (!confirm(`Delete template "${t.name}"? Existing documents keep their rendered body.`)) return;
-              try {
-                await api(`/api/document-templates/${t.id}`, { method: "DELETE" });
-                await loadTemplates();
-              } catch (err) {
-                setNotice({ tone: "error", text: err instanceof Error ? err.message : "Delete failed" });
-              }
-            }}
+            onDelete={(t) =>
+              setConfirmAction({
+                title: `Delete template “${t.name}”?`,
+                description: "Existing documents keep their rendered body. This cannot be undone.",
+                label: "Delete template",
+                run: () => {
+                  void (async () => {
+                    try {
+                      await api(`/api/document-templates/${t.id}`, { method: "DELETE" });
+                      setNotice({ tone: "success", text: `Template “${t.name}” deleted.` });
+                      await loadTemplates();
+                    } catch (err) {
+                      setNotice({ tone: "error", text: err instanceof Error ? err.message : "Delete failed" });
+                    }
+                  })();
+                },
+              })
+            }
           />
         )}
       </TabPanel>
@@ -357,6 +372,14 @@ export default function DocumentsPage() {
         />
       )}
       {preview && <PreviewDialog doc={preview} canEdit={canEdit} onClose={() => setPreview(null)} />}
+      {confirmAction && (
+        <Dialog title={confirmAction.title} description={confirmAction.description} onClose={() => setConfirmAction(null)} size="sm">
+          <DialogFooter>
+            <Button type="button" variant="outline" touch onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button type="button" variant="destructive" touch onClick={() => { const run = confirmAction.run; setConfirmAction(null); run(); }}>{confirmAction.label}</Button>
+          </DialogFooter>
+        </Dialog>
+      )}
       {editTemplate && (
         <TemplateEditorDialog
           template={editTemplate === "new" ? null : editTemplate}
@@ -397,7 +420,12 @@ function TemplatesTab({ templates, starters, canEdit, busy, onInstall, onEdit, o
         </div>
       )}
       {templates.length === 0 ? (
-        <Empty icon={<FileText className="h-6 w-6" aria-hidden />} title="No templates yet" text="Install the starters or write your own markdown template with {{merge.fields}}." />
+        <Empty
+          icon={<FileText className="h-6 w-6" aria-hidden />}
+          title="No templates yet"
+          text="Install the starters or write your own markdown template with {{merge.fields}}."
+          action={canEdit && starters.length > 0 ? <Button touch disabled={busy} onClick={onInstall}>{busy ? spinner : <Plus className="h-4 w-4" aria-hidden />} Install starter templates</Button> : undefined}
+        />
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((t) => (
@@ -465,12 +493,12 @@ function ContactPicker({ value, onChange }: { value: Contact | null; onChange: (
     <div className="relative">
       <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search contacts by name or email…" aria-label="Search contacts" />
       {results.length > 0 && (
-        <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded-md border border-border bg-popover p-1 text-sm shadow-md" role="listbox">
+        <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded-md border border-border bg-card p-1 text-sm shadow-md" role="listbox" aria-label="Matching contacts">
           {results.map((c) => (
             <li key={c.id}>
-              <button type="button" role="option" aria-selected={false} className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { onChange(c); setQ(""); setResults([]); }}>
-                <span>{c.full_name}</span>
-                <span className="text-xs text-muted-foreground">{c.email}</span>
+              <button type="button" role="option" aria-selected={false} className="flex min-h-11 w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-start hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0" onClick={() => { onChange(c); setQ(""); setResults([]); }}>
+                <span className="min-w-0 truncate">{c.full_name}</span>
+                <span className="min-w-0 truncate text-xs text-muted-foreground">{c.email}</span>
               </button>
             </li>
           ))}
@@ -584,7 +612,7 @@ function CreateDocumentDialog({ templates, onClose, onCreated }: { templates: Do
 
         {!template && (
           <div className="space-y-3 rounded-lg border border-border p-3">
-            <div className="grid gap-3 sm:grid-cols-[10rem_1fr]">
+            <div className="grid gap-3 sm:grid-cols-[10rem_minmax(0,1fr)]">
               <Field label="Kind">
                 <Select value={kind} onChange={(e) => setKind(e.target.value as DocumentKind)}>
                   {DOCUMENT_KINDS.map((k) => (
@@ -675,7 +703,7 @@ function SendDialog({ doc, onClose, onSent }: { doc: DocumentDTO; onClose: () =>
         <fieldset className="space-y-2" disabled={locked}>
           <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Signers</legend>
           {signers.map((s, i) => (
-            <div key={i} className="grid gap-2 sm:grid-cols-[1fr_1fr_7rem_auto]">
+            <div key={i} className="grid gap-2 rounded-lg border border-border p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem_auto] sm:items-center sm:border-0 sm:p-0" role="group" aria-label={`Signer ${i + 1}`}>
               <Input value={s.name} onChange={(e) => setSigners((x) => x.map((y, j) => (j === i ? { ...y, name: e.target.value } : y)))} placeholder="Name" aria-label={`Signer ${i + 1} name`} required />
               <Input type="email" value={s.email} onChange={(e) => setSigners((x) => x.map((y, j) => (j === i ? { ...y, email: e.target.value } : y)))} placeholder="email@example.com" aria-label={`Signer ${i + 1} email`} required />
               <Input value={s.role} onChange={(e) => setSigners((x) => x.map((y, j) => (j === i ? { ...y, role: e.target.value } : y)))} placeholder="Role" aria-label={`Signer ${i + 1} role`} />
@@ -725,7 +753,7 @@ function PreviewDialog({ doc, canEdit, onClose }: { doc: DocumentDTO; canEdit: b
   return (
     <Dialog title={doc.title} description={<span className="capitalize">{doc.kind} · {doc.status}{doc.pdf_hash ? ` · fingerprint ${doc.pdf_hash.slice(0, 16)}…` : ""}</span>} onClose={onClose} size="lg">
       <div className="space-y-5">
-        <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-border bg-card p-4">
+        <div className="max-h-[50dvh] overflow-y-auto rounded-lg border border-border bg-card p-4" tabIndex={0} aria-label="Document body">
           <MarkdownView body={doc.body_md} />
         </div>
         {doc.signers.length > 0 && (
@@ -803,7 +831,7 @@ function TemplateEditorDialog({ template, onClose, onSaved }: { template: Docume
     <Dialog title={template ? `Edit template · ${template.name}` : "New template"} description="Markdown with {{merge.fields}}. Headings, paragraphs, bullet lists, **bold** and simple tables render in the PDF." onClose={onClose} size="xl">
       <form onSubmit={submit} className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
-        <div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
           <Field label="Name" required>
             <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} required />
           </Field>
@@ -831,7 +859,7 @@ function TemplateEditorDialog({ template, onClose, onSaved }: { template: Docume
           </Button>
         </div>
         {showPreview ? (
-          <div className="max-h-[40vh] overflow-y-auto rounded-lg border border-border bg-card p-4">
+          <div className="max-h-[40dvh] overflow-y-auto rounded-lg border border-border bg-card p-4" tabIndex={0} aria-label="Template preview">
             <MarkdownView body={body} />
           </div>
         ) : (
@@ -844,14 +872,14 @@ function TemplateEditorDialog({ template, onClose, onSaved }: { template: Docume
             <p className="text-xs text-muted-foreground">
               Used in the body but not declared:{" "}
               {undeclared.map((k) => (
-                <button key={k} type="button" className="mr-1 underline" onClick={() => addField(STANDARD_MERGE_FIELDS.find((f) => f.key === k) ?? { key: k, label: k.replace(/[._]/g, " "), source: "custom" })}>
+                <button key={k} type="button" className="me-1 inline-flex min-h-11 items-center rounded font-mono underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0" aria-label={`Declare merge field ${k}`} onClick={() => addField(STANDARD_MERGE_FIELDS.find((f) => f.key === k) ?? { key: k, label: k.replace(/[._]/g, " "), source: "custom" })}>
                   {`{{${k}}}`}
                 </button>
               ))}
             </p>
           )}
           {fields.map((f, i) => (
-            <div key={i} className="grid gap-2 sm:grid-cols-[1fr_1fr_8rem_auto_auto]">
+            <div key={i} className="grid gap-2 rounded-lg border border-border p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem_auto_auto] sm:items-center sm:border-0 sm:p-0" role="group" aria-label={`Merge field ${i + 1}`}>
               <Input value={f.key} onChange={(e) => setFields((x) => x.map((y, j) => (j === i ? { ...y, key: e.target.value } : y)))} placeholder="key" aria-label={`Field ${i + 1} key`} className="font-mono text-xs" />
               <Input value={f.label} onChange={(e) => setFields((x) => x.map((y, j) => (j === i ? { ...y, label: e.target.value } : y)))} placeholder="Label" aria-label={`Field ${i + 1} label`} />
               <Select value={f.source} onChange={(e) => setFields((x) => x.map((y, j) => (j === i ? { ...y, source: e.target.value as MergeField["source"] } : y)))} aria-label={`Field ${i + 1} source`}>
@@ -869,7 +897,7 @@ function TemplateEditorDialog({ template, onClose, onSaved }: { template: Docume
             <Button type="button" size="sm" variant="outline" touch onClick={() => addField({ key: `field_${fields.length + 1}`, label: "New field", source: "custom" })}>
               <Plus className="h-3.5 w-3.5" aria-hidden /> Custom field
             </Button>
-            <Select aria-label="Add a standard field" value="" onChange={(e) => { const f = STANDARD_MERGE_FIELDS.find((x) => x.key === e.target.value); if (f) addField(f); }} className="h-8 w-auto text-xs">
+            <Select aria-label="Add a standard field" value="" onChange={(e) => { const f = STANDARD_MERGE_FIELDS.find((x) => x.key === e.target.value); if (f) addField(f); }} className="w-auto sm:h-8 sm:text-xs">
               <option value="">Add standard field…</option>
               {STANDARD_MERGE_FIELDS.filter((f) => !fields.some((x) => x.key === f.key)).map((f) => (
                 <option key={f.key} value={f.key}>

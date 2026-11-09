@@ -238,6 +238,8 @@ export const RUN_LIMITS = {
   toolTimeoutMs: 10_000,
   maxDelayDays: 30,
   approvalTtlDays: 7,
+  /** A run left in `running` longer than this (worker crash / function timeout) is failed so it can be retried. */
+  runningLeaseMinutes: 15,
 } as const;
 
 /** Prefix on `approvals.run_id` that marks an automation (not agent) run. */

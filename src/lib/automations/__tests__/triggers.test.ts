@@ -65,6 +65,16 @@ describe("triggerMatches", () => {
     expect(triggerMatches(d, evt("automation.run_failed", { automation_id: "a1" }), "a1")).toBe(false);
     expect(triggerMatches(d, evt("automation.run_failed", { automation_id: "other" }), "a1")).toBe(true);
   });
+  it("catch-all patterns never fire on other automations' run events (ping-pong guard)", () => {
+    for (const pattern of ["*", "automation*", "ticket.*,*"]) {
+      const d = def({ trigger_config: { event_type: pattern } });
+      expect(triggerMatches(d, evt("automation.run_finished", { automation_id: "other" }), "a1"), pattern).toBe(false);
+      expect(triggerMatches(d, evt("automation.run_failed", { automation_id: "other" }), "a1"), pattern).toBe(false);
+    }
+    expect(triggerMatches(def({ trigger_config: { event_type: "*" } }), evt("ticket.created"), "a1")).toBe(true);
+    expect(triggerMatches(def({ trigger_config: { event_type: "automation.run_finished" } }), evt("automation.run_finished", { automation_id: "other" }), "a1")).toBe(true);
+    expect(triggerMatches(def({ trigger_config: { event_type: "ticket.*, automation.*" } }), evt("automation.run_finished", { automation_id: "other" }), "a1")).toBe(true);
+  });
 });
 
 describe("fanOutEvents", () => {

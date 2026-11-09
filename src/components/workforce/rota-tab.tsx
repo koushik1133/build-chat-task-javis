@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { ArrowLeftRight, CalendarPlus, ChevronLeft, ChevronRight, Copy, Loader2, Plus, Send, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
-import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
-import { Input, Select, Textarea } from "@/components/ui/input";
+import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Pill, StatusPill } from "@/components/ui/pill";
+import { TableScroller } from "@/components/ui/table-scroller";
 import { cn } from "@/lib/utils";
 import { addDays, weekStartOf, type ShiftConflict, type ShiftDTO, type StaffDTO, type SwapDTO } from "@/lib/workforce/pure";
 import type { WeekView } from "@/lib/workforce/shifts";
@@ -85,9 +87,9 @@ export function RotaTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: N
           <Button variant="outline" size="icon" touch aria-label="Next week" onClick={() => setWeekStart((w) => addDays(w, 7))}>
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <p className="ml-2 text-sm font-medium" aria-live="polite">
+          <p className="ms-2 text-sm font-medium" aria-live="polite">
             {fmtDay(weekStart, { month: "short", day: "numeric" })} – {fmtDay(addDays(weekStart, 6), { month: "short", day: "numeric", year: "numeric" })}
-            <span className="ml-2 text-xs font-normal text-muted-foreground">{tz}</span>
+            <span className="ms-2 text-xs font-normal text-muted-foreground">{tz}</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -100,16 +102,16 @@ export function RotaTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: N
             const r = await jsonFetch<{ created: number; skipped: number }>("/api/workforce/shifts/copy-week", { method: "POST", body: JSON.stringify({ source_week: addDays(weekStart, -7), target_week: weekStart }), fallback: "Could not copy" });
             return `Copied ${r.created} shift${r.created === 1 ? "" : "s"} from last week${r.skipped ? ` (${r.skipped} skipped for conflicts)` : ""}.`;
           })}>
-            {busy === "copy" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />} Copy last week
+            {busy === "copy" ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />} Copy last week
           </Button>
           <Button size="sm" touch disabled={drafts.length === 0 || busy !== null} onClick={() => void act("publish", async () => {
             const r = await jsonFetch<{ published: ShiftDTO[] }>("/api/workforce/shifts/publish", { method: "POST", body: JSON.stringify({ ids: drafts.map((d) => d.id) }), fallback: "Could not publish" });
             return `Published ${r.published.length} shift${r.published.length === 1 ? "" : "s"}. Staff with an email have been notified.`;
           })}>
-            {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Publish week{drafts.length ? ` (${drafts.length})` : ""}
+            {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />} Publish week{drafts.length ? ` (${drafts.length})` : ""}
           </Button>
           <Button size="sm" touch variant="secondary" onClick={() => setEditing({ shift: null, day: weekStart })}>
-            <Plus className="h-4 w-4" /> New shift
+            <Plus className="h-4 w-4" aria-hidden /> New shift
           </Button>
         </div>
       </div>
@@ -144,21 +146,39 @@ export function RotaTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: N
       {error ? (
         <ErrorState message={error} onRetry={() => void load()} />
       ) : loading && !week ? (
-        <Loading label="Loading rota…" />
+        <SkeletonList count={5} itemClassName="h-16" label="Loading rota…" />
       ) : !week ? null : staff.length === 0 && week.shifts.length === 0 ? (
-        <Empty icon={<CalendarPlus className="h-6 w-6" aria-hidden />} title="No staff yet" text="Add people under the Staff tab, then build the rota here." />
+        <Empty
+          icon={<CalendarPlus className="h-6 w-6" aria-hidden />}
+          title="No staff yet"
+          text="Add people under the Staff tab, then build the rota here."
+          action={
+            <>
+              <Button asChild touch>
+                <Link href="/workforce?tab=staff">Add staff</Link>
+              </Button>
+              <Button variant="outline" touch onClick={() => setEditing({ shift: null, day: weekStart })}>
+                Add an open shift
+              </Button>
+            </>
+          }
+        />
       ) : (
         <>
-          {/* Desktop grid */}
-          <div className="hidden overflow-x-auto rounded-lg border border-border md:block" role="region" aria-label="Weekly rota">
-            <table className="w-full min-w-[880px] table-fixed border-collapse text-sm">
+          {/* Desktop grid: one column per day, bounded horizontal scroll on narrow tablets */}
+          <div className="hidden md:block">
+            <TableScroller label="Weekly rota">
+              <table className="w-full min-w-[55rem] table-fixed border-collapse text-sm">
+                <caption className="sr-only">
+                  Shifts for the week of {fmtDay(weekStart, { month: "long", day: "numeric", year: "numeric" })}
+                </caption>
               <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th scope="col" className="w-44 px-3 py-2 text-left font-medium">
+                  <th scope="col" className="w-44 px-3 py-2 text-start font-medium">
                     Staff
                   </th>
                   {week.days.map((d) => (
-                    <th key={d} scope="col" className={cn("px-2 py-2 text-left font-medium", d === today && "text-primary")}>
+                    <th key={d} scope="col" className={cn("px-2 py-2 text-start font-medium", d === today && "text-primary")} aria-current={d === today ? "date" : undefined}>
                       {fmtDay(d)}
                     </th>
                   ))}
@@ -167,12 +187,13 @@ export function RotaTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: N
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id} className="border-t border-border align-top">
-                    <th scope="row" className="px-3 py-2 text-left font-medium">
+                    <th scope="row" className="px-3 py-2 text-start font-medium">
                       <div className="truncate">{r.name}</div>
                       <div className="text-xs font-normal text-muted-foreground">
                         {r.role ?? "—"}
                         {r.id !== OPEN && (
-                          <span className={cn("ml-1", r.weekly > 0 && r.minutes > r.weekly * 60 && "text-amber-600 dark:text-amber-400")}>
+                          <span className={cn("ms-1", r.weekly > 0 && r.minutes > r.weekly * 60 && "text-amber-600 dark:text-amber-400")}>
+                            {r.weekly > 0 && r.minutes > r.weekly * 60 && <span className="sr-only">Over contracted hours: </span>}
                             · {hours(r.minutes)}
                             {r.weekly > 0 ? ` / ${r.weekly}h` : ""}
                           </span>
@@ -192,7 +213,7 @@ export function RotaTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: N
                             <button
                               type="button"
                               onClick={() => setEditing({ shift: null, day: d, staffId: r.id === OPEN ? null : r.id })}
-                              className="mt-auto rounded-md border border-dashed border-transparent px-1 py-0.5 text-left text-[11px] text-muted-foreground opacity-0 transition-opacity hover:border-border hover:bg-secondary/60 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 [tr:hover_&]:opacity-100"
+                              className="mt-auto min-h-7 rounded-md border border-dashed border-transparent px-1 py-0.5 text-start text-[11px] text-muted-foreground opacity-0 transition-opacity hover:border-border hover:bg-secondary/60 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none [tr:hover_&]:opacity-100 [@media(hover:none)]:border-border [@media(hover:none)]:opacity-100"
                               aria-label={`Add shift for ${r.name} on ${fmtDay(d)}`}
                             >
                               + Add
@@ -204,7 +225,8 @@ export function RotaTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: N
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </TableScroller>
           </div>
 
           {/* Mobile: day-by-day list */}
@@ -218,7 +240,7 @@ export function RotaTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: N
                       {fmtDay(d, { weekday: "long", month: "short", day: "numeric" })}
                     </h3>
                     <Button size="sm" variant="ghost" touch aria-label={`Add shift on ${fmtDay(d)}`} onClick={() => setEditing({ shift: null, day: d })}>
-                      <Plus className="h-4 w-4" />
+                      <Plus className="h-4 w-4" aria-hidden /> Add
                     </Button>
                   </header>
                   {list.length === 0 ? (
@@ -227,15 +249,16 @@ export function RotaTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: N
                     <ul className="divide-y divide-border">
                       {list.map((s) => (
                         <li key={s.id}>
-                          <button type="button" onClick={() => setEditing({ shift: s })} className="flex min-h-14 w-full items-center justify-between gap-3 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                          <button type="button" onClick={() => setEditing({ shift: s })} className="flex min-h-14 w-full items-center justify-between gap-3 px-3 py-2 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Edit ${s.staff_name ?? "open"} shift ${fmtTime(s.starts_at, tz)} to ${fmtTime(s.ends_at, tz)}, ${s.status}`}>
                             <span className="min-w-0">
                               <span className="block truncate text-sm font-medium">{s.staff_name ?? "Open shift"}</span>
                               <span className="block text-xs text-muted-foreground">
                                 {fmtTime(s.starts_at, tz)} – {fmtTime(s.ends_at, tz)} · {hours(s.minutes)}
                                 {s.role_title ? ` · ${s.role_title}` : ""}
+                                {s.location ? ` · ${s.location}` : ""}
                               </span>
                             </span>
-                            <StatusPill status={s.status} map={SHIFT_TONE} />
+                            <StatusPill status={s.status} map={SHIFT_TONE} className="shrink-0" />
                           </button>
                         </li>
                       ))}
@@ -297,7 +320,7 @@ function ShiftChip({ shift, tz, onClick }: { shift: ShiftDTO; tz: string; onClic
     <button
       type="button"
       onClick={onClick}
-      className={cn("w-full rounded-md border px-1.5 py-1 text-left text-[11px] leading-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", cls[tone] ?? cls.neutral)}
+      className={cn("w-full rounded-md border px-1.5 py-1 text-start text-[11px] leading-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", cls[tone] ?? cls.neutral)}
       aria-label={`${shift.staff_name ?? "Open"} shift ${fmtTime(shift.starts_at, tz)} to ${fmtTime(shift.ends_at, tz)}, ${shift.status}`}
     >
       <span className="block font-medium">
@@ -436,21 +459,17 @@ function ShiftDialog({
             <Textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} maxLength={2000} />
           </Field>
         </div>
-        {!shift && (
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" className="h-4 w-4" checked={form.publish} onChange={(e) => set("publish", e.target.checked)} /> Publish immediately (notifies the person)
-          </label>
-        )}
+        {!shift && <Checkbox checked={form.publish} onChange={(e) => set("publish", e.target.checked)} label="Publish immediately (notifies the person)" />}
         <DialogFooter
           start={
             shift && (
               <span className="flex flex-wrap gap-2">
                 <Button type="button" variant="ghost" size="sm" touch disabled={saving} onClick={() => void remove()}>
-                  <Trash2 className="h-4 w-4" /> {shift.status === "draft" ? "Delete" : "Cancel shift"}
+                  <Trash2 className="h-4 w-4" aria-hidden /> {shift.status === "draft" ? "Delete" : "Cancel shift"}
                 </Button>
                 {shift.staff_id && shift.status !== "cancelled" && (
                   <Button type="button" variant="ghost" size="sm" touch disabled={saving} onClick={() => onSwap(shift)}>
-                    <ArrowLeftRight className="h-4 w-4" /> Swap
+                    <ArrowLeftRight className="h-4 w-4" aria-hidden /> Swap
                   </Button>
                 )}
               </span>
@@ -461,7 +480,7 @@ function ShiftDialog({
             Close
           </Button>
           <Button type="submit" touch disabled={saving}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />} {shift ? "Save" : form.publish ? "Publish shift" : "Add draft"}
+            {saving && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} {shift ? "Save" : form.publish ? "Publish shift" : "Add draft"}
           </Button>
         </DialogFooter>
       </form>
@@ -508,7 +527,7 @@ function SwapDialog({ shift, staff, tz, onClose, onSaved }: { shift: ShiftDTO; s
             Cancel
           </Button>
           <Button type="submit" touch disabled={saving || !to}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />} Request swap
+            {saving && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} Request swap
           </Button>
         </DialogFooter>
       </form>

@@ -100,6 +100,15 @@ export async function removeObject(storagePath: string): Promise<void> {
 }
 
 /** `<dataId>/<entity_kind>/<entity_id>/<id>` — tenant-first so a prefix listing never crosses orgs. */
+const KEY_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,199}$/;
+
 export function objectKey(dataId: string, entityKind: string, entityId: string, id: string): string {
-  return join(dataId, entityKind, entityId, id).split(sep).join("/");
+  const segments = [dataId, entityKind, entityId, id];
+  for (const seg of segments) {
+    // `..`, separators, empty or odd segments would let a caller-supplied entity id escape the tenant prefix.
+    if (!KEY_SEGMENT_RE.test(seg) || seg === "." || seg === "..") throw new Error("invalid storage key segment");
+  }
+  const key = join(...segments).split(sep).join("/");
+  if (!key.startsWith(`${dataId}/`)) throw new Error("storage key escaped tenant prefix");
+  return key;
 }

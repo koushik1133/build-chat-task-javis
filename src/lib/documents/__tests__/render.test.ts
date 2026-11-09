@@ -42,6 +42,17 @@ describe("merge fields", () => {
     expect(markdownToText(merged)).toBe("# Boss");
   });
 
+  it("escapes rule-like and numbered-paren lines so a value never becomes a horizontal rule or list", () => {
+    expect(escapeMergeValue("---")).toBe("\\---");
+    expect(escapeMergeValue("  ___")).toBe("  \\___");
+    expect(escapeMergeValue("2) second")).toBe("\\2) second");
+    expect(escapeMergeValue("--")).toBe("--"); // too short to be a rule, left alone
+    expect(escapeMergeValue("well-known")).toBe("well-known");
+    const merged = renderMerge("Before\n{{v}}\nAfter", { v: "---" }).body;
+    expect(parseMarkdown(merged).map((b) => b.type)).toEqual(["paragraph"]);
+    expect(markdownToText(merged)).toBe("Before --- After");
+  });
+
   it("is single-pass: a merged value containing {{...}} is not expanded", () => {
     const out = renderMerge("{{a}}", { a: "{{b}}", b: "SECRET" });
     expect(out.body).toBe("{{b}}");
@@ -122,5 +133,28 @@ describe("document PDF", () => {
     expect(redacted).not.toContain("203.0.113.9");
     expect(redacted).toContain("IP and device recorded");
     expect(documentHash(signed)).not.toBe(hash);
+  });
+});
+
+describe("public (signer) PDF redaction (SEC: no other signers' emails on the public copy)", () => {
+  const stamps: SignerStamp[] = [
+    { name: "Ada Client", email: "ada.client@example.test", role: "Client", signature_text: "Ada Client", signed_at: "2026-11-09T10:00:00.000Z", ip: "203.0.113.9", user_agent: "itest", consent_text: null },
+    { name: "Bob Provider", email: "bob@example.test", role: null, signature_text: "Bob", signed_at: "2026-11-09T11:00:00.000Z", ip: "203.0.113.10", user_agent: "itest", consent_text: null },
+  ];
+  const input = { title: "Service Agreement", kind: "contract" as const, body_md: "# Hello", created_at: "2026-11-01T00:00:00Z", sent_at: "2026-11-02T00:00:00Z", expires_at: null, completed_at: "2026-11-09T11:00:00Z", status: "signed" as const, reference: "DOC-1" };
+
+  it("prints hints instead of addresses and hides IP/UA when redactEvidence is set", () => {
+    const text = Buffer.from(renderDocumentPdf(input, stamps, {} as Parameters<typeof renderDocumentPdf>[2], { redactEvidence: true, documentHash: "abc" })).toString("latin1");
+    expect(text).not.toContain("ada.client@example.test");
+    expect(text).not.toContain("bob@example.test");
+    expect(text).not.toContain("203.0.113.9");
+    expect(text).toContain("@example.test");
+    expect(text).toContain("IP and device recorded");
+  });
+
+  it("keeps full evidence on the internal copy", () => {
+    const text = Buffer.from(renderDocumentPdf(input, stamps, {} as Parameters<typeof renderDocumentPdf>[2], { documentHash: "abc" })).toString("latin1");
+    expect(text).toContain("ada.client@example.test");
+    expect(text).toContain("203.0.113.9");
   });
 });

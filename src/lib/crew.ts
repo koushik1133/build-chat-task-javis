@@ -6,7 +6,8 @@ import { minutesBetween } from "@/lib/finance/time";
 import { clockInStaff, clockOutStaff, openAttendance } from "@/lib/workforce/attendance";
 import { requestLeave } from "@/lib/workforce/leave";
 import { WorkforceError } from "@/lib/workforce/staff";
-import { LEAVE_KINDS, type LeaveKind } from "@/lib/workforce/pure";
+import { isValidYmd, LEAVE_KINDS, type LeaveKind } from "@/lib/workforce/pure";
+import { rateLimitAsync } from "@/lib/request-limits";
 
 /** Crew clock-ins are ordinary time_entries rows keyed by ref_kind/ref_id = crew/<token id>. */
 export const CREW_REF_KIND = "crew";
@@ -189,6 +190,54 @@ export class CrewActionError extends Error {
   }
 }
 
+export const CREW_LEAVE_MAX_DAYS = 365;
+export const CREW_LEAVE_REQUESTS_PER_DAY = 10;
+
+/** Crew links may only file real, bounded date ranges (≤ 365 days, within the next two years). */
+export function assertCrewLeaveRange(startsOn: string, endsOn: string, now = new Date()): void {
+  if (!isValidYmd(startsOn) || !isValidYmd(endsOn)) throw new CrewActionError(400, "Leave dates must be real calendar dates (YYYY-MM-DD).");
+  const start = Date.parse(`${startsOn}T00:00:00Z`);
+  const end = Date.parse(`${endsOn}T00:00:00Z`);
+  if (end < start) throw new CrewActionError(400, "Leave must end on or after it starts.");
+  if ((end - start) / 86_400_000 >= CREW_LEAVE_MAX_DAYS) throw new CrewActionError(400, `Leave requests are limited to ${CREW_LEAVE_MAX_DAYS} days.`);
+  const horizon = now.getTime() + 2 * 366 * 86_400_000;
+  if (start > horizon) throw new CrewActionError(400, "Leave cannot start more than two years ahead.");
+  if (end < now.getTime() - 366 * 86_400_000) throw new CrewActionError(400, "Leave cannot end more than a year in the past.");
+}
+
+/**
+ * Crew timer in `time_entries` (billing / job-costing trail). Clock-in is a
+ * conditional INSERT (one open timer per token, decided inside the statement);
+ * clock-out closes the open timer and fills `minutes`. Returns null when there
+ * was nothing to do (already open / nothing open). Throws on DB errors.
+ */
+async function crewTimeEntry(dataId: string, t: CrewToken, who: string, action: "clock_in" | "clock_out"): Promise<Record<string, unknown> | null> {
+  if (action === "clock_in") {
+    const id = randomUUID();
+    const startedAt = new Date().toISOString();
+    const inserted = await query<{ id: string }>(
+      `INSERT INTO time_entries (id, user_id, member_id, ref_kind, ref_id, description, started_at, rate_minor, currency, billable)
+       SELECT $1, $2, NULL, $3, $4, $5, $6, 0, 'USD', FALSE
+        WHERE NOT EXISTS (SELECT 1 FROM time_entries WHERE user_id = $2 AND ref_kind = $3 AND ref_id = $4 AND ended_at IS NULL)
+       RETURNING id`,
+      [id, dataId, CREW_REF_KIND, t.id, `Crew: ${who}`, startedAt]
+    );
+    if (inserted.length === 0) return null;
+    if (t.staff_id) await query(`UPDATE time_entries SET staff_id = $3 WHERE id = $1 AND user_id = $2`, [id, dataId, t.staff_id]).catch(() => undefined);
+    return { entryId: id, startedAt };
+  }
+  const rows = await query<{ id: string; started_at: string | Date; ended_at: string | Date }>(
+    `UPDATE time_entries SET ended_at = NOW() WHERE user_id = $1 AND ref_kind = $2 AND ref_id = $3 AND ended_at IS NULL RETURNING id, started_at, ended_at`,
+    [dataId, CREW_REF_KIND, t.id]
+  );
+  if (!rows[0]) return null;
+  const startedAt = new Date(rows[0].started_at).toISOString();
+  const endedAt = new Date(rows[0].ended_at).toISOString();
+  // Fill `minutes` so the entry shows up in billables / job costing like any other stopped timer.
+  await query(`UPDATE time_entries SET minutes = $3 WHERE id = $1 AND user_id = $2`, [rows[0].id, dataId, minutesBetween(startedAt, endedAt)]).catch(() => undefined);
+  return { entryId: rows[0].id, startedAt, endedAt };
+}
+
 export async function runCrewAction(t: CrewToken, a: CrewAction): Promise<Record<string, unknown>> {
   const dataId = t.user_id;
   const who = t.label ?? "Crew";
@@ -222,6 +271,8 @@ export async function runCrewAction(t: CrewToken, a: CrewAction): Promise<Record
     case "request_leave": {
       if (!t.staff_id) throw new CrewActionError(403, "This link is not tied to a staff profile.");
       if (!LEAVE_KINDS.includes(a.kind)) throw new CrewActionError(400, "Unknown leave kind.");
+      assertCrewLeaveRange(a.starts_on, a.ends_on);
+      if (!(await rateLimitAsync(`crew:leave:${t.id}`, CREW_LEAVE_REQUESTS_PER_DAY, 86_400_000)).allowed) throw new CrewActionError(429, "Too many leave requests from this link today.");
       try {
         const leave = await requestLeave(dataId, { staff_id: t.staff_id, kind: a.kind, starts_on: a.starts_on, ends_on: a.ends_on, note: a.note ?? null }, `crew:${t.id}`);
         return { leave };
@@ -236,36 +287,25 @@ export async function runCrewAction(t: CrewToken, a: CrewAction): Promise<Record
       if (!hasTime && !t.staff_id) throw new CrewActionError(501, "Time tracking is not enabled for this workspace.");
       // Attendance (workforce) when the link is tied to a staff profile; time_entries keeps the billing/job-costing trail.
       if (t.staff_id) {
-        const att = a.action === "clock_in" ? await clockInStaff(dataId, t.staff_id, "crew").catch(() => null) : await clockOutStaff(dataId, t.staff_id).catch(() => null);
-        if (!att && !hasTime) throw new CrewActionError(409, a.action === "clock_in" ? "Already clocked in." : "Not clocked in.");
-        if (att && !hasTime) return a.action === "clock_in" ? { attendanceId: att.id, startedAt: att.clock_in } : { attendanceId: att.id, startedAt: att.clock_in, endedAt: att.clock_out };
+        // Attendance is authoritative for staff-linked links: "already clocked in" / "not clocked in"
+        // is decided here, and the time_entries mirror below is best-effort so the two trails never
+        // disagree about whether this person is on the clock (payroll reads attendance.minutes).
+        const att = a.action === "clock_in" ? await clockInStaff(dataId, t.staff_id, "crew") : await clockOutStaff(dataId, t.staff_id);
+        if (!att) throw new CrewActionError(409, a.action === "clock_in" ? "Already clocked in." : "Not clocked in.");
+        const base = a.action === "clock_in" ? { attendanceId: att.id, startedAt: att.clock_in } : { attendanceId: att.id, startedAt: att.clock_in, endedAt: att.clock_out };
+        if (!hasTime) return base;
+        try {
+          const mirrored = await crewTimeEntry(dataId, t, who, a.action);
+          return { ...base, ...(mirrored ?? {}) };
+        } catch (err) {
+          console.warn("[crew] time_entries mirror failed:", err instanceof Error ? err.message : err);
+          return base;
+        }
       }
       try {
-        if (a.action === "clock_in") {
-          // Conditional INSERT: one open crew timer per token, decided inside the statement.
-          const id = randomUUID();
-          const startedAt = new Date().toISOString();
-          const inserted = await query<{ id: string }>(
-            `INSERT INTO time_entries (id, user_id, member_id, ref_kind, ref_id, description, started_at, rate_minor, currency, billable)
-             SELECT $1, $2, NULL, $3, $4, $5, $6, 0, 'USD', FALSE
-              WHERE NOT EXISTS (SELECT 1 FROM time_entries WHERE user_id = $2 AND ref_kind = $3 AND ref_id = $4 AND ended_at IS NULL)
-             RETURNING id`,
-            [id, dataId, CREW_REF_KIND, t.id, `Crew: ${who}`, startedAt]
-          );
-          if (inserted.length && t.staff_id) await query(`UPDATE time_entries SET staff_id = $3 WHERE id = $1 AND user_id = $2`, [id, dataId, t.staff_id]).catch(() => undefined);
-          if (inserted.length === 0) throw new CrewActionError(409, "Already clocked in.");
-          return { entryId: id, startedAt };
-        }
-        const rows = await query<{ id: string; started_at: string | Date; ended_at: string | Date }>(
-          `UPDATE time_entries SET ended_at = NOW() WHERE user_id = $1 AND ref_kind = $2 AND ref_id = $3 AND ended_at IS NULL RETURNING id, started_at, ended_at`,
-          [dataId, CREW_REF_KIND, t.id]
-        );
-        if (!rows[0]) throw new CrewActionError(409, "Not clocked in.");
-        const startedAt = new Date(rows[0].started_at).toISOString();
-        const endedAt = new Date(rows[0].ended_at).toISOString();
-        // Fill `minutes` so the entry shows up in billables / job costing like any other stopped timer.
-        await query(`UPDATE time_entries SET minutes = $3 WHERE id = $1 AND user_id = $2`, [rows[0].id, dataId, minutesBetween(startedAt, endedAt)]).catch(() => undefined);
-        return { entryId: rows[0].id, startedAt, endedAt };
+        const entry = await crewTimeEntry(dataId, t, who, a.action);
+        if (!entry) throw new CrewActionError(409, a.action === "clock_in" ? "Already clocked in." : "Not clocked in.");
+        return entry;
       } catch (err) {
         if (err instanceof CrewActionError) throw err;
         console.warn("[crew] time_entries write failed:", err instanceof Error ? err.message : err);

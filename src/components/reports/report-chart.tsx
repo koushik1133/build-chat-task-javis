@@ -50,7 +50,7 @@ function Tooltip({ x, width, children }: { x: number; width: number; children: R
   const left = Math.min(Math.max(x, 0), width);
   const flip = left > width * 0.6;
   return (
-    <div role="status" aria-live="polite" className="pointer-events-none absolute top-1 z-10 max-w-[min(16rem,80%)] rounded-md border border-border bg-card px-2.5 py-1.5 text-xs shadow-md" style={{ left, transform: flip ? "translateX(calc(-100% - 8px))" : "translateX(8px)" }}>
+    <div aria-hidden className="pointer-events-none absolute top-1 z-10 max-w-[min(16rem,80%)] rounded-md border border-border bg-card px-2.5 py-1.5 text-xs shadow-md" style={{ left, transform: flip ? "translateX(calc(-100% - 8px))" : "translateX(8px)" }}>
       {children}
     </div>
   );
@@ -77,11 +77,11 @@ export function ReportChart(props: ReportChartProps) {
 
 function KpiTiles({ data, currency, className }: { data: ChartData; currency: string; className?: string }) {
   return (
-    <div className={cn("grid grid-cols-2 gap-3 lg:grid-cols-4", className)}>
+    <div className={cn("grid grid-cols-2 gap-3 lg:grid-cols-4", className)} role="list">
       {data.series.map((s) => (
-        <div key={s.key} className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">{s.label}</p>
-          <p className="mt-1 text-xl font-semibold tabular-nums sm:text-2xl">{formatValue(s.values[0], data.format, currency)}</p>
+        <div key={s.key} role="listitem" className="min-w-0 rounded-xl border border-border bg-card p-4">
+          <p className="truncate text-xs uppercase tracking-wide text-muted-foreground" title={s.label}>{s.label}</p>
+          <p className="mt-1 break-words text-xl font-semibold tabular-nums sm:text-2xl">{formatValue(s.values[0], data.format, currency)}</p>
         </div>
       ))}
       {data.series.length === 0 && <p className="text-sm text-muted-foreground">Add a measure to show a KPI.</p>}
@@ -113,8 +113,9 @@ function SeriesChart({ data, currency, title, className, compact, kind }: { data
   return (
     <div ref={ref} className={cn("kh-viz relative", className)}>
       <style>{VIZ_STYLE + EXTRA_STYLE}</style>
-      <svg width={width} height={height} role="img" aria-labelledby={`${id}-t`} className="block" onMouseLeave={() => setHover(null)} onKeyDown={(e) => e.key === "Escape" && setHover(null)}>
-        <title id={`${id}-t`}>{title ?? `${kind} chart of ${data.series.map((s) => s.label).join(", ")}`}</title>
+      <svg width={width} height={height} role="img" aria-labelledby={`${id}-t`} aria-describedby={`${id}-d`} className="block max-w-full" onMouseLeave={() => setHover(null)} onKeyDown={(e) => e.key === "Escape" && setHover(null)}>
+        <title id={`${id}-t`}>{title ?? `${kind === "bar" ? "Bar" : "Line"} chart of ${data.series.map((s) => s.label).join(", ")}`}</title>
+        <desc id={`${id}-d`}>{n} {n === 1 ? "category" : "categories"}, {data.series.length} {data.series.length === 1 ? "series" : "series"}. Use Tab to move between points; each point reads its values.</desc>
         {ticks.map((t) => (
           <g key={t}>
             <line x1={pad.left} x2={width - pad.right} y1={y(t)} y2={y(t)} stroke="var(--viz-grid)" />

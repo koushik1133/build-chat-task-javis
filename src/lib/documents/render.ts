@@ -1,6 +1,6 @@
 import { PdfDocument, measureText, type PdfFont, type Rgb } from "@/lib/pdf/writer";
 import { CONSENT_TEXT, Flow, INK, MUTED, PANEL, RULE, documentHash, drawFooters, drawHeader, fmtDateOnly, fmtInstant } from "@/lib/pdf/quote-document";
-import type { DocumentKind, MergeField } from "./types";
+import { emailHint, type DocumentKind, type MergeField } from "./types";
 
 /**
  * Pure rendering for documents: merge-field substitution, a small markdown
@@ -29,7 +29,14 @@ export function escapeMergeValue(v: string): string {
   return v
     .replace(/\r\n?/g, "\n")
     .split("\n")
-    .map((line) => line.replace(/\*/g, "\\*").replace(/^(\s*)([#>\-+]|\d+\.)(\s)/, "$1\\$2$3").replace(/\|/g, "\\|"))
+    .map((line) =>
+      line
+        .replace(/\*/g, "\\*")
+        .replace(/^(\s*)([#>\-+]|\d+[.)])(\s)/, "$1\\$2$3")
+        // a value line of only ---/___ would otherwise render as a horizontal rule
+        .replace(/^(\s*)([-_])(?=[-_]{2,}\s*$)/, "$1\\$2")
+        .replace(/\|/g, "\\|")
+    )
     .join("\n");
 }
 
@@ -326,7 +333,8 @@ function drawSignerBlock(flow: Flow, s: SignerStamp, docHash: string | null, tz:
   const valueX = inner + labelW;
   const valueW = flow.width - labelW - 24;
   const rows: Array<[string, string, { font?: PdfFont; size?: number }?]> = [
-    ["Signed by", `${s.name} <${s.email}>${s.role ? ` (${s.role})` : ""}`],
+    // The public (signer) copy never prints the other signers' full addresses.
+    ["Signed by", `${s.name} <${redact ? emailHint(s.email) : s.email}>${s.role ? ` (${s.role})` : ""}`],
     ["Signature", s.signature_text?.trim() || s.name, { font: "Helvetica-Oblique", size: 15 }],
     ["Signed at (UTC)", fmtInstant(s.signed_at, "UTC")],
   ];

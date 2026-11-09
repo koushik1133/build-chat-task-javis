@@ -16,10 +16,10 @@ import type { Catalog, JsonSchema } from "./shared";
  * and the live preview renders the input against the sample context.
  */
 
-function TemplateHint({ listId }: { listId: string }) {
+function TemplateHint() {
   return (
     <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-      <Braces className="h-3 w-3" aria-hidden /> type <code>{"{{"}</code> and pick a field (list: {listId.replace(/-.*$/, "")})
+      <Braces className="h-3 w-3" aria-hidden /> Type <code>{"{{"}</code> in a text field and pick a context path from the suggestions
     </span>
   );
 }
@@ -29,7 +29,7 @@ function Preview({ label = "Preview", value }: { label?: string; value: unknown 
   return (
     <div className="rounded-md border border-dashed border-border bg-secondary/30 px-3 py-2">
       <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
-      <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">{text || "(empty)"}</pre>
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] text-xs" tabIndex={0}>{text || "(empty)"}</pre>
     </div>
   );
 }
@@ -137,7 +137,7 @@ function ToolSelect({ tools, value, onChange }: { tools: Catalog["tools"]; value
     return tools.filter((t) => !needle || t.name.includes(needle) || t.description.toLowerCase().includes(needle)).slice(0, 60);
   }, [tools, q]);
   return (
-    <div className="grid gap-2 sm:grid-cols-[1fr_2fr]">
+    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
       <Field label="Find a tool">
         <Input placeholder="e.g. tasks, helpdesk, crm" value={q} onChange={(e) => setQ(e.target.value)} />
       </Field>
@@ -169,14 +169,14 @@ export function StepConfigEditor({ step, onChange, catalog, context, listId, all
             <>
               <p className="text-xs text-muted-foreground">
                 {tool.description}{" "}
-                {tool.gated && <Pill tone="warning">needs approval unless autonomy is auto</Pill>}
+                {tool.gated && <Pill tone="warning">Needs approval unless autonomy is automatic</Pill>}
               </p>
               <SchemaForm schema={tool.schema} value={step.config.input} onChange={(input) => setCfg<"tool">({ ...step.config, input })} listId={listId} />
-              <TemplateHint listId={listId} />
+              <TemplateHint />
               <Preview label="Rendered input (sample event)" value={renderValue(step.config.input, context)} />
             </>
           ) : (
-            <p className="text-xs text-destructive">Tool {step.config.tool || "(none)"} is not registered.</p>
+            <p className="text-xs text-destructive" role="alert">Tool {step.config.tool || "(none)"} is not registered.</p>
           )}
         </div>
       );
@@ -238,7 +238,7 @@ export function StepConfigEditor({ step, onChange, catalog, context, listId, all
           <Field label="Prompt">
             <Textarea rows={4} value={step.config.prompt} onChange={(e) => setCfg<"agent">({ ...step.config, prompt: e.target.value })} />
           </Field>
-          <TemplateHint listId={listId} />
+          <TemplateHint />
           <Preview value={resolveTemplate(step.config.prompt, context)} />
         </div>
       );
@@ -273,7 +273,7 @@ export function StepConfigEditor({ step, onChange, catalog, context, listId, all
               )}
             </div>
           )}
-          <TemplateHint listId={listId} />
+          <TemplateHint />
           <Preview value={{ to: resolveTemplate(step.config.to, context), subject: step.config.subject ? resolveTemplate(step.config.subject, context) : null, body: resolveTemplate(step.config.body, context) }} />
         </div>
       );

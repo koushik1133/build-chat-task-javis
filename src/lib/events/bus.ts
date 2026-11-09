@@ -82,6 +82,7 @@ export const EVENT_TYPES = [
   "quote.sent",
   "invoice.created",
   "invoice.sent",
+  "invoice.overdue",
   "product.created",
   "product.stock_changed",
   "expense.created",

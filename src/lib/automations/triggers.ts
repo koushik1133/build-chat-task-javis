@@ -159,12 +159,22 @@ export interface FanOutResult {
   queued: number;
 }
 
+function explicitlyNamesAutomationEvents(pattern: string | undefined): boolean {
+  if (!pattern) return false;
+  return pattern.split(",").some((raw) => raw.trim().startsWith("automation."));
+}
+
 /** Decide whether one automation fires for one event (pure, exported for tests). */
 export function triggerMatches(def: AutomationDefinition, event: RunEvent, automationId: string): boolean {
   if (!def.enabled || def.trigger_type !== "event") return false;
   if (!matchesEventType(def.trigger_config.event_type, event.type)) return false;
-  // Never let an automation react to its own run events (infinite loop guard).
-  if (event.type.startsWith("automation.") && String(event.data.automation_id ?? "") === automationId) return false;
+  if (event.type.startsWith("automation.")) {
+    // Loop guards: never react to this automation's own run events, and only react to *other*
+    // automations' run events when the trigger names them explicitly ("automation.run_finished",
+    // "automation.*"). A catch-all "*" would otherwise ping-pong between two automations forever.
+    if (String(event.data.automation_id ?? "") === automationId) return false;
+    if (!explicitlyNamesAutomationEvents(def.trigger_config.event_type)) return false;
+  }
   return matchesFilter(def.trigger_config.filter, event.data);
 }
 

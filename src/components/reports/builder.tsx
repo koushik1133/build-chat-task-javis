@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Play, Plus, Save, X } from "lucide-react";
+import { Loader2, Play, Plus, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
-import { Banner, Empty, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, Skeleton, SkeletonList } from "@/components/ui/feedback";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { isAbortError, useAbortable, useDebouncedValue } from "@/components/ui/hooks";
 import { api } from "@/components/finance/shared";
@@ -87,8 +87,8 @@ export function ReportBuilder({ catalogue, initial, onSaved, canEdit }: Props) {
   const update = (patch: Partial<ReportSpec>) => setSpec((s) => ({ ...s, ...patch }));
   const setFilter = (i: number, f: ReportFilter) => update({ filters: spec.filters.map((x, j) => (j === i ? f : x)) });
 
-  if (!catalogue) return <Loading label="Loading datasets…" />;
-  if (catalogue.datasets.length === 0) return <Empty title="No datasets available" text="Your role cannot view any reportable module yet." />;
+  if (!catalogue) return <SkeletonList count={4} itemClassName="h-12" label="Loading datasets…" />;
+  if (catalogue.datasets.length === 0) return <Empty title="No datasets available" text="Your role cannot view any reportable module yet. Ask an admin to grant view access to a module." />;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -175,15 +175,15 @@ export function ReportBuilder({ catalogue, initial, onSaved, canEdit }: Props) {
                   </Select>
                 )}
                 {flt.op === "date_range" && !preset && v && typeof v === "object" && !Array.isArray(v) && (
-                  <div className="flex gap-2">
-                    <Input type="date" aria-label="From" value={"from" in v ? (v.from ?? "") : ""} onChange={(e) => setFilter(i, { ...flt, value: { from: e.target.value, to: "to" in v ? (v.to ?? "") : "" } })} />
-                    <Input type="date" aria-label="To" value={"to" in v ? (v.to ?? "") : ""} onChange={(e) => setFilter(i, { ...flt, value: { from: "from" in v ? (v.from ?? "") : "", to: e.target.value } })} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input type="date" aria-label={`Filter ${i + 1} from date`} className="min-w-0" value={"from" in v ? (v.from ?? "") : ""} onChange={(e) => setFilter(i, { ...flt, value: { from: e.target.value, to: "to" in v ? (v.to ?? "") : "" } })} />
+                    <Input type="date" aria-label={`Filter ${i + 1} to date`} className="min-w-0" value={"to" in v ? (v.to ?? "") : ""} onChange={(e) => setFilter(i, { ...flt, value: { from: "from" in v ? (v.from ?? "") : "", to: e.target.value } })} />
                   </div>
                 )}
                 {flt.op === "between" && Array.isArray(v) && (
-                  <div className="flex gap-2">
-                    <Input type={kind === "date" ? "date" : "number"} aria-label="From" value={String(v[0] ?? "")} onChange={(e) => setFilter(i, { ...flt, value: [kind === "measure" ? Number(e.target.value) : e.target.value, v[1] ?? ""] })} />
-                    <Input type={kind === "date" ? "date" : "number"} aria-label="To" value={String(v[1] ?? "")} onChange={(e) => setFilter(i, { ...flt, value: [v[0] ?? "", kind === "measure" ? Number(e.target.value) : e.target.value] })} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input type={kind === "date" ? "date" : "number"} aria-label={`Filter ${i + 1} lower bound`} className="min-w-0" value={String(v[0] ?? "")} onChange={(e) => setFilter(i, { ...flt, value: [kind === "measure" ? Number(e.target.value) : e.target.value, v[1] ?? ""] })} />
+                    <Input type={kind === "date" ? "date" : "number"} aria-label={`Filter ${i + 1} upper bound`} className="min-w-0" value={String(v[1] ?? "")} onChange={(e) => setFilter(i, { ...flt, value: [v[0] ?? "", kind === "measure" ? Number(e.target.value) : e.target.value] })} />
                   </div>
                 )}
                 {(flt.op === "in" || flt.op === "not_in") && (
@@ -198,7 +198,7 @@ export function ReportBuilder({ catalogue, initial, onSaved, canEdit }: Props) {
         </Section>
 
         <Section title="Chart">
-          <div role="group" aria-label="Chart type" className="flex flex-wrap gap-1 rounded-lg border border-border bg-card p-1">
+          <div role="group" aria-label="Chart type" className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-card p-1 sm:flex sm:flex-wrap">
             {CHART_TYPES.map((t) => (
               <button key={t} type="button" aria-pressed={chart.type === t} onClick={() => setChart((c) => ({ ...c, type: t }))} className={cn("inline-flex min-h-11 flex-1 items-center justify-center rounded-md px-2 text-sm font-medium capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8", chart.type === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground")}>
                 {t}
@@ -239,21 +239,45 @@ export function ReportBuilder({ catalogue, initial, onSaved, canEdit }: Props) {
         </div>
       </aside>
 
-      <section aria-label="Preview" aria-busy={running || undefined} className="min-w-0 space-y-4">
+      <section aria-labelledby="preview-heading" aria-busy={running || undefined} className="min-w-0 space-y-4">
+        <h2 id="preview-heading" className="sr-only">Preview</h2>
         {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
-        {!result && running && <Loading label="Running…" />}
+        <p className="sr-only" role="status" aria-live="polite">
+          {running ? "Running the report…" : result ? `Report ready: ${result.row_count} row${result.row_count === 1 ? "" : "s"}${result.truncated ? ", limited to the first 500" : ""}.` : ""}
+        </p>
+        {!result && running && (
+          <div className="space-y-4" aria-hidden>
+            <Skeleton className="h-4 w-40" />
+            {chart.type !== "table" && <Skeleton className="h-64 rounded-xl" />}
+            <div className="space-y-2">
+              <Skeleton className="h-9 rounded-lg" />
+              <Skeleton className="h-9 rounded-lg" />
+              <Skeleton className="h-9 rounded-lg" />
+              <Skeleton className="h-9 rounded-lg" />
+            </div>
+          </div>
+        )}
+        {!result && !running && !error && <Empty title="Preview appears here" text="Pick a dataset, then add groups, measures and filters. The preview re-runs as you change them." />}
         {result && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{result.row_count} row{result.row_count === 1 ? "" : "s"}{result.truncated ? " (limited)" : ""} · {result.timezone}</span>
-              {running && <span aria-live="polite">Refreshing…</span>}
+              <span className="tabular-nums">{result.row_count} row{result.row_count === 1 ? "" : "s"}{result.truncated ? " (limited to 500)" : ""} · {result.timezone}</span>
+              {running && <span className="inline-flex items-center gap-1"><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> Refreshing…</span>}
             </div>
             {chart.type !== "table" && (
-              <div className="rounded-xl border border-border bg-card p-4">
+              <div className={cn("rounded-xl border border-border bg-card p-4 transition-opacity motion-reduce:transition-none", running && "opacity-60")}>
                 <ReportChart rows={result.rows} columns={result.columns} chart={chart} currency={result.currency} />
               </div>
             )}
-            {result.rows.length === 0 ? <Empty title="No rows match" text="Loosen the filters or widen the date range." /> : <ReportTable rows={result.rows} columns={result.columns} totals={result.totals} currency={result.currency} label="Report preview" max={100} />}
+            {result.rows.length === 0 ? (
+              <Empty
+                title="No rows match"
+                text="Loosen the filters or widen the date range."
+                action={spec.filters.length > 0 ? <Button type="button" variant="outline" touch onClick={() => update({ filters: [] })}>Clear filters</Button> : undefined}
+              />
+            ) : (
+              <ReportTable rows={result.rows} columns={result.columns} totals={result.totals} currency={result.currency} label="Report preview" max={100} className={cn("transition-opacity motion-reduce:transition-none", running && "opacity-60")} />
+            )}
           </>
         )}
       </section>
@@ -269,7 +293,7 @@ function Section({ title, children, onAdd, addLabel }: { title: string; children
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
         {onAdd && (
-          <Button type="button" size="sm" variant="ghost" onClick={onAdd} aria-label={addLabel}>
+          <Button type="button" size="sm" variant="ghost" touch onClick={onAdd} aria-label={addLabel}>
             <Plus className="h-4 w-4" aria-hidden /> Add
           </Button>
         )}
@@ -316,7 +340,7 @@ function SaveDialog({ initial, spec, chart, onClose, onSaved }: { initial: Saved
   }
   return (
     <Dialog title={initial ? "Save changes" : "Save report"} onClose={onClose} size="sm">
-      <form onSubmit={submit} className="space-y-4 p-4 sm:p-5">
+      <form onSubmit={submit} className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
         <Field label="Name" required>
           <Input value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoFocus />
@@ -331,8 +355,8 @@ function SaveDialog({ initial, spec, chart, onClose, onSaved }: { initial: Saved
           </Select>
         </Field>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save"}</Button>
+          <Button type="button" variant="outline" touch onClick={onClose}>Cancel</Button>
+          <Button type="submit" touch disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save"}</Button>
         </DialogFooter>
       </form>
     </Dialog>

@@ -185,7 +185,15 @@ export async function executeStep(step: Step, env: StepEnv, deps: StepDeps = def
           recipient: to,
           subject,
           body,
-          data: { automation_id: env.automation.id, run_id: env.runId, event_type: context.event.type },
+          // `category` + `member_user_id` let the outbox apply the member's channel/quiet-hour
+          // preferences; in-app recipients are member ids, email/SMS recipients are addresses.
+          data: {
+            automation_id: env.automation.id,
+            run_id: env.runId,
+            event_type: context.event.type,
+            category: "agents",
+            ...(step.config.channel === "in_app" ? { member_user_id: to } : {}),
+          },
         });
         return { status: "ok", summary: `Queued ${step.config.channel} to ${to}`, output: { outbox_id: id, to, subject } };
       } catch (err) {

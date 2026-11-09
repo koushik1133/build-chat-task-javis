@@ -42,9 +42,9 @@ function valueToString(v: unknown): string {
 function RuleRow({ rule, onChange, onRemove, listId }: { rule: ConditionRule; onChange: (r: ConditionRule) => void; onRemove: () => void; listId: string }) {
   const needsValue = rule.op !== "exists";
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <Input list={listId} aria-label="Field path" placeholder="event.data.status" value={rule.field} onChange={(e) => onChange({ ...rule, field: e.target.value })} className="sm:flex-1" />
-      <Select aria-label="Operator" value={rule.op} onChange={(e) => onChange({ ...rule, op: e.target.value as ConditionRule["op"] })} className="sm:w-40">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-lg border border-border bg-card p-2 sm:grid-cols-[minmax(0,1fr)_10rem_minmax(0,1fr)_auto] sm:items-center sm:border-0 sm:bg-transparent sm:p-0">
+      <Input list={listId} aria-label="Field path" placeholder="event.data.status" value={rule.field} onChange={(e) => onChange({ ...rule, field: e.target.value })} className="col-span-2 min-w-0 sm:col-span-1" />
+      <Select aria-label="Operator" value={rule.op} onChange={(e) => onChange({ ...rule, op: e.target.value as ConditionRule["op"] })} className="col-span-2 min-w-0 sm:col-span-1">
         {CONDITION_OPS.map((op) => (
           <option key={op} value={op}>
             {CONDITION_OP_LABELS[op]}
@@ -52,11 +52,11 @@ function RuleRow({ rule, onChange, onRemove, listId }: { rule: ConditionRule; on
         ))}
       </Select>
       {needsValue ? (
-        <Input aria-label="Value" placeholder={rule.op === "in" ? "a, b, c" : "value"} value={valueToString(rule.value)} onChange={(e) => onChange({ ...rule, value: parseValue(e.target.value) })} className="sm:flex-1" />
+        <Input aria-label="Value" placeholder={rule.op === "in" ? "a, b, c" : "value"} value={valueToString(rule.value)} onChange={(e) => onChange({ ...rule, value: parseValue(e.target.value) })} className="min-w-0" />
       ) : (
-        <div className="hidden sm:block sm:flex-1" />
+        <span className="text-xs text-muted-foreground sm:text-center">no value needed</span>
       )}
-      <Button type="button" variant="ghost" size="icon-sm" touch aria-label="Remove condition" onClick={onRemove}>
+      <Button type="button" variant="ghost" size="icon-sm" touch aria-label="Remove condition" onClick={onRemove} className="justify-self-end">
         <Trash2 className="h-4 w-4" aria-hidden />
       </Button>
     </div>
@@ -92,7 +92,7 @@ export function ConditionBuilder({
       {depth === 0 && <datalist id={listId}>{fieldOptions.map((f) => <option key={f} value={f} />)}</datalist>}
       <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <span className="text-muted-foreground">Match</span>
-        <Select aria-label="Group mode" value={mode} onChange={(e) => commit(items, e.target.value as "all" | "any")} className="w-32">
+        <Select aria-label="Group mode" value={mode} onChange={(e) => commit(items, e.target.value as "all" | "any")} className="w-36">
           <option value="all">all (AND)</option>
           <option value="any">any (OR)</option>
         </Select>
@@ -104,7 +104,7 @@ export function ConditionBuilder({
           isRule(n) ? (
             <RuleRow key={i} rule={n} listId={listId} onChange={(r) => update(i, r)} onRemove={() => remove(i)} />
           ) : (
-            <div key={i} className="flex items-start gap-2">
+            <div key={i} className="flex items-start gap-2" role="group" aria-label={`Nested condition group ${i + 1}`}>
               <div className="min-w-0 flex-1">
                 <ConditionBuilder value={n} onChange={(v) => (v ? update(i, v) : remove(i))} fieldOptions={fieldOptions} listId={listId} depth={depth + 1} />
               </div>
@@ -116,12 +116,12 @@ export function ConditionBuilder({
         )}
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => commit([...items, { field: "event.data.", op: "eq", value: "" }])}>
-          <Plus className="h-3.5 w-3.5" aria-hidden /> Condition
+        <Button type="button" variant="outline" size="sm" touch onClick={() => commit([...items, { field: "event.data.", op: "eq", value: "" }])}>
+          <Plus className="h-3.5 w-3.5" aria-hidden /> Add condition
         </Button>
         {depth < 2 && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => commit([...items, { any: [] }])}>
-            <Plus className="h-3.5 w-3.5" aria-hidden /> Group
+          <Button type="button" variant="ghost" size="sm" touch onClick={() => commit([...items, { any: [] }])}>
+            <Plus className="h-3.5 w-3.5" aria-hidden /> Add group
           </Button>
         )}
       </div>

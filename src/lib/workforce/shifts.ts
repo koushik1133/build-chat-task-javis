@@ -246,7 +246,7 @@ async function notifyPublished(dataId: string, shifts: ShiftDTO[]): Promise<void
         recipient: dataId,
         subject: `Rota published: ${c.display_name}`,
         body: `${mine.length} shift${mine.length === 1 ? "" : "s"} published for ${c.display_name}.`,
-        data: { kind: "shift.published", staffId, href: "/workforce" },
+        data: { kind: "shift.published", staffId, href: "/workforce", category: "team", member_user_id: dataId },
       });
     } catch (err) {
       console.error("[workforce] publish notification failed:", err);

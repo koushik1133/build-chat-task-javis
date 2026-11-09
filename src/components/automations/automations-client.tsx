@@ -126,10 +126,10 @@ export function AutomationsClient() {
       icon={<Zap className="h-5 w-5" aria-hidden />}
       actions={
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={() => setTab("templates")}>
+          <Button type="button" variant="outline" touch onClick={() => setTab("templates")}>
             <Download className="h-4 w-4" aria-hidden /> Templates
           </Button>
-          <Button asChild>
+          <Button asChild touch>
             <Link href="/automations/new">
               <Plus className="h-4 w-4" aria-hidden /> New automation
             </Link>
@@ -159,7 +159,7 @@ export function AutomationsClient() {
             icon={<Zap className="h-6 w-6" aria-hidden />}
             title={items.length === 0 ? "No automations yet" : "Nothing matches"}
             text={items.length === 0 ? "Start from a template or build one from scratch." : "Try a different search."}
-            action={items.length === 0 ? <Button type="button" variant="outline" onClick={() => setTab("templates")}>Browse templates</Button> : undefined}
+            action={items.length === 0 ? <Button type="button" variant="outline" touch onClick={() => setTab("templates")}>Browse templates</Button> : <Button type="button" variant="outline" touch onClick={() => setQ("")}>Clear search</Button>}
           />
         ) : (
           <ul className="space-y-2">
@@ -193,7 +193,7 @@ export function AutomationsClient() {
                     )}
                   </div>
                   <div className="flex items-center gap-1">
-                    <Button type="button" size="sm" variant={a.enabled ? "secondary" : "default"} disabled={busyId === a.id} onClick={() => toggle(a)} aria-pressed={a.enabled} aria-label={`${a.enabled ? "Disable" : "Enable"} ${a.name}`}>
+                    <Button type="button" size="sm" touch variant={a.enabled ? "secondary" : "default"} disabled={busyId === a.id} onClick={() => toggle(a)} aria-pressed={a.enabled} aria-label={`${a.enabled ? "Disable" : "Enable"} ${a.name}`}>
                       {a.enabled ? "Disable" : "Enable"}
                     </Button>
                     <Button asChild variant="ghost" size="icon-sm" touch>
@@ -221,22 +221,22 @@ export function AutomationsClient() {
           <Empty title="No runs yet" text="Runs appear here when an automation fires." />
         ) : (
           <TableScroller label="Recent runs">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[44rem] text-sm">
               <thead className={THEAD}>
                 <tr>
-                  <th className={TH}>When</th>
-                  <th className={TH}>Automation</th>
-                  <th className={TH}>Status</th>
-                  <th className={TH}>Event</th>
-                  <th className={TH}>Duration</th>
-                  <th className={TH}>Error</th>
+                  <th scope="col" className={TH}>When</th>
+                  <th scope="col" className={TH}>Automation</th>
+                  <th scope="col" className={TH}>Status</th>
+                  <th scope="col" className={TH}>Event</th>
+                  <th scope="col" className={TH}>Duration</th>
+                  <th scope="col" className={TH}>Error</th>
                 </tr>
               </thead>
               <tbody>
                 {runs.map((r) => (
                   <tr key={r.id} className="border-t border-border hover:bg-secondary/40">
                     <td className="px-3 py-2">
-                      <button type="button" className="text-left underline-offset-2 hover:underline" onClick={() => setOpenRun(r)}>
+                      <button type="button" className="rounded text-start underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setOpenRun(r)} aria-label={`Open run from ${fmtDate(r.created_at)}`}>
                         {fmtDate(r.created_at)}
                       </button>
                     </td>
@@ -268,7 +268,7 @@ export function AutomationsClient() {
                 <h3 className="font-medium">{t.title}</h3>
                 <p className="mt-1 flex-1 text-sm text-muted-foreground">{t.summary}</p>
                 <p className="mt-2 text-xs text-muted-foreground">Trigger: {describeTrigger(t.definition)}</p>
-                <Button type="button" className="mt-3 self-start" size="sm" disabled={busyId === t.key} onClick={() => install(t)}>
+                <Button type="button" className="mt-3 self-start" size="sm" touch disabled={busyId === t.key} onClick={() => install(t)}>
                   <Download className="h-3.5 w-3.5" aria-hidden /> {busyId === t.key ? "Installing…" : "Install"}
                 </Button>
               </li>
@@ -282,11 +282,11 @@ export function AutomationsClient() {
       {confirmDelete && (
         <Dialog title={`Delete “${confirmDelete.name}”?`} description="The automation and its run history are removed. This cannot be undone." onClose={() => setConfirmDelete(null)} size="sm">
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirmDelete(null)}>
+            <Button type="button" variant="outline" touch onClick={() => setConfirmDelete(null)}>
               Cancel
             </Button>
-            <Button type="button" variant="destructive" disabled={busyId === confirmDelete.id} onClick={() => remove(confirmDelete)}>
-              Delete
+            <Button type="button" variant="destructive" touch disabled={busyId === confirmDelete.id} onClick={() => remove(confirmDelete)}>
+              {busyId === confirmDelete.id ? "Deleting…" : "Delete"}
             </Button>
           </DialogFooter>
         </Dialog>

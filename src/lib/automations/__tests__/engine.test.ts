@@ -12,7 +12,7 @@ const emitEvent = vi.fn(async () => undefined);
 vi.mock("@/lib/events/bus", () => ({ emitEvent: (...a: unknown[]) => emitEvent(...(a as [])), EVENT_TYPES: [] }));
 vi.mock("@/lib/agents/tools/index", () => ({ ensureToolsLoaded: () => undefined }));
 
-import { executeRun, planRun, resumeAutomationRun } from "@/lib/automations/engine";
+import { executeRun, planRun, resumeAutomationRun, runQueued } from "@/lib/automations/engine";
 import type { StepDeps } from "@/lib/automations/actions";
 import type { AutomationRow, RunRow } from "@/lib/automations/store";
 import type { RunContext, Step, StepResult } from "@/lib/automations/types";
@@ -333,5 +333,44 @@ describe("planRun (dry run)", () => {
     expect(miss.reason).toContain("does not match");
     const cond = planRun({ ...def, conditions: { field: "event.data.priority", op: "eq", value: "low" } }, "a1", context(), deps);
     expect(cond.reason).toContain("conditions");
+  });
+});
+
+describe("runQueued housekeeping", () => {
+  const steps: Step[] = [{ id: "mail", kind: "tool", config: { tool: "comms.send_email", input: { to: "x@example.com", body: "hi" } } }];
+
+  it("fails runs whose execution lease lapsed and finishes waiting runs whose approval expired outside decideApproval()", async () => {
+    const waiting = run(context(), { status: "waiting", approval_id: "ap9", step_index: 0 });
+    query.mockImplementation(async (sql: string) => {
+      const q = String(sql);
+      if (q.startsWith("UPDATE automation_runs SET status = 'failed'") && q.includes("status = 'running'")) return [{ id: "stale1", user_id: "u1", automation_id: "a1" }];
+      if (q.startsWith("UPDATE approvals SET status = 'expired'")) return [];
+      if (q.includes("JOIN approvals a ON a.id = r.approval_id")) return [{ run_id: "r1", user_id: "u1", approval_id: "ap9", status: "expired", tool_name: "comms.send_email", input: null }];
+      return [];
+    });
+    queryOne.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("UPDATE automation_runs r SET status = 'running'")) return waiting;
+      if (String(sql).includes("FROM automations WHERE")) return automation(steps, "approve");
+      return null;
+    });
+    const out = await runQueued(10, deps);
+    expect(out).toMatchObject({ reaped: 1, resumed: 1, claimed: 0 });
+    // The reaper only touches rows past the lease.
+    const reap = query.mock.calls.find(([sql]) => String(sql).includes("status = 'running' AND COALESCE(started_at, created_at) <"));
+    expect(reap).toBeTruthy();
+    expect(emitEvent).toHaveBeenCalledWith("u1", expect.objectContaining({ type: "automation.run_failed", entityId: "stale1" }));
+    // The stranded run ended as skipped with the expiry reason, without executing the gated tool.
+    expect(toolRuns).toHaveLength(0);
+    const finish = query.mock.calls.find(([sql, params]) => String(sql).startsWith("UPDATE automation_runs SET status = $2") && (params as unknown[])[1] === "skipped");
+    expect(finish).toBeTruthy();
+    expect((finish![1] as unknown[])[2]).toBe("Approval expired");
+    // Claims renew the lease timestamp.
+    const claim = queryOne.mock.calls.find(([sql]) => String(sql).includes("UPDATE automation_runs r SET status = 'running'"));
+    expect(String(claim![0])).toContain("started_at = NOW()");
+  });
+
+  it("reports zero housekeeping when nothing is stale or decided", async () => {
+    const out = await runQueued(10, deps);
+    expect(out).toEqual({ claimed: 0, done: 0, waiting: 0, failed: 0, resumed: 0, reaped: 0 });
   });
 });

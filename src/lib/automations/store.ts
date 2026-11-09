@@ -71,6 +71,20 @@ export function toAutomationDTO(row: AutomationRow): AutomationDTO {
   };
 }
 
+/** Marker returned in place of a stored secret for callers who may read but not edit automations. */
+export const REDACTED_SECRET = "••••••••";
+
+/**
+ * Strip the inbound webhook token and outbound webhook signing secrets from a
+ * DTO. Viewers (agents: view) must not learn credentials that let them fire
+ * the automation from outside or forge signed deliveries.
+ */
+export function redactAutomationSecrets(dto: AutomationDTO): AutomationDTO {
+  const trigger_config: TriggerConfig = dto.trigger_config.webhook ? { ...dto.trigger_config, webhook: { token: REDACTED_SECRET } } : dto.trigger_config;
+  const steps = dto.steps.map((s) => (s.kind === "webhook" && s.config.secret ? { ...s, config: { ...s.config, secret: REDACTED_SECRET } } : s));
+  return { ...dto, trigger_config, steps };
+}
+
 export async function listAutomations(dataId: string, opts: { triggerType?: TriggerType | null; enabled?: boolean | null; limit?: number } = {}): Promise<AutomationRow[]> {
   const params: unknown[] = [dataId];
   let where = "user_id = $1";

@@ -98,7 +98,14 @@ export async function createAttendance(dataId: string, input: AttendanceInput, s
   const staff = await queryOne<{ id: string }>(`SELECT id FROM staff_profiles WHERE user_id = $1 AND id = $2`, [dataId, input.staff_id]);
   if (!staff) throw new WorkforceError(400, "staff_id is not a staff profile");
   if (input.clock_out && new Date(input.clock_out).getTime() <= new Date(input.clock_in).getTime()) throw new WorkforceError(400, "clock_out must be after clock_in");
-  const shiftId = input.shift_id === undefined ? await matchShift(dataId, input.staff_id, input.clock_in) : input.shift_id;
+  let shiftId: string | null;
+  if (input.shift_id === undefined) shiftId = await matchShift(dataId, input.staff_id, input.clock_in);
+  else if (input.shift_id === null) shiftId = null;
+  else {
+    const shift = await queryOne<{ id: string }>(`SELECT id FROM shifts WHERE user_id = $1 AND id = $2 AND staff_id = $3`, [dataId, input.shift_id, input.staff_id]);
+    if (!shift) throw new WorkforceError(400, "shift_id is not a shift for this staff member");
+    shiftId = shift.id;
+  }
   const id = randomUUID();
   await query(`INSERT INTO attendance (id, user_id, staff_id, shift_id, clock_in, clock_out, source, minutes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [
     id,

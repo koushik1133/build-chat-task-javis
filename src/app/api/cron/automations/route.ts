@@ -34,12 +34,18 @@ async function handleCron(req: Request) {
 
   const tickStart = Date.now();
 
-  const rows = await query(
-    `SELECT id, user_id, name, action_type, action_config, trigger_event,
+  // Legacy daily automations: rows the v2 engine has not adopted yet (trigger_type IS NULL).
+  // Before aws/phase7/c.sql adds `trigger_type`, every row is legacy — fall back to the
+  // pre-Phase-7 query so existing schedules keep firing instead of silently stopping.
+  const legacySelect = `SELECT id, user_id, name, action_type, action_config, trigger_event,
             schedule_time, schedule_timezone, schedule_days, last_scheduled_date
      FROM automations
-     WHERE status = 'active' AND trigger_event = 'Scheduled (Daily)' AND trigger_type IS NULL`
-  ).catch(() => []);
+     WHERE status = 'active' AND trigger_event = 'Scheduled (Daily)'`;
+  const rows = await query(`${legacySelect} AND trigger_type IS NULL`).catch(async (err: unknown) => {
+    if (err instanceof Error && /trigger_type/i.test(err.message)) return query(legacySelect).catch(() => []);
+    console.error("[cron/automations] legacy schedule query failed:", err);
+    return [];
+  });
 
   const scheduled = rows as ScheduledRow[];
   const due: Array<{ row: ScheduledRow; local: ReturnType<typeof getLocalNow> }> = [];
@@ -131,10 +137,10 @@ async function handleCron(req: Request) {
   );
 
   // v2 engine: events → queued runs, due schedules, then execute/resume.
-  const v2 = { fanout: 0, schedules: 0, done: 0, waiting: 0, failed: 0 };
+  const v2 = { fanout: 0, schedules: 0, done: 0, waiting: 0, failed: 0, resumed: 0, reaped: 0 };
   try { v2.fanout = (await fanOutEvents(200)).queued; } catch (err) { console.error("[cron/automations] fan-out failed:", err); }
   try { v2.schedules = (await fireDueSchedules()).queued; } catch (err) { console.error("[cron/automations] schedules failed:", err); }
-  try { const r = await runQueued(50); v2.done = r.done; v2.waiting = r.waiting; v2.failed = r.failed; } catch (err) { console.error("[cron/automations] run queue failed:", err); }
+  try { const r = await runQueued(50); v2.done = r.done; v2.waiting = r.waiting; v2.failed = r.failed; v2.resumed = r.resumed; v2.reaped = r.reaped; } catch (err) { console.error("[cron/automations] run queue failed:", err); }
 
   return NextResponse.json({
     ok: true,

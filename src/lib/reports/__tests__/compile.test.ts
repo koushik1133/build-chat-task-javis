@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compileReport, ReportSpecError } from "@/lib/reports/compile";
-import { STATIC_DATASETS, recordsDataset } from "@/lib/reports/datasets";
+import { AGGREGATIONS, DATE_BUCKETS, STATIC_DATASETS, recordsDataset } from "@/lib/reports/datasets";
 import { ReportSpecSchema } from "@/lib/reports/spec";
 
 const ctx = { dataId: "org-1", timeZone: "Asia/Kolkata", now: new Date("2026-03-15T10:30:00Z") };
@@ -82,5 +82,64 @@ describe("compileReport", () => {
     const c = compileReport(STATIC_DATASETS.expenses, spec({ dataset: "expenses", group_by: [{ field: "spent_at" }], measures: [{ field: "amount_minor", agg: "sum" }, { field: "amount_minor", agg: "sum" }] }), ctx);
     expect(c.columns.map((x) => x.key)).toEqual(["spent_at", "sum_amount_minor", "sum_amount_minor_2"]);
     expect(c.sql).toContain("to_char(spent_at AT TIME ZONE $2, 'YYYY-MM-DD')");
+  });
+
+  it("compiles every dataset × field × allowed aggregation × bucket without throwing and with balanced parameters", () => {
+    const datasets = [...Object.values(STATIC_DATASETS), recordsDataset({ id: "t1", name: "Deals", fields: [{ key: "stage_score", label: "Score", type: "number" }, { key: "closes_on", label: "Closes", type: "date" }, { key: "region", label: "Region", type: "text" }] as never })];
+    let compiled = 0;
+    for (const ds of datasets) {
+      const recordTypeId = ds.key.startsWith("records:") ? "t1" : null;
+      const dates = ds.fields.filter((f) => f.kind === "date");
+      for (const f of ds.fields) {
+        const aggs = f.aggregations ?? (f.kind === "dimension" ? ["count", "count_distinct"] : ["sum", "avg", "min", "max", "count", "count_distinct"]);
+        for (const agg of aggs) {
+          for (const bucket of [undefined, ...DATE_BUCKETS]) {
+            const groupBy = bucket ? [{ field: dates[0]?.key ?? ds.defaultDate, bucket }] : [{ field: ds.fields.find((x) => x.kind === "dimension")?.key ?? ds.defaultDate }];
+            const c = compileReport(ds, spec({ dataset: ds.key, filters: [{ field: ds.defaultDate, op: "date_range", value: { preset: "last_30_days" } }], group_by: groupBy, measures: [{ field: f.key, agg }] }), { ...ctx, recordTypeId });
+            compiled++;
+            // Every $n placeholder in the SQL must be bound, and vice versa.
+            const placeholders = new Set([...c.sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1])));
+            expect(Math.max(...placeholders), `${ds.key}.${f.key} ${agg} ${bucket ?? "-"}`).toBe(c.values.length);
+            expect(c.totalsSql).not.toBeNull();
+            const tph = new Set([...(c.totalsSql ?? "").matchAll(/\$(\d+)/g)].map((m) => Number(m[1])));
+            expect(Math.max(...tph)).toBe(c.totalsValues.length);
+            expect(c.columns.filter((x) => x.kind === "measure")).toHaveLength(1);
+            expect(c.columns[0].kind).toBe(bucket ? "date" : ds.fields.find((x) => x.key === groupBy[0].field)?.kind);
+          }
+        }
+        // Disallowed aggregations throw a ReportSpecError rather than emitting SQL.
+        for (const agg of AGGREGATIONS.filter((a) => !aggs.includes(a))) {
+          expect(() => compileReport(ds, spec({ dataset: ds.key, measures: [{ field: f.key, agg }] }), { ...ctx, recordTypeId })).toThrow(ReportSpecError);
+        }
+      }
+      // Raw mode: every field listable; a bucket on a non-date field throws.
+      const raw = compileReport(ds, spec({ dataset: ds.key, columns: ds.fields.map((f) => f.key) }), { ...ctx, recordTypeId });
+      expect(raw.columns.map((c) => c.key)).toEqual(ds.fields.map((f) => f.key));
+      const dim = ds.fields.find((f) => f.kind !== "date");
+      if (dim) expect(() => compileReport(ds, spec({ dataset: ds.key, group_by: [{ field: dim.key, bucket: "month" }] }), { ...ctx, recordTypeId })).toThrow(ReportSpecError);
+    }
+    expect(compiled).toBeGreaterThan(1500);
+  });
+
+  it("totals SQL re-binds every filter and keeps measure keys aligned with the row query", () => {
+    const c = compileReport(
+      STATIC_DATASETS.tickets,
+      spec({
+        dataset: "tickets",
+        filters: [
+          { field: "status", op: "neq", value: "closed" },
+          { field: "priority", op: "in", value: ["urgent", "high"] },
+          { field: "first_response_minutes", op: "gte", value: 5 },
+          { field: "created_at", op: "date_range", value: { from: "2026-01-01", to: "2026-01-31" } },
+        ],
+        group_by: [{ field: "created_at", bucket: "week" }, { field: "priority" }],
+        measures: [{ field: "first_response_minutes", agg: "avg" }, { field: "id", agg: "count_distinct" }, { agg: "count" }],
+      }),
+      ctx
+    );
+    expect(c.columns.map((x) => x.key)).toEqual(["created_at_week", "priority", "avg_first_response_minutes", "count_distinct_id", "count"]);
+    expect(c.sql).toContain(`GROUP BY 1, 2 ORDER BY 1 ASC, 2 ASC`);
+    expect(c.totalsSql).toBe(`SELECT AVG((EXTRACT(EPOCH FROM (first_responded_at - created_at)) / 60)) AS "avg_first_response_minutes", COUNT(DISTINCT id) AS "count_distinct_id", COUNT(*) AS "count" FROM tickets WHERE user_id = $1 AND status <> $2 AND priority = ANY($3::text[]) AND (EXTRACT(EPOCH FROM (first_responded_at - created_at)) / 60) >= $4 AND created_at >= $5 AND created_at < $6`);
+    expect(c.totalsValues).toEqual(["org-1", "closed", ["urgent", "high"], 5, "2025-12-31T18:30:00.000Z", "2026-01-31T18:30:00.000Z"]);
   });
 });

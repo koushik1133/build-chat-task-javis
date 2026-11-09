@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CalendarClock, Download, FileText, Pencil, Play, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Checkbox } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
-import { Banner, Empty } from "@/components/ui/feedback";
+import { Banner, Empty, SkeletonList } from "@/components/ui/feedback";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Pill } from "@/components/ui/pill";
 import { api } from "@/components/finance/shared";
@@ -30,6 +30,7 @@ export function SavedReports({ reports, canEdit, onEdit, onChanged }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scheduleFor, setScheduleFor] = useState<SavedReportDTO | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<SavedReportDTO | null>(null);
 
   async function run(r: SavedReportDTO) {
     setBusy(`run:${r.id}`);
@@ -70,10 +71,10 @@ export function SavedReports({ reports, canEdit, onEdit, onChanged }: Props) {
   }
 
   async function remove(r: SavedReportDTO) {
-    if (!window.confirm(`Delete “${r.name}” and its schedules?`)) return;
     setBusy(`del:${r.id}`);
     try {
       await api(`/api/reports/saved/${r.id}`, { method: "DELETE" });
+      setConfirmDelete(null);
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete.");
@@ -82,7 +83,7 @@ export function SavedReports({ reports, canEdit, onEdit, onChanged }: Props) {
     }
   }
 
-  if (reports.length === 0) return <Empty icon={<FileText className="h-5 w-5" />} title="No saved reports yet" text="Build a report in the Builder tab and save it to run, export or schedule it here." />;
+  if (reports.length === 0) return <Empty icon={<FileText className="h-5 w-5" aria-hidden />} title="No saved reports yet" text="Build a report in the Builder tab and save it to run, export or schedule it here." />;
 
   return (
     <div className="space-y-3">
@@ -96,17 +97,17 @@ export function SavedReports({ reports, canEdit, onEdit, onChanged }: Props) {
               <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="truncate font-medium">{r.name}</h3>
+                    <h3 className="min-w-0 break-words font-medium">{r.name}</h3>
                     <Pill tone="neutral">{r.spec.dataset.replace(/^records:/, "records · ")}</Pill>
                     <Pill tone="info">{r.chart.type}</Pill>
                     {r.visibility === "private" && <Pill tone="violet">Only me</Pill>}
                   </div>
                   {r.description && <p className="mt-1 text-sm text-muted-foreground">{r.description}</p>}
-                  <p className="mt-1 text-xs text-muted-foreground">Updated {new Date(r.updated_at).toLocaleString()}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Updated <time dateTime={r.updated_at}>{new Date(r.updated_at).toLocaleString()}</time></p>
                 </div>
                 <div className="flex flex-wrap gap-1.5 sm:shrink-0">
-                  <Button size="sm" variant="outline" touch onClick={() => (isOpen ? setOpen(null) : void run(r))} disabled={busy === `run:${r.id}`} aria-expanded={isOpen}>
-                    <Play className="h-4 w-4" aria-hidden /> {isOpen ? "Hide" : "Run"}
+                  <Button size="sm" variant="outline" touch onClick={() => (isOpen ? setOpen(null) : void run(r))} disabled={busy === `run:${r.id}`} aria-expanded={isOpen} aria-controls={`saved-${r.id}-result`}>
+                    <Play className="h-4 w-4" aria-hidden /> {busy === `run:${r.id}` ? "Running…" : isOpen ? "Hide" : "Run"}
                   </Button>
                   <Button size="sm" variant="outline" touch onClick={() => void exportReport(r, "csv")} disabled={busy === `csv:${r.id}`} aria-label={`Export ${r.name} as CSV`}>
                     <Download className="h-4 w-4" aria-hidden /> CSV
@@ -122,7 +123,7 @@ export function SavedReports({ reports, canEdit, onEdit, onChanged }: Props) {
                       <Button size="sm" variant="ghost" touch onClick={() => onEdit(r)} aria-label={`Edit ${r.name}`}>
                         <Pencil className="h-4 w-4" aria-hidden />
                       </Button>
-                      <Button size="sm" variant="ghost" touch onClick={() => void remove(r)} disabled={busy === `del:${r.id}`} aria-label={`Delete ${r.name}`}>
+                      <Button size="sm" variant="ghost" touch onClick={() => setConfirmDelete(r)} disabled={busy === `del:${r.id}`} aria-label={`Delete ${r.name}`}>
                         <Trash2 className="h-4 w-4" aria-hidden />
                       </Button>
                     </>
@@ -130,7 +131,8 @@ export function SavedReports({ reports, canEdit, onEdit, onChanged }: Props) {
                 </div>
               </div>
               {isOpen && res && (
-                <div className="space-y-3 border-t border-border p-4">
+                <div id={`saved-${r.id}-result`} className="space-y-3 border-t border-border p-4">
+                  <p className="text-xs tabular-nums text-muted-foreground" role="status">{res.row_count} row{res.row_count === 1 ? "" : "s"}{res.truncated ? " (limited)" : ""}</p>
                   {r.chart.type !== "table" && <ReportChart rows={res.rows} columns={res.columns} chart={r.chart} currency={res.currency} title={r.name} />}
                   <ReportTable rows={res.rows} columns={res.columns} totals={res.totals} currency={res.currency} label={r.name} max={50} />
                 </div>
@@ -140,6 +142,16 @@ export function SavedReports({ reports, canEdit, onEdit, onChanged }: Props) {
         })}
       </ul>
       {scheduleFor && <ScheduleDialog report={scheduleFor} onClose={() => setScheduleFor(null)} />}
+      {confirmDelete && (
+        <Dialog title={`Delete “${confirmDelete.name}”?`} description="The report, its schedules and any dashboard cards that use it are removed. This cannot be undone." onClose={() => setConfirmDelete(null)} size="sm">
+          <DialogFooter>
+            <Button type="button" variant="outline" touch onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            <Button type="button" variant="destructive" touch disabled={busy === `del:${confirmDelete.id}`} onClick={() => void remove(confirmDelete)}>
+              {busy === `del:${confirmDelete.id}` ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -155,7 +167,7 @@ function ScheduleDialog({ report, onClose }: { report: SavedReportDTO; onClose: 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const r = await api<{ schedules: ScheduleDTO[] }>(`/api/reports/schedules?report_id=${encodeURIComponent(report.id)}`);
       setList(r.schedules);
@@ -163,8 +175,10 @@ function ScheduleDialog({ report, onClose }: { report: SavedReportDTO; onClose: 
       setError(e instanceof Error ? e.message : "Could not load schedules.");
       setList([]);
     }
-  }
-  if (list === null) void load();
+  }, [report.id]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -185,29 +199,40 @@ function ScheduleDialog({ report, onClose }: { report: SavedReportDTO; onClose: 
     }
   }
   async function toggle(s: ScheduleDTO) {
-    await api(`/api/reports/schedules/${s.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: !s.enabled }) }).catch(() => undefined);
+    setError(null);
+    try {
+      await api(`/api/reports/schedules/${s.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: !s.enabled }) });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update the schedule.");
+    }
     await load();
   }
   async function remove(s: ScheduleDTO) {
-    await api(`/api/reports/schedules/${s.id}`, { method: "DELETE" }).catch(() => undefined);
+    setError(null);
+    try {
+      await api(`/api/reports/schedules/${s.id}`, { method: "DELETE" });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete the schedule.");
+    }
     await load();
   }
 
   return (
     <Dialog title={`Schedule “${report.name}”`} description="Email this report on a cadence. Times are in your workspace time zone." onClose={onClose}>
-      <div className="space-y-4 p-4 sm:p-5">
+      <div className="space-y-4">
         {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
+        {list === null && <SkeletonList count={2} itemClassName="h-12" label="Loading schedules…" />}
         {list && list.length > 0 && (
-          <ul className="divide-y divide-border rounded-lg border border-border text-sm">
+          <ul className="divide-y divide-border rounded-lg border border-border text-sm" aria-label="Existing schedules">
             {list.map((s) => (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <p className="font-medium capitalize">{s.cadence} · {String(s.hour).padStart(2, "0")}:00 · {s.format}</p>
-                  <p className="truncate text-xs text-muted-foreground">{s.recipients.join(", ")}{s.next_run_at ? ` · next ${new Date(s.next_run_at).toLocaleString()}` : ""}</p>
+                  <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{s.recipients.join(", ")}{s.next_run_at ? ` · next ${new Date(s.next_run_at).toLocaleString()}` : ""}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <Checkbox label={s.enabled ? "On" : "Off"} checked={s.enabled} onChange={() => void toggle(s)} />
-                  <Button size="icon" variant="ghost" touch onClick={() => void remove(s)} aria-label="Delete schedule"><Trash2 className="h-4 w-4" aria-hidden /></Button>
+                  <Button size="icon" variant="ghost" touch onClick={() => void remove(s)} aria-label={`Delete ${s.cadence} schedule`}><Trash2 className="h-4 w-4" aria-hidden /></Button>
                 </div>
               </li>
             ))}
@@ -252,11 +277,11 @@ function ScheduleDialog({ report, onClose }: { report: SavedReportDTO; onClose: 
             </Field>
           </div>
           <Field label="Recipients" hint="Comma-separated emails." required>
-            <Input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="finance@example.com, ops@example.com" required />
+            <Input type="text" inputMode="email" autoComplete="off" value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="finance@example.com, ops@example.com" required />
           </Field>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Close</Button>
-            <Button type="submit" disabled={saving || !recipients.trim()}>{saving ? "Saving…" : "Add schedule"}</Button>
+            <Button type="button" variant="outline" touch onClick={onClose}>Close</Button>
+            <Button type="submit" touch disabled={saving || !recipients.trim()}>{saving ? "Saving…" : "Add schedule"}</Button>
           </DialogFooter>
         </form>
       </div>

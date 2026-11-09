@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Clock, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
-import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { Input, Select } from "@/components/ui/input";
@@ -61,30 +61,30 @@ export function AttendanceTab({ staff, notify }: { staff: StaffDTO[]; notify: (t
           </Field>
         </div>
         <div className="flex items-center gap-3">
-          {rows && <p className="text-sm text-muted-foreground">{rows.length} record{rows.length === 1 ? "" : "s"} · {hours(total)}</p>}
+          {rows && <p className="text-sm tabular-nums text-muted-foreground" role="status" aria-live="polite">{rows.length} record{rows.length === 1 ? "" : "s"} · {hours(total)}</p>}
           <Button size="sm" touch onClick={() => setShowNew(true)} disabled={staff.length === 0}>
-            <Plus className="h-4 w-4" /> Manual entry
+            <Plus className="h-4 w-4" aria-hidden /> Manual entry
           </Button>
         </div>
       </div>
       {error ? (
         <ErrorState message={error} onRetry={() => void load()} />
       ) : rows === null ? (
-        <Loading label="Loading attendance…" />
+        <SkeletonList count={5} itemClassName="h-12" label="Loading attendance…" />
       ) : rows.length === 0 ? (
         <Empty icon={<Clock className="h-6 w-6" aria-hidden />} title="No clock-ins in this range" text="Give staff a crew link (Staff tab) and their clock in/out lands here, matched to the shift they were scheduled for." />
       ) : (
         <TableScroller label="Attendance">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[44rem] text-sm">
             <thead className={THEAD}>
               <tr>
-                <th className={TH}>Who</th>
-                <th className={TH}>Clock in</th>
-                <th className={TH}>Clock out</th>
-                <th className={`${TH} text-right`}>Worked</th>
-                <th className={`${TH} text-right`}>Scheduled</th>
-                <th className={TH}>Variance</th>
-                <th className={TH}>Source</th>
+                <th scope="col" className={TH}>Who</th>
+                <th scope="col" className={TH}>Clock in</th>
+                <th scope="col" className={TH}>Clock out</th>
+                <th scope="col" className={`${TH} text-right`}>Worked</th>
+                <th scope="col" className={`${TH} text-right`}>Scheduled</th>
+                <th scope="col" className={TH}>Variance</th>
+                <th scope="col" className={TH}>Source</th>
               </tr>
             </thead>
             <tbody>
@@ -164,7 +164,7 @@ function ManualDialog({ staff, tz, onClose, onSaved }: { staff: StaffDTO[]; tz: 
             Cancel
           </Button>
           <Button type="submit" touch disabled={saving || !form.staff_id}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save
+            {saving && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} Save
           </Button>
         </DialogFooter>
       </form>

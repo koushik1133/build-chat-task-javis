@@ -1,4 +1,4 @@
-import { zonedMidnight } from "./dates";
+import { zonedTime } from "./dates";
 
 /** Pure schedule maths for report schedules and digests (next run in the org time zone). */
 
@@ -35,7 +35,7 @@ export function nextRunAt(spec: CadenceSpec, after: Date, timeZone: string): Dat
   const tz = safeZone(timeZone);
   const hour = Math.max(0, Math.min(23, Math.floor(spec.hour)));
   const p = localParts(after, tz);
-  const at = (y: number, m: number, d: number) => new Date(zonedMidnight(y, m, d, tz).getTime() + hour * 3_600_000);
+  const at = (y: number, m: number, d: number) => zonedTime(y, m, d, hour, 0, tz);
   for (let i = 0; i < 400; i++) {
     const cand = at(p.y, p.m, p.d + i);
     if (cand.getTime() <= after.getTime()) continue;
@@ -71,7 +71,7 @@ export function quietHoursEnd(quiet: { start?: string | null; end?: string | nul
   const p = localParts(now, tz);
   const endMin = Math.min(23, Number(m[1])) * 60 + Math.min(59, Number(m[2]));
   for (let i = 0; i < 2; i++) {
-    const cand = new Date(zonedMidnight(p.y, p.m, p.d + i, tz).getTime() + endMin * 60_000);
+    const cand = zonedTime(p.y, p.m, p.d + i, Math.floor(endMin / 60), endMin % 60, tz);
     if (cand.getTime() > now.getTime()) return cand;
   }
   return now;

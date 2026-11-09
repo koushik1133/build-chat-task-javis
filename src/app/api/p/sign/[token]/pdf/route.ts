@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { paramToken, publicRateLimit } from "@/lib/money/http";
 import { pdfForToken, SignLinkError } from "@/lib/documents/signing";
+import { DocumentError } from "@/lib/documents/documents";
 import { pdfResponse } from "@/lib/pdf/documents";
 
 export const runtime = "nodejs";
@@ -14,6 +15,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ token: stri
     return pdfResponse(built, "attachment");
   } catch (err) {
     if (err instanceof SignLinkError) return NextResponse.json({ error: err.code }, { status: err.code === "expired" ? 410 : 404 });
+    if (err instanceof DocumentError) return NextResponse.json({ error: "unavailable", detail: err.message }, { status: 410 });
     console.error("[p.sign.pdf]", err);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }

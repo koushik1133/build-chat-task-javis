@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { LayoutDashboard, Minus, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, LayoutDashboard, Minus, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
@@ -165,9 +165,14 @@ export function Dashboards({ reports, role, canAdmin }: Props) {
       {loading && !dash ? (
         <SkeletonList count={3} itemClassName="h-40" />
       ) : layout.length === 0 ? (
-        <Empty icon={<LayoutDashboard className="h-5 w-5" />} title="Empty dashboard" text={canAdmin ? "Add KPI tiles, built-in widgets or saved reports." : "An admin has not set up a dashboard for your role yet."} />
+        <Empty
+          icon={<LayoutDashboard className="h-5 w-5" aria-hidden />}
+          title="Empty dashboard"
+          text={canAdmin ? "Add KPI tiles, built-in widgets or saved reports." : "An admin has not set up a dashboard for your role yet."}
+          action={canAdmin && !editing ? <Button variant="outline" touch onClick={() => setEditing(true)}>Edit layout</Button> : undefined}
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-12" aria-busy={loading || undefined}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-12" aria-busy={loading || undefined} aria-live="polite" aria-relevant="additions removals">
           {layout.map((item, i) => {
             const report = item.report_id ? reports.find((r) => r.id === item.report_id) : null;
             const title = item.builtin ? (BUILTINS.find((b) => b.key === item.builtin)?.label ?? item.builtin) : (report?.name ?? "Report");
@@ -177,16 +182,16 @@ export function Dashboards({ reports, role, canAdmin }: Props) {
                   <h3 className="truncate text-sm font-semibold">{title}</h3>
                   {editing && (
                     <div className="flex shrink-0 flex-wrap items-center gap-1" role="group" aria-label={`Arrange ${title}`}>
-                      <Select aria-label="Width" value={item.w} onChange={(e) => patch(i, { w: Number(e.target.value) })} className="h-8 w-20 py-0 text-xs">
+                      <Select aria-label={`Width of ${title}`} value={item.w} onChange={(e) => patch(i, { w: Number(e.target.value) })} className="h-11 w-20 py-0 text-xs sm:h-8">
                         {WIDTHS.map((w) => (
                           <option key={w} value={w}>{w}/12</option>
                         ))}
                       </Select>
-                      <Button size="icon" variant="ghost" onClick={() => patch(i, { h: Math.max(1, item.h - 1) })} aria-label="Shorter"><Minus className="h-4 w-4" aria-hidden /></Button>
-                      <Button size="icon" variant="ghost" onClick={() => patch(i, { h: Math.min(6, item.h + 1) })} aria-label="Taller"><Plus className="h-4 w-4" aria-hidden /></Button>
-                      <Button size="icon" variant="ghost" onClick={() => move(i, -1)} aria-label="Move earlier" disabled={i === 0}>↑</Button>
-                      <Button size="icon" variant="ghost" onClick={() => move(i, 1)} aria-label="Move later" disabled={i === layout.length - 1}>↓</Button>
-                      <Button size="icon" variant="ghost" onClick={() => setLayout((l) => l.filter((_, j) => j !== i))} aria-label={`Remove ${title}`}><Trash2 className="h-4 w-4" aria-hidden /></Button>
+                      <Button size="icon" variant="ghost" touch onClick={() => patch(i, { h: Math.max(1, item.h - 1) })} aria-label={`Make ${title} shorter`} disabled={item.h <= 1}><Minus className="h-4 w-4" aria-hidden /></Button>
+                      <Button size="icon" variant="ghost" touch onClick={() => patch(i, { h: Math.min(6, item.h + 1) })} aria-label={`Make ${title} taller`} disabled={item.h >= 6}><Plus className="h-4 w-4" aria-hidden /></Button>
+                      <Button size="icon" variant="ghost" touch onClick={() => move(i, -1)} aria-label={`Move ${title} earlier`} disabled={i === 0}><ArrowUp className="h-4 w-4" aria-hidden /></Button>
+                      <Button size="icon" variant="ghost" touch onClick={() => move(i, 1)} aria-label={`Move ${title} later`} disabled={i === layout.length - 1}><ArrowDown className="h-4 w-4" aria-hidden /></Button>
+                      <Button size="icon" variant="ghost" touch onClick={() => setLayout((l) => l.filter((_, j) => j !== i))} aria-label={`Remove ${title}`}><Trash2 className="h-4 w-4" aria-hidden /></Button>
                     </div>
                   )}
                 </div>
@@ -231,7 +236,17 @@ export function ReportCard({ report, compact }: { report: SavedReportDTO; compac
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (!res) return <SkeletonList count={1} itemClassName="h-32" />;
   if (report.chart.type === "table") return <ReportTable rows={res.rows} columns={res.columns} totals={res.totals} currency={res.currency} label={report.name} max={compact ? 8 : 50} />;
-  return <ReportChart rows={res.rows} columns={res.columns} chart={report.chart} currency={res.currency} title={report.name} compact={compact} />;
+  return (
+    <div className="space-y-2">
+      <ReportChart rows={res.rows} columns={res.columns} chart={report.chart} currency={res.currency} title={report.name} compact={compact} />
+      {res.rows.length > 0 && (
+        <details className="text-xs">
+          <summary className="inline-flex min-h-11 cursor-pointer items-center rounded text-muted-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">View as table</summary>
+          <ReportTable rows={res.rows} columns={res.columns} totals={res.totals} currency={res.currency} label={`${report.name} data`} max={compact ? 8 : 50} className="mt-2" />
+        </details>
+      )}
+    </div>
+  );
 }
 
 let summaryCache: { at: number; p: Promise<HomeSummary> } | null = null;

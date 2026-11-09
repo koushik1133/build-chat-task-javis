@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Check, Copy, Link2, Loader2, Plus, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
-import { Banner, Empty, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, SkeletonList } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { Checkbox, Input, Select } from "@/components/ui/input";
 import { Pill } from "@/components/ui/pill";
@@ -40,7 +40,7 @@ export function StaffTab({ staff, reload, notify }: { staff: StaffDTO[] | null; 
     }
   }
 
-  if (staff === null) return <Loading label="Loading staff…" />;
+  if (staff === null) return <SkeletonList count={5} itemClassName="h-12" label="Loading staff…" />;
   const list = staff.filter((s) => showInactive || s.active);
 
   return (
@@ -48,23 +48,23 @@ export function StaffTab({ staff, reload, notify }: { staff: StaffDTO[] | null; 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Checkbox checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} label="Show inactive" />
         <Button size="sm" touch onClick={() => setEditing("new")}>
-          <Plus className="h-4 w-4" /> Add staff
+          <Plus className="h-4 w-4" aria-hidden /> Add staff
         </Button>
       </div>
       {list.length === 0 ? (
         <Empty icon={<UserRound className="h-6 w-6" aria-hidden />} title="No staff profiles" text="Add the people you schedule. They don't need a login — give them a crew link for their phone." action={<Button touch onClick={() => setEditing("new")}>Add staff</Button>} />
       ) : (
         <TableScroller label="Staff">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[44rem] text-sm">
             <thead className={THEAD}>
               <tr>
-                <th className={TH}>Name</th>
-                <th className={TH}>Role</th>
-                <th className={TH}>Type</th>
-                <th className={`${TH} text-right`}>Rate</th>
-                <th className={`${TH} text-right`}>Hours/wk</th>
-                <th className={TH}>Contact</th>
-                <th className={TH}>
+                <th scope="col" className={TH}>Name</th>
+                <th scope="col" className={TH}>Role</th>
+                <th scope="col" className={TH}>Type</th>
+                <th scope="col" className={`${TH} text-right`}>Rate</th>
+                <th scope="col" className={`${TH} text-right`}>Hours/wk</th>
+                <th scope="col" className={TH}>Contact</th>
+                <th scope="col" className={TH}>
                   <span className="sr-only">Actions</span>
                 </th>
               </tr>
@@ -73,7 +73,7 @@ export function StaffTab({ staff, reload, notify }: { staff: StaffDTO[] | null; 
               {list.map((s) => (
                 <tr key={s.id} className="border-t border-border">
                   <td className="px-3 py-2">
-                    <button type="button" onClick={() => setEditing(s)} className="font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <button type="button" onClick={() => setEditing(s)} className="rounded text-start font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Edit ${s.display_name}`}>
                       {s.display_name}
                     </button>
                     <div className="flex flex-wrap gap-1 pt-0.5">
@@ -92,8 +92,8 @@ export function StaffTab({ staff, reload, notify }: { staff: StaffDTO[] | null; 
                     <div className="truncate">{s.email ?? s.phone ?? "—"}</div>
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button variant="outline" size="sm" touch disabled={busy === s.id || !s.active} onClick={() => void makeCrewLink(s)} title="Create a crew link for this person's phone">
-                      {busy === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Crew link
+                    <Button variant="outline" size="sm" touch disabled={busy === s.id || !s.active} onClick={() => void makeCrewLink(s)} title="Create a crew link for this person's phone" aria-label={`Create crew link for ${s.display_name}`}>
+                      {busy === s.id ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Link2 className="h-4 w-4" aria-hidden />} Crew link
                     </Button>
                   </td>
                 </tr>
@@ -209,8 +209,8 @@ function StaffDialog({ staff, onClose, onSaved }: { staff: StaffDTO | null; onCl
           <Field label="Hourly rate">
             <Input type="number" inputMode="decimal" min={0} step="0.01" value={form.rate} onChange={(e) => set("rate", e.target.value)} />
           </Field>
-          <Field label="Currency">
-            <Input value={form.currency} onChange={(e) => set("currency", e.target.value)} maxLength={3} />
+          <Field label="Currency" hint="3-letter code">
+            <Input value={form.currency} onChange={(e) => set("currency", e.target.value.toUpperCase())} maxLength={3} autoCapitalize="characters" />
           </Field>
           <Field label="Contracted hours / week" hint="Overtime is paid above this">
             <Input type="number" inputMode="numeric" min={0} max={168} value={form.weekly_hours} onChange={(e) => set("weekly_hours", Number(e.target.value))} />
@@ -245,7 +245,7 @@ function StaffDialog({ staff, onClose, onSaved }: { staff: StaffDTO | null; onCl
             Cancel
           </Button>
           <Button type="submit" touch disabled={saving || !form.display_name.trim()}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />} {staff ? "Save" : "Add"}
+            {saving && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} {staff ? "Save" : "Add"}
           </Button>
         </DialogFooter>
       </form>
@@ -258,7 +258,8 @@ function CrewLinkDialog({ staff, url, onClose }: { staff: StaffDTO; url: string;
   return (
     <Dialog title={`Crew link for ${staff.display_name}`} description="Shown once. Send it to their phone — it opens their shifts, clock in/out and leave requests without a login." onClose={onClose} size="sm">
       <div className="space-y-3">
-        <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} aria-label="Crew link URL" />
+        <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} aria-label="Crew link URL" className="font-mono text-xs" />
+        <p className="sr-only" role="status" aria-live="polite">{copied ? "Link copied to the clipboard." : ""}</p>
         <DialogFooter>
           <Button type="button" variant="outline" touch onClick={onClose}>
             Done
@@ -270,7 +271,7 @@ function CrewLinkDialog({ staff, url, onClose }: { staff: StaffDTO; url: string;
               void navigator.clipboard?.writeText(url).then(() => setCopied(true)).catch(() => undefined);
             }}
           >
-            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copied ? "Copied" : "Copy link"}
+            {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />} {copied ? "Copied" : "Copy link"}
           </Button>
         </DialogFooter>
       </div>

@@ -47,7 +47,7 @@ export function RunDrawer({ run, onClose, onRetried }: { run: AutomationRunDTO; 
       footer={
         <div className="flex w-full items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">{run.automation_name ?? run.automation_id}</span>
-          <Button type="button" size="sm" variant="outline" disabled={!canRetry || busy} onClick={retry}>
+          <Button type="button" size="sm" variant="outline" touch disabled={!canRetry || busy} onClick={retry}>
             <RotateCcw className="h-3.5 w-3.5" aria-hidden /> {busy ? "Retrying…" : "Retry run"}
           </Button>
         </div>
@@ -75,7 +75,7 @@ export function RunDrawer({ run, onClose, onRetried }: { run: AutomationRunDTO; 
                     </span>
                     <span className="text-xs text-muted-foreground">{s.kind}</span>
                     <StatusPill status={s.status} map={STEP_TONE} />
-                    <span className="ml-auto text-xs text-muted-foreground">{s.ms}ms</span>
+                    <span className="ms-auto text-xs tabular-nums text-muted-foreground">{s.ms} ms</span>
                   </div>
                   <p className="mt-1 text-sm">{s.summary}</p>
                   {s.error && <p className="mt-1 text-xs text-destructive">{s.error}</p>}

@@ -71,8 +71,13 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
   const [dragging, setDragging] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [announce, setAnnounce] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = `attach-${entityKind}-${entityId}`;
+  const hintId = `${inputId}-hint`;
+  // Parents often pass an inline callback; keep it in a ref so it never re-triggers the load effect.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const load = useCallback(async () => {
     setError(null);
@@ -82,12 +87,12 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
       if (!res.ok) throw new Error(data?.error === "forbidden" ? "You do not have access to these files." : "Could not load files.");
       const list = data?.attachments ?? [];
       setFiles(list);
-      onChange?.(list);
+      onChangeRef.current?.(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load files.");
       setFiles([]);
     }
-  }, [entityKind, entityId, onChange]);
+  }, [entityKind, entityId]);
 
   useEffect(() => {
     void load();
@@ -96,11 +101,17 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
   async function upload(list: FileList | File[]) {
     const picked = Array.from(list);
     if (picked.length === 0) return;
+    let ok = 0;
+    let failed = 0;
+    setAnnounce(`Uploading ${picked.length} file${picked.length === 1 ? "" : "s"}…`);
     for (const file of picked) {
       const problem = validateAttachmentMeta(file);
       const state: UploadState = { name: file.name, progress: 0, error: problem };
       setUploads((u) => [...u, state]);
-      if (problem) continue;
+      if (problem) {
+        failed += 1;
+        continue;
+      }
       const form = new FormData();
       form.set("file", file);
       form.set("entity_kind", entityKind);
@@ -112,13 +123,17 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
           const body = res.body as { detail?: unknown; error?: string } | null;
           const detail = typeof body?.detail === "string" ? body.detail : body?.error === "payload_too_large" ? "File must be 20 MB or smaller" : "Upload failed";
           setUploads((u) => u.map((x) => (x.name === state.name ? { ...x, error: detail } : x)));
+          failed += 1;
           continue;
         }
         setUploads((u) => u.filter((x) => x.name !== state.name));
+        ok += 1;
       } catch (err) {
         setUploads((u) => u.map((x) => (x.name === state.name ? { ...x, error: err instanceof Error ? err.message : "Upload failed" } : x)));
+        failed += 1;
       }
     }
+    setAnnounce(failed === 0 ? `${ok} file${ok === 1 ? "" : "s"} uploaded.` : `${ok} uploaded, ${failed} failed. See the errors below.`);
     await load();
   }
 
@@ -138,6 +153,7 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
 
   return (
     <section aria-label="Files" className={cn("space-y-3", className)}>
+      <p className="sr-only" role="status" aria-live="polite">{announce}</p>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold">
           <Paperclip className="h-4 w-4 text-muted-foreground" aria-hidden /> Files
@@ -159,6 +175,7 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
               accept={ATTACHMENT_ACCEPT}
               className="sr-only"
               aria-label="Choose files to upload"
+              aria-describedby={hintId}
               onChange={(e) => {
                 if (e.target.files) void upload(e.target.files);
                 e.target.value = "";
@@ -174,7 +191,8 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
         <div
           role="button"
           tabIndex={0}
-          aria-label="Drop files here or press Enter to choose files"
+          aria-label="Drop files here, or press Enter to choose files"
+          aria-describedby={hintId}
           onClick={() => inputRef.current?.click()}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -193,30 +211,35 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
             if (e.dataTransfer.files?.length) void upload(e.dataTransfer.files);
           }}
           className={cn(
-            "flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+            "flex min-h-11 cursor-pointer flex-wrap items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
             dragging ? "border-primary bg-primary/5 text-foreground" : "border-border hover:border-primary/60"
           )}
         >
-          <Upload className="h-4 w-4" aria-hidden /> Drop files here or click to browse · PDF, Word, Excel, CSV, text, images · up to 20 MB
+          <Upload className="h-4 w-4 shrink-0" aria-hidden />
+          <span>
+            Drop files here or <span className="font-medium text-foreground underline underline-offset-2">browse</span>
+          </span>
+          <span id={hintId} className="basis-full text-[11px]">PDF, Word, Excel, CSV, text or images · up to 20 MB each</span>
         </div>
       )}
+      {canEdit && compact && <span id={hintId} className="sr-only">PDF, Word, Excel, CSV, text or images, up to 20 MB each</span>}
 
       {uploads.length > 0 && (
-        <ul className="space-y-1.5" aria-live="polite">
+        <ul className="space-y-1.5" aria-label="Uploads in progress">
           {uploads.map((u, i) => (
-            <li key={`${u.name}-${i}`} className="rounded-md border border-border px-3 py-2 text-xs">
+            <li key={`${u.name}-${i}`} className={cn("rounded-md border px-3 py-2 text-xs", u.error ? "border-red-500/30 bg-red-500/5" : "border-border")}>
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate font-medium">{u.name}</span>
+                <span className="min-w-0 truncate font-medium">{u.name}</span>
                 {u.error ? (
-                  <button type="button" className="text-muted-foreground underline" onClick={() => setUploads((x) => x.filter((_, j) => j !== i))}>
+                  <Button type="button" size="sm" variant="ghost" touch className="-my-1 shrink-0" onClick={() => setUploads((x) => x.filter((_, j) => j !== i))} aria-label={`Dismiss error for ${u.name}`}>
                     Dismiss
-                  </button>
+                  </Button>
                 ) : (
-                  <span className="tabular-nums text-muted-foreground">{u.progress}%</span>
+                  <span className="shrink-0 tabular-nums text-muted-foreground">{u.progress}%</span>
                 )}
               </div>
               {u.error ? (
-                <p className="mt-1 text-destructive">{u.error}</p>
+                <p className="mt-1 text-red-700 dark:text-red-300" role="alert">{u.error}</p>
               ) : (
                 <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-secondary" role="progressbar" aria-valuenow={u.progress} aria-valuemin={0} aria-valuemax={100} aria-label={`Uploading ${u.name}`}>
                   <div className="h-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${u.progress}%` }} />
@@ -243,7 +266,7 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
                 <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="truncate font-medium">{f.file_name}</span>
+                    <span className="min-w-0 truncate font-medium [overflow-wrap:anywhere]" title={f.file_name}>{f.file_name}</span>
                     {f.visibility === "portal" && <Pill tone="info">Portal</Pill>}
                   </div>
                   <p className="text-[11px] text-muted-foreground">
@@ -257,8 +280,8 @@ export function AttachmentPanel({ entityKind, entityId, canEdit = true, allowPor
                 </Button>
                 {canEdit &&
                   (confirmId === f.id ? (
-                    <span className="flex items-center gap-1 text-xs">
-                      <Button type="button" size="sm" variant="destructive" touch disabled={deleting === f.id} onClick={() => void remove(f.id)}>
+                    <span className="flex items-center gap-1 text-xs" role="group" aria-label={`Confirm deleting ${f.file_name}`}>
+                      <Button type="button" size="sm" variant="destructive" touch disabled={deleting === f.id} onClick={() => void remove(f.id)} autoFocus>
                         {deleting === f.id ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : "Delete"}
                       </Button>
                       <Button type="button" size="sm" variant="ghost" touch onClick={() => setConfirmId(null)}>

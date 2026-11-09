@@ -210,8 +210,12 @@ export async function sendPurchaseOrder(
   if (!po) throw new Error("Purchase order not found");
   if (po.status === "cancelled") throw new Error("Purchase order is cancelled");
   if (po.items.length === 0) throw new Error("Add at least one line item before sending");
-  const to = (opts.to ?? po.supplier_email ?? "").trim();
-  if (!to) throw new Error("No recipient email: set one on the supplier or pass `to`");
+  const supplierEmail = (po.supplier_email ?? "").trim();
+  if (!supplierEmail) throw new Error("No recipient email: set an email on the supplier first");
+  // The PO (lines, prices, totals) is only ever sent to the supplier on record; `to` may confirm it but not redirect it.
+  const requested = opts.to?.trim();
+  if (requested && requested.toLowerCase() !== supplierEmail.toLowerCase()) throw new Error("Purchase orders can only be sent to the supplier's email on record");
+  const to = supplierEmail;
   const from = await businessName(dataId);
   await query(
     `UPDATE purchase_orders SET status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END, sent_at = COALESCE(sent_at, NOW()), updated_at = NOW()

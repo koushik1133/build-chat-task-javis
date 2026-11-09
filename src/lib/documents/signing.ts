@@ -3,7 +3,8 @@ import { query, queryOne } from "@/lib/dsql";
 import { recordAudit } from "@/lib/audit";
 import { emitEvent } from "@/lib/events/bus";
 import { enqueueNotification } from "@/lib/notifications/outbox";
-import { issueShareToken, resolveShareTokenDetailed, type ShareTokenRow } from "@/lib/share-tokens";
+import { issueShareToken, resolveShareTokenDetailed, revokeShareTokens, type ShareTokenRow } from "@/lib/share-tokens";
+import { rateLimitAsync } from "@/lib/request-limits";
 import { businessName } from "@/lib/money/quotes";
 import { assertRecipientMatches, OTP_MAX_ATTEMPTS, OTP_TTL_MS } from "@/lib/money/acceptance";
 import { CONSENT_TEXT } from "@/lib/pdf/quote-document";
@@ -58,6 +59,8 @@ export function allSigned(signers: OrderSigner[]): boolean {
 /* ─── send ───────────────────────────────────────────────────────────────── */
 
 async function notifySigner(dataId: string, doc: DocumentDTO, signer: SignerRow, message: string | null): Promise<{ url: string }> {
+  // One live link per signer: a re-send invalidates any earlier (possibly leaked) link.
+  await revokeShareTokens("sign", signer.id);
   const link = await issueShareToken(dataId, "sign", signer.id, ttlDays(doc), { recipient: signer.email });
   const from = await businessName(dataId);
   await enqueueNotification(dataId, {
@@ -97,9 +100,12 @@ export async function sendForSignature(dataId: string, documentId: string, opts:
   if (!doc.body_md.trim()) throw new DocumentError("Document body is empty");
 
   if (doc.status === "draft") {
-    const built = await buildUnsignedPdf(dataId, doc);
+    const sentAt = new Date().toISOString();
     const expiresAt = opts.expires_in_days ? new Date(Date.now() + opts.expires_in_days * 86_400_000).toISOString() : (doc.expires_at ?? new Date(Date.now() + DEFAULT_SIGN_TTL_DAYS * 86_400_000).toISOString());
-    await query(`UPDATE documents SET status = 'sent', sent_at = NOW(), pdf_hash = $3, expires_at = $4, updated_at = NOW() WHERE user_id = $1 AND id = $2`, [dataId, documentId, built.hash, expiresAt]);
+    // Fingerprint the PDF exactly as it will render once stored (status sent, sent/expiry dates set),
+    // otherwise the stored hash never matches a downloadable copy.
+    const built = await buildUnsignedPdf(dataId, { ...doc, status: "sent", sent_at: sentAt, expires_at: expiresAt });
+    await query(`UPDATE documents SET status = 'sent', sent_at = $5, pdf_hash = $3, expires_at = $4, updated_at = NOW() WHERE user_id = $1 AND id = $2`, [dataId, documentId, built.hash, expiresAt, sentAt]);
   }
   const fresh = (await getDocument(dataId, documentId)) ?? doc;
   const signers = await listSigners(documentId);
@@ -141,6 +147,15 @@ export async function resolveSigner(token: string): Promise<SignerContext> {
   const doc = await getDocumentById(signer.document_id);
   if (!doc || doc.user_id !== lookup.row.user_id) throw new SignLinkError("not_found", "This signing link is not valid");
   return { share: lookup.row, signer, doc };
+}
+
+/** Recipient binding surfaced as a DocumentError so the public routes can return it (plain Errors are never echoed). */
+function assertRecipient(email: string, recipient: string | null | undefined): void {
+  try {
+    assertRecipientMatches(email, recipient);
+  } catch (err) {
+    throw new DocumentError(err instanceof Error ? err.message : "This link was sent to a different email address", 400);
+  }
 }
 
 function docIsExpired(doc: DocumentDTO): boolean {
@@ -195,15 +210,25 @@ function signerOrder(signers: DocumentSignerDTO[], id: string): number {
 
 /* ─── OTP ────────────────────────────────────────────────────────────────── */
 
+export const OTP_REQUESTS_PER_WINDOW = 5;
+export const OTP_REQUEST_WINDOW_MS = 10 * 60_000;
+
 export async function requestSignOtp(token: string, email: string, purpose: SignOtpPurpose): Promise<{ ok: true; expiresAt: string }> {
   const { share, signer, doc } = await resolveSigner(token);
-  assertRecipientMatches(email, share.recipient ?? signer.email);
+  assertRecipient(email, share.recipient ?? signer.email);
   assertSignable(doc);
   if (signer.status === "signed") throw new DocumentError("You have already signed this document");
   if (purpose === "sign" && !isSignersTurn(doc.signing_order, doc.signers, signer.id)) throw new DocumentError("It is not your turn to sign yet; you will be emailed when it is");
+  // Per-signer budget (independent of IP): bounds code emails to the recipient and the guess rate.
+  const budget = await rateLimitAsync(`sign-otp:${signer.id}`, OTP_REQUESTS_PER_WINDOW, OTP_REQUEST_WINDOW_MS);
+  if (!budget.allowed) throw new DocumentError("Too many code requests; please wait a few minutes and try again");
   const otp = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
-  await query(`UPDATE document_signers SET otp_hash = $2, otp_expires_at = $3, otp_attempts = 0 WHERE id = $1`, [signer.id, hashSignOtp(signer.id, email, otp, purpose), expiresAt]);
+  // Re-issuing while a code is still live keeps the failed-attempt counter, so "request a new code" cannot reset the guess budget.
+  await query(
+    `UPDATE document_signers SET otp_hash = $2, otp_expires_at = $3, otp_attempts = CASE WHEN otp_expires_at IS NOT NULL AND otp_expires_at > NOW() THEN otp_attempts ELSE 0 END WHERE id = $1 AND user_id = $4`,
+    [signer.id, hashSignOtp(signer.id, email, otp, purpose), expiresAt, share.user_id]
+  );
   const from = await businessName(share.user_id);
   await enqueueNotification(share.user_id, {
     channel: "email",
@@ -215,17 +240,26 @@ export async function requestSignOtp(token: string, email: string, purpose: Sign
   return { ok: true, expiresAt };
 }
 
-async function verifySignOtp(signerId: string, email: string, otp: string, purpose: SignOtpPurpose): Promise<void> {
-  const row = await queryOne<{ otp_hash: string | null; otp_expires_at: string | Date | null; otp_attempts: number }>(`SELECT otp_hash, otp_expires_at, otp_attempts FROM document_signers WHERE id = $1`, [signerId]);
-  if (!row || !row.otp_hash) throw new DocumentError("Request a verification code first");
+/**
+ * Consume one attempt atomically (increment-then-check), so concurrent guesses
+ * cannot all pass the `< max` read. A correct code clears the counter.
+ */
+async function verifySignOtp(dataId: string, signerId: string, email: string, otp: string, purpose: SignOtpPurpose): Promise<void> {
+  const row = await queryOne<{ otp_hash: string | null; otp_expires_at: string | Date | null; otp_attempts: number }>(
+    `UPDATE document_signers SET otp_attempts = otp_attempts + 1 WHERE id = $1 AND user_id = $2 AND otp_attempts < $3 RETURNING otp_hash, otp_expires_at, otp_attempts`,
+    [signerId, dataId, OTP_MAX_ATTEMPTS]
+  );
+  if (!row) {
+    const exists = await queryOne<{ otp_hash: string | null }>(`SELECT otp_hash FROM document_signers WHERE id = $1 AND user_id = $2`, [signerId, dataId]);
+    if (!exists?.otp_hash) throw new DocumentError("Request a verification code first");
+    throw new DocumentError("Too many attempts; request a new code");
+  }
+  if (!row.otp_hash) throw new DocumentError("Request a verification code first");
   if (row.otp_expires_at && new Date(row.otp_expires_at).getTime() < Date.now()) throw new DocumentError("Verification code expired; request a new one");
-  if (Number(row.otp_attempts) >= OTP_MAX_ATTEMPTS) throw new DocumentError("Too many attempts; request a new code");
   const expected = hashSignOtp(signerId, email, otp, purpose);
   const good = expected.length === row.otp_hash.length && timingSafeEqual(Buffer.from(expected), Buffer.from(row.otp_hash));
-  if (!good) {
-    await query(`UPDATE document_signers SET otp_attempts = otp_attempts + 1 WHERE id = $1`, [signerId]);
-    throw new DocumentError("Incorrect verification code");
-  }
+  if (!good) throw new DocumentError("Incorrect verification code");
+  await query(`UPDATE document_signers SET otp_attempts = 0 WHERE id = $1 AND user_id = $2`, [signerId, dataId]);
 }
 
 /* ─── sign / decline ─────────────────────────────────────────────────────── */
@@ -241,16 +275,22 @@ export interface SignInput {
 
 export async function signWithToken(token: string, input: SignInput): Promise<{ document: PublicDocument; completed: boolean }> {
   const { share, signer, doc } = await resolveSigner(token);
-  assertRecipientMatches(input.email, share.recipient ?? signer.email);
+  assertRecipient(input.email, share.recipient ?? signer.email);
   assertSignable(doc);
   if (signer.status === "signed") throw new DocumentError("You have already signed this document");
   if (!isSignersTurn(doc.signing_order, doc.signers, signer.id)) throw new DocumentError("It is not your turn to sign yet");
-  await verifySignOtp(signer.id, input.email, input.otp, "sign");
+  await verifySignOtp(share.user_id, signer.id, input.email, input.otp, "sign");
   const signature = input.signature_text.trim().slice(0, 200) || signer.name;
-  await query(
-    `UPDATE document_signers SET status = 'signed', signed_at = NOW(), signature_text = $2, name = COALESCE(NULLIF($3, ''), name), ip = $4, user_agent = $5, consent_text = $6, otp_hash = NULL WHERE id = $1`,
-    [signer.id, signature, input.name?.trim().slice(0, 200) ?? "", input.ip, input.userAgent?.slice(0, 500) ?? null, CONSENT_TEXT]
+  // Guarded write: the signer must still be open and the document still signable at write time
+  // (a concurrent sign, decline or void between the read above and this UPDATE must lose).
+  const signed = await query<{ id: string }>(
+    `UPDATE document_signers s SET status = 'signed', signed_at = NOW(), signature_text = $2, name = COALESCE(NULLIF($3, ''), name), ip = $4, user_agent = $5, consent_text = $6, otp_hash = NULL
+      WHERE s.id = $1 AND s.user_id = $7 AND s.status IN ('pending', 'viewed')
+        AND EXISTS (SELECT 1 FROM documents d WHERE d.id = s.document_id AND d.user_id = $7 AND d.status IN ('sent', 'viewed'))
+      RETURNING s.id`,
+    [signer.id, signature, input.name?.trim().slice(0, 200) ?? "", input.ip, input.userAgent?.slice(0, 500) ?? null, CONSENT_TEXT, share.user_id]
   );
+  if (signed.length === 0) throw new DocumentError("This document can no longer be signed from this link");
   void recordAudit({ dataId: share.user_id, userId: null }, { action: "document.signer_signed", entity: "document", entityId: doc.id, after: { signer_id: signer.id, email: signer.email } });
 
   const signers = await listSigners(doc.id);
@@ -271,7 +311,13 @@ export async function signWithToken(token: string, input: SignInput): Promise<{ 
 
 /** All signers signed: stamp, hash, attach, notify. */
 async function completeDocument(dataId: string, documentId: string): Promise<void> {
-  await query(`UPDATE documents SET status = 'signed', completed_at = NOW(), updated_at = NOW() WHERE user_id = $1 AND id = $2`, [dataId, documentId]);
+  // Conditional claim: two signers finishing in parallel both see allSigned(); only the one that
+  // flips sent/viewed → signed stamps, attaches and notifies.
+  const flipped = await query<{ id: string }>(
+    `UPDATE documents SET status = 'signed', completed_at = NOW(), updated_at = NOW() WHERE user_id = $1 AND id = $2 AND status IN ('sent', 'viewed') RETURNING id`,
+    [dataId, documentId]
+  );
+  if (flipped.length === 0) return;
   const doc = await getDocument(dataId, documentId);
   if (!doc) return;
   try {
@@ -305,12 +351,16 @@ export interface DeclineInput {
 
 export async function declineWithToken(token: string, input: DeclineInput): Promise<PublicDocument> {
   const { share, signer, doc } = await resolveSigner(token);
-  assertRecipientMatches(input.email, share.recipient ?? signer.email);
+  assertRecipient(input.email, share.recipient ?? signer.email);
   assertSignable(doc);
   if (signer.status === "signed") throw new DocumentError("You have already signed this document");
-  await verifySignOtp(signer.id, input.email, input.otp, "decline");
-  await query(`UPDATE document_signers SET status = 'declined', decline_reason = $2, otp_hash = NULL WHERE id = $1`, [signer.id, input.reason?.trim().slice(0, 1000) || null]);
-  await query(`UPDATE documents SET status = 'declined', updated_at = NOW() WHERE id = $1`, [doc.id]);
+  await verifySignOtp(share.user_id, signer.id, input.email, input.otp, "decline");
+  const declined = await query<{ id: string }>(
+    `UPDATE document_signers SET status = 'declined', decline_reason = $2, otp_hash = NULL WHERE id = $1 AND user_id = $3 AND status IN ('pending', 'viewed') RETURNING id`,
+    [signer.id, input.reason?.trim().slice(0, 1000) || null, share.user_id]
+  );
+  if (declined.length === 0) throw new DocumentError("This document can no longer be declined from this link");
+  await query(`UPDATE documents SET status = 'declined', updated_at = NOW() WHERE id = $1 AND user_id = $2 AND status IN ('sent', 'viewed')`, [doc.id, share.user_id]);
   void recordAudit({ dataId: share.user_id, userId: null }, { action: "document.declined", entity: "document", entityId: doc.id, after: { signer_id: signer.id, reason: input.reason ?? null } });
   void emitEvent(share.user_id, { type: "document.declined", entity: "document", entityId: doc.id, data: { title: doc.title, signer_email: signer.email, reason: input.reason ?? null } });
   await enqueueNotification(share.user_id, {
@@ -326,6 +376,8 @@ export async function declineWithToken(token: string, input: DeclineInput): Prom
 /** PDF for a signer: redacted evidence (no raw IP/UA on the public copy). */
 export async function pdfForToken(token: string) {
   const { share, doc } = await resolveSigner(token);
+  // A live link only downloads a document that is still in flight or fully signed.
+  if (doc.status !== "signed") assertSignable(doc);
   return buildDocumentPdf(share.user_id, doc, { redactEvidence: true });
 }
 

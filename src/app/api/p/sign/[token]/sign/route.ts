@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { clientIp, paramToken, parseBody, publicRateLimit } from "@/lib/money/http";
 import { signWithToken, SignLinkError } from "@/lib/documents/signing";
+import { DocumentError } from "@/lib/documents/documents";
 
 export const runtime = "nodejs";
 
@@ -34,8 +35,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     return NextResponse.json(out);
   } catch (err) {
     if (err instanceof SignLinkError) return NextResponse.json({ error: err.code }, { status: err.code === "expired" ? 410 : 404 });
-    const msg = err instanceof Error ? err.message : "error";
-    if (err instanceof Error && err.name !== "DbError") return NextResponse.json({ error: "bad_request", detail: msg }, { status: 400 });
+    if (err instanceof DocumentError) return NextResponse.json({ error: "bad_request", detail: err.message }, { status: err.status });
     console.error("[p.sign.sign]", err);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }

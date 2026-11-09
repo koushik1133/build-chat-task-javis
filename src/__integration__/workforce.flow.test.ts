@@ -233,6 +233,10 @@ describeDb("workforce flow", () => {
     expect(lr.body.leave).toMatchObject({ staff_id: ben.id, kind: "unpaid", status: "pending", hours: 4 });
     const pend = await api<{ pendingLeave: number }>(crew.GET, `/api/m/${token}`, { query: { tz: "UTC" }, params: { token }, expect: 200 });
     expect(pend.body.pendingLeave).toBe(1);
+    // SEC: crew leave is bounded — no impossible dates, no multi-year blocks.
+    await api(crew.POST, `/api/m/${token}`, { json: { action: "request_leave", kind: "unpaid", starts_on: "2026-99-99", ends_on: "2026-99-99" }, params: { token }, expect: 400 });
+    await api(crew.POST, `/api/m/${token}`, { json: { action: "request_leave", kind: "unpaid", starts_on: plusDays(thu, 30), ends_on: "9999-12-31" }, params: { token }, expect: 400 });
+    expect((await api<{ pendingLeave: number }>(crew.GET, `/api/m/${token}`, { query: { tz: "UTC" }, params: { token }, expect: 200 })).body.pendingLeave).toBe(1);
     setScope(org);
   });
 
@@ -246,6 +250,9 @@ describeDb("workforce flow", () => {
     // matched to Ben's Tue 10–14 shift (240 scheduled) → 205 worked → −35
     expect(manual.body.attendance).toMatchObject({ shift_id: second.id, minutes: 205, scheduled_minutes: 240, variance_minutes: -35, source: "manual" });
     await api(attendance.POST, "/api/workforce/attendance", { json: { staff_id: ben.id, clock_in: at(tue, "10:05"), clock_out: at(tue, "09:30") }, expect: 400 });
+    // SEC: a supplied shift_id must be a shift of this org for this staff member (ana's shift cannot be pinned to ben).
+    await api(attendance.POST, "/api/workforce/attendance", { json: { staff_id: ana.id, shift_id: second.id, clock_in: at(tue, "09:00"), clock_out: at(tue, "12:00") }, expect: 400 });
+    await api(attendance.POST, "/api/workforce/attendance", { json: { staff_id: ben.id, shift_id: "00000000-0000-4000-8000-000000000000", clock_in: at(tue, "09:00"), clock_out: at(tue, "12:00") }, expect: 400 });
     const list = await api<{ attendance: AttendanceDTO[] }>(attendance.GET, "/api/workforce/attendance", { query: { from: at(tue, "00:00"), to: at(wed, "00:00") }, expect: 200 });
     expect(list.body.attendance.map((a) => a.id)).toEqual([manual.body.attendance.id]);
   });

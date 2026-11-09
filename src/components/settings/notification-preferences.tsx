@@ -7,6 +7,7 @@ import { Field } from "@/components/ui/field";
 import { Banner, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Pill } from "@/components/ui/pill";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
+import { TableScroller } from "@/components/ui/table-scroller";
 
 /**
  * Settings → Notifications: category × channel matrix, digest cadence/hour and quiet hours.
@@ -81,19 +82,19 @@ export function NotificationPreferences() {
       <section aria-labelledby="matrix-heading" className="rounded-xl border border-border bg-card p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 id="matrix-heading" className="text-sm font-semibold">What reaches you, and where</h2>
-          <p className="text-xs text-muted-foreground" aria-live="polite">{saving ? "Saving…" : savedAt ? "Saved" : ""}</p>
+          <p className="text-xs text-muted-foreground" role="status" aria-live="polite">{saving ? "Saving…" : savedAt ? "Saved" : ""}</p>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">Untick a channel to stop that kind of alert there. Simulated channels write to the Outbox only.</p>
-        <div className="mt-4 overflow-x-auto">
+        <TableScroller label="Notification categories by channel" className="mt-4">
           <table className="w-full min-w-[32rem] text-sm">
             <caption className="sr-only">Notification categories by channel</caption>
             <thead className="text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th scope="col" className="py-2 pr-3 text-left font-medium">Category</th>
+                <th scope="col" className="px-3 py-2 text-start font-medium">Category</th>
                 {data.channels.map((c) => (
                   <th key={c} scope="col" className="px-2 py-2 text-center font-medium">
                     {CHANNEL_LABELS[c]}
-                    {data.channel_status[c] === "simulated" && <span className="ml-1 block text-[10px] normal-case text-muted-foreground">simulated</span>}
+                    {data.channel_status[c] === "simulated" && <span className="block text-[10px] normal-case text-muted-foreground">Simulated</span>}
                   </th>
                 ))}
               </tr>
@@ -101,7 +102,7 @@ export function NotificationPreferences() {
             <tbody className="divide-y divide-border">
               {data.categories.map((cat) => (
                 <tr key={cat.key}>
-                  <th scope="row" className="py-2 pr-3 text-left font-medium">{cat.label}</th>
+                  <th scope="row" className="px-3 py-2 text-start font-medium">{cat.label}</th>
                   {data.channels.map((ch) => (
                     <td key={ch} className="px-2 py-1 text-center">
                       <Checkbox
@@ -116,11 +117,11 @@ export function NotificationPreferences() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroller>
       </section>
 
       <section aria-labelledby="digest-heading" className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 id="digest-heading" className="flex items-center gap-2 text-sm font-semibold">Digest email <Pill tone="info">{p.digest === "off" ? "Off" : p.digest}</Pill></h2>
+        <h2 id="digest-heading" className="flex items-center gap-2 text-sm font-semibold">Digest email <Pill tone={p.digest === "off" ? "neutral" : "info"}>{p.digest === "off" ? "Off" : p.digest === "daily" ? "Daily" : "Weekly"}</Pill></h2>
         <p className="mt-1 text-sm text-muted-foreground">A summary of what needs you, your KPIs with deltas, and your scheduled reports — sent on the Email channel of “Scheduled reports”.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <Field label="Cadence">

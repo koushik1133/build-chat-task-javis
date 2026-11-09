@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileSignature, Loader2 } from "lucide-react";
+import { FileSignature } from "lucide-react";
 import { Pill } from "@/components/ui/pill";
+import { Banner, SkeletonList } from "@/components/ui/feedback";
 
 interface PortalDoc {
   id: string;
@@ -32,8 +33,8 @@ export function DocumentsTab({ token }: { token: string }) {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load documents."));
   }, [token]);
 
-  if (error) return <p className="text-sm text-muted-foreground">{error}</p>;
-  if (!docs) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden /></div>;
+  if (error) return <Banner tone="error">{error}</Banner>;
+  if (!docs) return <SkeletonList count={2} itemClassName="h-28 rounded-xl" label="Loading documents…" />;
 
   const pending = docs.filter((d) => d.status === "sent" || d.status === "viewed");
   const done = docs.filter((d) => d.status !== "sent" && d.status !== "viewed");
@@ -48,18 +49,18 @@ export function DocumentsTab({ token }: { token: string }) {
           {d.pending_signers.length > 0 && d.status !== "signed" ? ` · waiting on ${d.pending_signers.join(", ")}` : ""}
         </div>
       </div>
-      <Pill tone={TONE[d.status as keyof typeof TONE] ?? "neutral"}>{d.status}</Pill>
+      <Pill tone={TONE[d.status as keyof typeof TONE] ?? "neutral"} className="shrink-0 capitalize">{d.status}</Pill>
     </li>
   );
 
   return (
     <div className="space-y-5">
-      <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><FileSignature className="h-4 w-4 text-primary" aria-hidden /> Awaiting signature</h2>
+      <section aria-labelledby="portal-docs-pending" className="rounded-xl border border-border bg-card p-5">
+        <h2 id="portal-docs-pending" className="mb-3 flex items-center gap-2 text-sm font-semibold"><FileSignature className="h-4 w-4 text-primary" aria-hidden /> Awaiting signature</h2>
         {pending.length === 0 ? <p className="text-sm text-muted-foreground">Nothing waiting for your signature. Signing links arrive by email.</p> : <ul className="divide-y divide-border/60">{pending.map((d) => <Item key={d.id} d={d} />)}</ul>}
       </section>
-      <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-3 text-sm font-semibold">Completed documents</h2>
+      <section aria-labelledby="portal-docs-done" className="rounded-xl border border-border bg-card p-5">
+        <h2 id="portal-docs-done" className="mb-3 text-sm font-semibold">Completed documents</h2>
         {done.length === 0 ? <p className="text-sm text-muted-foreground">No signed documents yet. Signed copies also appear under Files.</p> : <ul className="divide-y divide-border/60">{done.map((d) => <Item key={d.id} d={d} />)}</ul>}
       </section>
     </div>

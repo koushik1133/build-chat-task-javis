@@ -70,7 +70,25 @@ export interface ReceiveResult {
   recosted: Record<string, number>;
 }
 
+class ReceiptRace extends Error {
+  code = "40001";
+  constructor() {
+    super("purchase order changed while receiving (OC000)");
+  }
+}
+
+/**
+ * Receive against a PO. Two concurrent receipts for the remaining quantity
+ * must not both pass the over-receipt check, so the receipt row is appended
+ * with a single statement that also claims the PO row (its `updated_at` must
+ * still be the value we validated against). A lost claim raises a
+ * concurrency conflict and `withRetry` re-reads prior receipts and re-validates.
+ */
 export async function receivePurchaseOrder(dataId: string, poId: string, input: ReceiveLinesInput, actorId?: string | null): Promise<ReceiveResult> {
+  return withRetry(() => receiveOnce(dataId, poId, input, actorId), 5);
+}
+
+async function receiveOnce(dataId: string, poId: string, input: ReceiveLinesInput, actorId?: string | null): Promise<ReceiveResult> {
   const po = await getPurchaseOrder(dataId, poId);
   if (!po) throw new Error("Purchase order not found");
   if (po.status === "cancelled") throw new Error("Purchase order is cancelled");
@@ -92,21 +110,29 @@ export async function receivePurchaseOrder(dataId: string, poId: string, input: 
     costByProduct.set(it.product_id, it.unit_minor);
   }
   const products = await getProductsByIds(dataId, input.lines.map((l) => l.product_id));
+  for (const l of input.lines) if (!products.has(l.product_id)) throw new Error(`Product ${l.product_id} no longer exists`);
+
+  // Claim + append atomically: the PO row must be unchanged since we read it (ms precision: JS Dates carry no microseconds).
+  const receiptId = randomUUID();
+  const claimed = await query<{ id: string }>(
+    `WITH claim AS (
+       UPDATE purchase_orders SET updated_at = NOW()
+        WHERE id = $1 AND user_id = $2 AND date_trunc('milliseconds', updated_at) = $3::timestamptz AND status NOT IN ('draft', 'cancelled', 'received')
+        RETURNING id
+     )
+     INSERT INTO po_receipts (id, user_id, purchase_order_id, received_at, lines, note, created_by)
+     SELECT $4, $2, $1, $5, $6, $7, $8 FROM claim RETURNING id`,
+    [po.id, dataId, new Date(po.updated_at).toISOString(), receiptId, input.received_at ?? new Date().toISOString(), JSON.stringify(input.lines), input.note ?? null, actorId ?? null]
+  );
+  if (claimed.length === 0) throw new ReceiptRace();
 
   const recosted: Record<string, number> = {};
   for (const l of input.lines) {
-    if (!products.has(l.product_id)) throw new Error(`Product ${l.product_id} no longer exists`);
     await adjustStock(dataId, l.product_id, { kind: "receive", qty: l.qty, ref_kind: "purchase_order", ref_id: po.id, note: `Received on ${po.number}` }, actorId ?? null);
     const unitCost = costByProduct.get(l.product_id) ?? 0;
     const next = await recostProduct(dataId, l.product_id, l.qty, unitCost);
     if (next !== null) recosted[l.product_id] = next;
   }
-
-  const receiptId = randomUUID();
-  await query(
-    `INSERT INTO po_receipts (id, user_id, purchase_order_id, received_at, lines, note, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [receiptId, dataId, po.id, input.received_at ?? new Date().toISOString(), JSON.stringify(input.lines), input.note ?? null, actorId ?? null]
-  );
 
   const all = await listReceipts(dataId, po.id);
   const progress = receiptProgress(ordered, receivedByProduct(all.map((r) => r.lines)));

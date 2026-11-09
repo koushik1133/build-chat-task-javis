@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { rateLimitAsync } from "@/lib/request-limits";
 import { AutomationDefinitionSchema } from "@/lib/automations/schema";
-import { createAutomation, listAutomations, runStats, toAutomationDTO } from "@/lib/automations/store";
+import { createAutomation, listAutomations, redactAutomationSecrets, runStats, toAutomationDTO } from "@/lib/automations/store";
 import { recordAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -17,7 +17,8 @@ export async function GET() {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const [rows, stats] = await Promise.all([listAutomations(scope.dataId).catch(() => []), runStats(scope.dataId)]);
-  const automations = rows.map(toAutomationDTO).map((a) => ({ ...a, stats: stats[a.id] ?? { total: 0, failed: 0, waiting: 0 } }));
+  const canEdit = scope.can("agents", true);
+  const automations = rows.map(toAutomationDTO).map((a) => (canEdit ? a : redactAutomationSecrets(a))).map((a) => ({ ...a, stats: stats[a.id] ?? { total: 0, failed: 0, waiting: 0 } }));
   return NextResponse.json({ automations, workflows: automations });
 }
 

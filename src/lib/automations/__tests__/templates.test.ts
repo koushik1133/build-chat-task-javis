@@ -17,8 +17,6 @@ describe("automation templates", () => {
   });
   it("event triggers point at known event types", () => {
     const known = new Set<string>(EVENT_TYPES);
-    known.add("invoice.overdue");
-    known.add("shift.published");
     for (const t of AUTOMATION_TEMPLATES) {
       if (t.definition.trigger_type !== "event") continue;
       expect(known.has(t.definition.trigger_config.event_type ?? ""), `${t.key} → ${t.definition.trigger_config.event_type}`).toBe(true);

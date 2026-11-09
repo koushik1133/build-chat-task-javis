@@ -262,6 +262,18 @@ describeDb("automations v2 flow", () => {
     const run = await sqlOne<{ status: string }>(`SELECT status FROM automation_runs WHERE id = $1`, [ok.body.run_id]);
     expect(run?.status).toBe("done");
     expect(await sql(`SELECT id FROM tasks WHERE user_id = $1 AND title = 'Hook said hello'`, [org.dataId])).toHaveLength(1);
+
+    // SEC: a view-only role never learns the hook token; editors still do.
+    setScope(org, { role: "viewer" });
+    const one = await import("@/app/api/automations/[id]/route");
+    const asViewer = await api<{ automation: AutomationDTO }>(one.GET, `/api/automations/${created.body.automation.id}`, { params: { id: created.body.automation.id }, expect: 200 });
+    expect(asViewer.body.automation.trigger_config.webhook?.token).not.toBe(token);
+    expect(JSON.stringify(asViewer.body)).not.toContain(token);
+    const listed = await api<{ automations: AutomationDTO[] }>(list.GET, "/api/automations", { expect: 200 });
+    expect(JSON.stringify(listed.body)).not.toContain(token);
+    setScope(org);
+    const asOwner = await api<{ automation: AutomationDTO }>(one.GET, `/api/automations/${created.body.automation.id}`, { params: { id: created.body.automation.id }, expect: 200 });
+    expect(asOwner.body.automation.trigger_config.webhook?.token).toBe(token);
   });
 
   it("legacy rows are converted on read, saved into the v2 shape and migrated in bulk", async () => {

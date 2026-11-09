@@ -48,6 +48,19 @@ describe("schedule maths", () => {
     expect(nextRunAt({ cadence: "monthly", hour: 6, dayOfMonth: 1 }, after, "UTC").toISOString()).toBe("2026-04-01T06:00:00.000Z");
   });
 
+  it("keeps the local hour across DST transitions and clamps monthly day > 28", () => {
+    // New York springs forward 2026-03-08 02:00 → 03:00: 08:00 local is 12:00Z (EDT), not 13:00Z (midnight + 8h in EST).
+    expect(nextRunAt({ cadence: "daily", hour: 8 }, new Date("2026-03-08T00:30:00Z"), "America/New_York").toISOString()).toBe("2026-03-08T12:00:00.000Z");
+    // Fall back 2026-11-01 02:00 → 01:00: 08:00 local is 13:00Z (EST), not 12:00Z.
+    expect(nextRunAt({ cadence: "daily", hour: 8 }, new Date("2026-11-01T00:30:00Z"), "America/New_York").toISOString()).toBe("2026-11-01T13:00:00.000Z");
+    // Quiet hours ending at 07:00 on the spring-forward day resolve to 11:00Z (EDT).
+    expect(quietHoursEnd({ start: "22:00", end: "07:00" }, new Date("2026-03-08T06:30:00Z"), "America/New_York").toISOString()).toBe("2026-03-08T11:00:00.000Z");
+    // dayOfMonth 31 is clamped to 28 so every month has a run; February included.
+    expect(nextRunAt({ cadence: "monthly", hour: 6, dayOfMonth: 31 }, new Date("2026-01-29T00:00:00Z"), "UTC").toISOString()).toBe("2026-02-28T06:00:00.000Z");
+    // Weekly on Monday after a Monday-at-hour instant goes to next week, not the same day.
+    expect(nextRunAt({ cadence: "weekly", hour: 7, weekday: 1 }, new Date("2026-03-16T07:00:00Z"), "UTC").toISOString()).toBe("2026-03-23T07:00:00.000Z");
+  });
+
   it("quiet hours wrap midnight and resolve an end instant", () => {
     const q = { start: "22:00", end: "07:00" };
     expect(inQuietHours(q, new Date("2026-03-15T23:30:00Z"), "UTC")).toBe(true);

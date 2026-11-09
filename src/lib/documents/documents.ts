@@ -6,6 +6,8 @@ import { getBranding } from "@/lib/branding";
 import { businessName } from "@/lib/money/quotes";
 import { orgTimezone, type BuiltPdf } from "@/lib/pdf/documents";
 import { tableExists } from "@/lib/table-exists";
+import { entityExists } from "@/lib/attachments/store";
+import type { AttachmentEntityKind } from "@/lib/attachments/types";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import { DocumentError, getTemplate } from "./templates";
 import { documentHash, missingRequired, renderDocumentPdf, renderMerge, type SignerStamp } from "./render";
@@ -224,6 +226,7 @@ export async function createDocument(dataId: string, input: CreateDocumentInput,
     template = await getTemplate(dataId, input.template_id);
     if (!template) throw new DocumentError("Template not found", 404);
   }
+  await assertLinkedEntities(dataId, input);
   const defaults = await mergeDefaults(dataId, input.contact_id);
   const mergeData: Record<string, string> = { ...defaults, ...(input.merge_data ?? {}) };
   const fields: MergeField[] = template?.fields ?? [];
@@ -246,6 +249,19 @@ export async function createDocument(dataId: string, input: CreateDocumentInput,
   const doc = await getDocument(dataId, id);
   if (!doc) throw new Error("document insert vanished");
   return doc;
+}
+
+/** Linked contact/record/quote ids must belong to this org (they also become storage path segments). */
+async function assertLinkedEntities(dataId: string, ids: { contact_id?: string | null; record_id?: string | null; quote_id?: string | null }): Promise<void> {
+  const checks: Array<[AttachmentEntityKind, string | null | undefined, string]> = [
+    ["contact", ids.contact_id, "Contact not found"],
+    ["record", ids.record_id, "Record not found"],
+    ["quote", ids.quote_id, "Quote not found"],
+  ];
+  for (const [kind, id, msg] of checks) {
+    if (!id) continue;
+    if (!(await entityExists(dataId, kind, id))) throw new DocumentError(msg, 404);
+  }
 }
 
 export interface UpdateDocumentInput {
@@ -274,7 +290,10 @@ export async function updateDocument(dataId: string, id: string, patch: UpdateDo
   if (patch.merge_data !== undefined) set("merge_data", JSON.stringify({ ...before.merge_data, ...patch.merge_data }));
   if (patch.signing_order !== undefined) set("signing_order", patch.signing_order);
   if (patch.expires_at !== undefined) set("expires_at", patch.expires_at);
-  if (patch.contact_id !== undefined) set("contact_id", patch.contact_id);
+  if (patch.contact_id !== undefined) {
+    await assertLinkedEntities(dataId, { contact_id: patch.contact_id });
+    set("contact_id", patch.contact_id);
+  }
   if (sets.length) {
     sets.push("updated_at = NOW()");
     await query(`UPDATE documents SET ${sets.join(", ")} WHERE user_id = $1 AND id = $2`, values);
@@ -344,7 +363,9 @@ function toStamp(s: SignerEvidenceRow): SignerStamp {
 /** Unsigned PDF (always deterministic for a given document) and its hash. */
 export async function buildUnsignedPdf(dataId: string, doc: DocumentDTO): Promise<BuiltPdf> {
   const { branding, timezone, business } = await docContext(dataId);
-  const bytes = renderDocumentPdf(toInput(doc), null, branding, { business, timezone });
+  // The fingerprint must not drift with the mutable in-flight status (sent → viewed), so every non-draft copy renders as "sent".
+  const fingerprinted: DocumentDTO = doc.status === "draft" ? doc : { ...doc, status: "sent" };
+  const bytes = renderDocumentPdf(toInput(fingerprinted), null, branding, { business, timezone });
   return { bytes, filename: `${safeName(doc.title)}.pdf`, hash: documentHash(bytes), signed: false };
 }
 
@@ -352,7 +373,7 @@ export async function buildUnsignedPdf(dataId: string, doc: DocumentDTO): Promis
 export async function buildDocumentPdf(dataId: string, doc: DocumentDTO, opts: { redactEvidence?: boolean } = {}): Promise<BuiltPdf> {
   if (doc.status !== "signed") return buildUnsignedPdf(dataId, doc);
   const [{ branding, timezone, business }, signers] = await Promise.all([docContext(dataId), listSignersWithEvidence(doc.id)]);
-  const unsignedHash = doc.pdf_hash ?? documentHash(renderDocumentPdf(toInput(doc), null, branding, { business, timezone }));
+  const unsignedHash = doc.pdf_hash ?? documentHash(renderDocumentPdf(toInput({ ...doc, status: "sent" }), null, branding, { business, timezone }));
   const stamps = signers.filter((s) => s.status === "signed").map(toStamp);
   const bytes = renderDocumentPdf(toInput(doc), stamps, branding, { business, timezone, documentHash: unsignedHash, redactEvidence: opts.redactEvidence });
   return { bytes, filename: `${safeName(doc.title)}-signed.pdf`, hash: documentHash(bytes), signed: true };

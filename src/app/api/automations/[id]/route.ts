@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { AutomationDefinitionSchema, AutomationPatchSchema } from "@/lib/automations/schema";
-import { definitionOf, deleteAutomation, getAutomation, saveAutomation, toAutomationDTO } from "@/lib/automations/store";
+import { definitionOf, deleteAutomation, getAutomation, redactAutomationSecrets, saveAutomation, toAutomationDTO } from "@/lib/automations/store";
 import { recordAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -19,7 +19,8 @@ export async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const row = await getAutomation(scope.dataId, id).catch(() => null);
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
-  return NextResponse.json({ automation: toAutomationDTO(row) });
+  const dto = toAutomationDTO(row);
+  return NextResponse.json({ automation: scope.can("agents", true) ? dto : redactAutomationSecrets(dto) });
 }
 
 /** PATCH: partial update of the v2 definition (legacy rows are converted and persisted on first save). Accepts legacy `{status}` too. */

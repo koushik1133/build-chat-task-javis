@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, Loader2, Paperclip } from "lucide-react";
+import { Download, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Banner, SkeletonList } from "@/components/ui/feedback";
 import { formatBytes, type AttachmentDTO } from "@/lib/attachments/types";
 
 const when = (iso: string) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(iso));
@@ -22,12 +23,12 @@ export function FilesTab({ token }: { token: string }) {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load files."));
   }, [token]);
 
-  if (error) return <p className="text-sm text-muted-foreground">{error}</p>;
-  if (!files) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden /></div>;
+  if (error) return <Banner tone="error">{error}</Banner>;
+  if (!files) return <SkeletonList count={1} itemClassName="h-40 rounded-xl" label="Loading files…" />;
 
   return (
-    <section className="rounded-xl border border-border bg-card p-5">
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Paperclip className="h-4 w-4 text-primary" aria-hidden /> Files shared with you</h2>
+    <section aria-labelledby="portal-files-heading" className="rounded-xl border border-border bg-card p-5">
+      <h2 id="portal-files-heading" className="mb-3 flex items-center gap-2 text-sm font-semibold"><Paperclip className="h-4 w-4 text-primary" aria-hidden /> Files shared with you</h2>
       {files.length === 0 ? (
         <p className="text-sm text-muted-foreground">No files have been shared yet.</p>
       ) : (
@@ -35,7 +36,7 @@ export function FilesTab({ token }: { token: string }) {
           {files.map((f) => (
             <li key={f.id} className="flex items-center justify-between gap-3 py-2 text-sm">
               <div className="min-w-0">
-                <div className="truncate font-medium">{f.file_name}</div>
+                <div className="truncate font-medium" title={f.file_name}>{f.file_name}</div>
                 <div className="text-xs text-muted-foreground">{LABEL[f.entity_kind] ?? f.entity_kind} · {formatBytes(f.size_bytes)} · {when(f.created_at)}</div>
               </div>
               <Button asChild variant="outline" size="sm" touch>

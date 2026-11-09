@@ -223,9 +223,15 @@ export async function updateSupplierBill(dataId: string, id: string, patch: Supp
     if (!(await getSupplier(dataId, patch.supplier_id))) throw new Error("Supplier not found");
     push("supplier_id", patch.supplier_id);
   }
-  if (patch.purchase_order_id !== undefined) push("purchase_order_id", patch.purchase_order_id);
+  if (patch.purchase_order_id !== undefined) {
+    if (patch.purchase_order_id !== null && !(await getPurchaseOrder(dataId, patch.purchase_order_id))) throw new Error("Purchase order not found");
+    push("purchase_order_id", patch.purchase_order_id);
+  }
   if (patch.supplier_ref !== undefined) push("supplier_ref", patch.supplier_ref);
-  if (patch.currency !== undefined) push("currency", patch.currency.toUpperCase());
+  if (patch.currency !== undefined) {
+    if (bill.paid_minor > 0 && patch.currency.toUpperCase() !== bill.currency) throw new Error("Currency cannot change after a payment was recorded");
+    push("currency", patch.currency.toUpperCase());
+  }
   if (patch.issued_at !== undefined) push("issued_at", patch.issued_at);
   if (patch.due_at !== undefined) push("due_at", patch.due_at);
   if (patch.notes !== undefined) push("notes", patch.notes);

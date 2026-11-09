@@ -6,7 +6,7 @@ import { evaluateConditions } from "./conditions";
 import { definitionOf, getAutomation, RUN_COLS, type AutomationRow, type RunRow } from "./store";
 import { triggerMatches } from "./triggers";
 import type { AutomationDefinition, RunContext, RunStatus, Step, StepResult, TestPlan } from "./types";
-import { RUN_LIMITS } from "./types";
+import { APPROVAL_RUN_PREFIX, RUN_LIMITS } from "./types";
 
 /**
  * Execution side of the engine.
@@ -147,13 +147,59 @@ export async function executeRun(run: RunRow, automation: AutomationRow, deps: D
   return "done";
 }
 
+/** `started_at` is the lease timestamp: every claim (first start or resume) renews it. */
 async function claim(id: string): Promise<RunRow | null> {
   return queryOne<RunRow>(
-    `UPDATE automation_runs r SET status = 'running', started_at = COALESCE(started_at, NOW())
+    `UPDATE automation_runs r SET status = 'running', started_at = NOW()
       WHERE r.id = $1 AND (r.status = 'queued' OR (r.status = 'waiting' AND r.resume_at IS NOT NULL AND r.resume_at <= NOW()))
       RETURNING ${RUN_COLS}`,
     [id]
   );
+}
+
+/**
+ * Runs stuck in `running` past the lease (worker crashed or the serverless
+ * function was killed mid-run) are failed with a message so `requeueRun` can
+ * retry them; nothing else ever touches a `running` row.
+ */
+async function reapStaleRunning(): Promise<number> {
+  const rows = await query<{ id: string; user_id: string; automation_id: string }>(
+    `UPDATE automation_runs SET status = 'failed', error = $2, finished_at = NOW(), resume_at = NULL, approval_id = NULL
+      WHERE status = 'running' AND COALESCE(started_at, created_at) < NOW() - ($1 || ' minutes')::interval
+      RETURNING id, user_id, automation_id`,
+    [String(RUN_LIMITS.runningLeaseMinutes), `run exceeded the ${RUN_LIMITS.runningLeaseMinutes} minute execution lease (worker lost); retry from the run drawer`]
+  ).catch(() => []);
+  for (const r of rows) {
+    void emitEvent(r.user_id, { type: "automation.run_failed", entity: "automation_run", entityId: r.id, data: { automation_id: r.automation_id, run_id: r.id, status: "failed", error: "execution lease expired" } });
+  }
+  return rows.length;
+}
+
+/**
+ * Approvals decided outside `decideApproval()` (the inbox's expiry sweep, or
+ * a TTL that lapsed with nobody looking) would otherwise leave their run
+ * `waiting` forever. Expire overdue automation approvals here and finish the
+ * runs whose approval is no longer pending.
+ */
+async function settleDecidedApprovals(limit: number, deps: Deps): Promise<number> {
+  await query(`UPDATE approvals SET status = 'expired', decided_at = NOW() WHERE status = 'pending' AND run_id LIKE $1 AND expires_at IS NOT NULL AND expires_at < NOW()`, [`${APPROVAL_RUN_PREFIX}%`]).catch(() => undefined);
+  const rows = await query<{ run_id: string; user_id: string; approval_id: string; status: string; tool_name: string; input: string | null }>(
+    `SELECT r.id AS run_id, r.user_id, a.id AS approval_id, a.status, a.tool_name, a.input
+       FROM automation_runs r JOIN approvals a ON a.id = r.approval_id
+      WHERE r.status = 'waiting' AND r.approval_id IS NOT NULL AND a.status <> 'pending'
+      ORDER BY a.decided_at ASC NULLS FIRST LIMIT $1`,
+    [Math.min(Math.max(limit, 1), 500)]
+  ).catch(() => []);
+  let settled = 0;
+  for (const r of rows) {
+    try {
+      const status = await resumeAutomationRun(r.user_id, r.run_id, { id: r.approval_id, status: r.status, tool_name: r.tool_name, input: r.input }, deps);
+      if (status) settled++;
+    } catch (err) {
+      console.error(`[automations] settling approval ${r.approval_id} for run ${r.run_id} failed:`, err);
+    }
+  }
+  return settled;
 }
 
 export interface RunQueuedResult {
@@ -161,12 +207,18 @@ export interface RunQueuedResult {
   done: number;
   waiting: number;
   failed: number;
+  /** Runs continued because their approval was decided/expired outside decideApproval(). */
+  resumed: number;
+  /** Runs failed because their execution lease lapsed. */
+  reaped: number;
 }
 
 /** Execute due runs (oldest first). Safe to call concurrently: claims are conditional updates. */
 export async function runQueued(limit = 50, deps: Deps = defaultDeps): Promise<RunQueuedResult> {
   ensureToolsLoaded();
-  const out: RunQueuedResult = { claimed: 0, done: 0, waiting: 0, failed: 0 };
+  const out: RunQueuedResult = { claimed: 0, done: 0, waiting: 0, failed: 0, resumed: 0, reaped: 0 };
+  out.reaped = await reapStaleRunning();
+  out.resumed = await settleDecidedApprovals(limit, deps);
   const due = await query<{ id: string }>(
     `SELECT id FROM automation_runs WHERE status = 'queued' OR (status = 'waiting' AND resume_at IS NOT NULL AND resume_at <= NOW()) ORDER BY created_at ASC LIMIT $1`,
     [Math.min(Math.max(limit, 1), 500)]
@@ -218,7 +270,7 @@ export interface DecidedApproval {
 export async function resumeAutomationRun(dataId: string, runId: string, approval: DecidedApproval, deps: Deps = defaultDeps): Promise<RunStatus | null> {
   ensureToolsLoaded();
   const run = await queryOne<RunRow>(
-    `UPDATE automation_runs r SET status = 'running' WHERE r.id = $1 AND r.user_id = $2 AND r.status = 'waiting' AND r.approval_id = $3 RETURNING ${RUN_COLS}`,
+    `UPDATE automation_runs r SET status = 'running', started_at = NOW() WHERE r.id = $1 AND r.user_id = $2 AND r.status = 'waiting' AND r.approval_id = $3 RETURNING ${RUN_COLS}`,
     [runId, dataId, approval.id]
   );
   if (!run) return null;

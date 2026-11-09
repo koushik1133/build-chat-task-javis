@@ -198,6 +198,9 @@ describeDb("documents flow", () => {
     const signerPdf = await call(pubPdf.GET, req(`/api/p/sign/${token2}/pdf`), { token: token2 }, 200);
     expect(signerPdf.text).not.toContain("203.0.113.9");
     expect(signerPdf.text).toContain("IP and device recorded");
+    // SEC: the public copy never prints the other signer's full address (the owner copy does).
+    expect(signerPdf.text).not.toContain(signer1);
+    expect(ownerPdf.text).toContain(signer1);
     // Signer evidence is stored.
     const signers = await import("@/app/api/documents/[id]/signers/route");
     const ev = await api<{ signers: Array<{ ip: string | null; consent_text: string | null; signature_text: string | null }> }>(signers.GET, `/api/documents/${doc.id}/signers`, { params: { id: doc.id }, expect: 200 });
@@ -214,6 +217,9 @@ describeDb("documents flow", () => {
     });
     declineDoc = r.body.document;
     expect(declineDoc.body_md).toContain("Hello Ada Client.");
+    // SEC: linked ids must exist in this org (they become storage path segments too).
+    await api(route.POST, "/api/documents", { json: { title: "x", body_md: "# x", contact_id: "../../other-org/contact/x" }, expect: 404 });
+    await api(route.POST, "/api/documents", { json: { title: "x", body_md: "# x", record_id: "00000000-0000-4000-8000-000000000000" }, expect: 404 });
     const send = await import("@/app/api/documents/[id]/send/route");
     await api(send.POST, `/api/documents/${declineDoc.id}/send`, { json: {}, params: { id: declineDoc.id }, expect: 200 });
     const token = await signTokenFor(org.dataId, signer1);
@@ -232,6 +238,43 @@ describeDb("documents flow", () => {
     // Signing after decline is refused.
     const sign = await import("@/app/api/p/sign/[token]/sign/route");
     await api(sign.POST, `/api/p/sign/${token}/sign`, { json: { otp: declineCode, email: signer1, signature_text: "Ada", consent: true }, params: { token }, expect: 400 });
+    // SEC: a live link no longer downloads a declined document.
+    const pubPdf = await import("@/app/api/p/sign/[token]/pdf/route");
+    await call(pubPdf.GET, req(`/api/p/sign/${token}/pdf`), { token }, 410);
+  });
+
+  it("SEC: OTP attempts are consumed atomically, survive re-issue while the code is live, and reset once it expires", async () => {
+    const route = await import("@/app/api/documents/route");
+    const d = (await api<{ document: DocumentDTO }>(route.POST, "/api/documents", { json: { title: "Lockout", kind: "letter", body_md: "# Lockout", signers: [{ name: "Ada Client", email: signer1 }] }, expect: 201 })).body.document;
+    const send = await import("@/app/api/documents/[id]/send/route");
+    await api(send.POST, `/api/documents/${d.id}/send`, { json: {}, params: { id: d.id }, expect: 200 });
+    const token = await signTokenFor(org.dataId, signer1);
+    const otp = await import("@/app/api/p/sign/[token]/otp/route");
+    await api(otp.POST, `/api/p/sign/${token}/otp`, { json: { email: signer1 }, params: { token }, expect: 200 });
+    const code = await otpFor(org.dataId, signer1);
+    const sign = await import("@/app/api/p/sign/[token]/sign/route");
+    const guess = (otpGuess: string) => api<{ detail: string }>(sign.POST, `/api/p/sign/${token}/sign`, { json: { otp: otpGuess, email: signer1, signature_text: "Ada", consent: true }, params: { token } });
+    const wrongCodes = ["000000", "111111", "222222", "333333", "444444", "555555", "666666", "777777"].filter((c) => c !== code).slice(0, 7);
+    // 7 concurrent wrong guesses: every one is refused and the counter cannot exceed the cap.
+    const burst = await Promise.all(wrongCodes.map(guess));
+    expect(burst.every((r) => r.status === 400)).toBe(true);
+    const attempts = Number((await sqlOne<{ otp_attempts: number }>(`SELECT otp_attempts FROM document_signers WHERE document_id = $1`, [d.id]))?.otp_attempts);
+    expect(attempts).toBe(5);
+    // The right code is now locked out too …
+    expect((await guess(code)).body.detail).toMatch(/Too many attempts/);
+    // … and asking for a fresh code while the old one is still live does not reset the budget.
+    await api(otp.POST, `/api/p/sign/${token}/otp`, { json: { email: signer1 }, params: { token }, expect: 200 });
+    const second = await otpFor(org.dataId, signer1);
+    expect((await guess(second)).body.detail).toMatch(/Too many attempts/);
+    // Once the code has expired a re-issue starts over and the new code signs.
+    await sql(`UPDATE document_signers SET otp_expires_at = NOW() - INTERVAL '1 minute' WHERE document_id = $1`, [d.id]);
+    await api(otp.POST, `/api/p/sign/${token}/otp`, { json: { email: signer1 }, params: { token }, expect: 200 });
+    const third = await otpFor(org.dataId, signer1);
+    const ok = await guess(third);
+    expect(ok.status).toBe(200);
+    // Per-signer request budget: more code requests in the window are refused.
+    const extra = await Promise.all([1, 2, 3].map(() => api<{ detail: string }>(otp.POST, `/api/p/sign/${token}/otp`, { json: { email: signer1 }, params: { token } })));
+    expect(extra.some((r) => r.status === 400 && /Too many code requests|already/.test(r.body.detail))).toBe(true);
   });
 
   it("void revokes signing links; expiry sweep expires overdue documents", async () => {

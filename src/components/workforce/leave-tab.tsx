@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarOff, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
-import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Field } from "@/components/ui/field";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -68,33 +68,38 @@ export function LeaveTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: 
             <h3 id="leave-requests" className="text-sm font-semibold">
               Requests
             </h3>
-            <Select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Filter requests" className="h-8 w-auto text-xs">
+            <Select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Filter requests" className="w-auto sm:h-8 sm:text-xs">
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="all">All</option>
             </Select>
           </div>
           <Button size="sm" touch onClick={() => setShowNew(true)} disabled={staff.length === 0}>
-            <Plus className="h-4 w-4" /> Request leave
+            <Plus className="h-4 w-4" aria-hidden /> Request leave
           </Button>
         </div>
         {error ? (
           <ErrorState message={error} onRetry={() => void load()} />
         ) : leave === null ? (
-          <Loading label="Loading leave…" />
+          <SkeletonList count={4} itemClassName="h-12" label="Loading leave…" />
         ) : leave.length === 0 ? (
-          <Empty icon={<CalendarOff className="h-6 w-6" aria-hidden />} title={filter === "pending" ? "Nothing to approve" : "No leave"} text="Requests from crew links and the team appear here." />
+          <Empty
+            icon={<CalendarOff className="h-6 w-6" aria-hidden />}
+            title={filter === "pending" ? "Nothing to approve" : "No leave"}
+            text="Requests from crew links and the team appear here."
+            action={filter !== "all" ? <Button variant="outline" touch onClick={() => setFilter("all")}>Show all requests</Button> : staff.length > 0 ? <Button variant="outline" touch onClick={() => setShowNew(true)}>Request leave</Button> : undefined}
+          />
         ) : (
           <TableScroller label="Leave requests">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[40rem] text-sm">
               <thead className={THEAD}>
                 <tr>
-                  <th className={TH}>Who</th>
-                  <th className={TH}>Kind</th>
-                  <th className={TH}>Dates</th>
-                  <th className={`${TH} text-right`}>Hours</th>
-                  <th className={TH}>Status</th>
-                  <th className={TH}>
+                  <th scope="col" className={TH}>Who</th>
+                  <th scope="col" className={TH}>Kind</th>
+                  <th scope="col" className={TH}>Dates</th>
+                  <th scope="col" className={`${TH} text-right`}>Hours</th>
+                  <th scope="col" className={TH}>Status</th>
+                  <th scope="col" className={TH}>
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
@@ -119,7 +124,7 @@ export function LeaveTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: 
                       {l.status === "pending" && (
                         <span className="inline-flex gap-1">
                           <Button size="sm" touch disabled={busy === l.id} onClick={() => void decide(l.id, "approve")}>
-                            {busy === l.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Approve
+                            {busy === l.id ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : null} Approve
                           </Button>
                           <Button size="sm" variant="outline" touch disabled={busy === l.id} onClick={() => void decide(l.id, "reject")}>
                             Reject
@@ -150,19 +155,19 @@ export function LeaveTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: 
           </Button>
         </div>
         {balances === null ? (
-          <Loading label="Loading balances…" />
+          <SkeletonList count={3} itemClassName="h-10" label="Loading balances…" />
         ) : balances.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">No allotments yet. Without one, paid leave is approved without a cap.</p>
+          <Empty title="No allotments yet" text="Without one, paid leave is approved without a cap." className="py-6" action={staff.length > 0 ? <Button size="sm" variant="outline" touch onClick={() => setShowBalance(true)}>Set allotment</Button> : undefined} />
         ) : (
           <TableScroller label="Leave balances">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[30rem] text-sm">
               <thead className={THEAD}>
                 <tr>
-                  <th className={TH}>Who</th>
-                  <th className={TH}>Kind</th>
-                  <th className={`${TH} text-right`}>Allotted</th>
-                  <th className={`${TH} text-right`}>Used</th>
-                  <th className={`${TH} text-right`}>Remaining</th>
+                  <th scope="col" className={TH}>Who</th>
+                  <th scope="col" className={TH}>Kind</th>
+                  <th scope="col" className={`${TH} text-right`}>Allotted</th>
+                  <th scope="col" className={`${TH} text-right`}>Used</th>
+                  <th scope="col" className={`${TH} text-right`}>Remaining</th>
                 </tr>
               </thead>
               <tbody>
@@ -173,7 +178,7 @@ export function LeaveTab({ staff, notify }: { staff: StaffDTO[]; notify: (tone: 
                     <td className="px-3 py-2 text-right tabular-nums">{b.allotted_hours}h</td>
                     <td className="px-3 py-2 text-right tabular-nums">{b.used_hours}h</td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      <span className={b.remaining_hours <= 8 ? "text-amber-600 dark:text-amber-400" : ""}>{b.remaining_hours}h</span>
+                      <span className={b.remaining_hours <= 8 ? "text-amber-600 dark:text-amber-400" : ""}>{b.remaining_hours <= 8 && <span className="sr-only">Running low: </span>}{b.remaining_hours}h</span>
                     </td>
                   </tr>
                 ))}
@@ -273,7 +278,7 @@ function LeaveDialog({ staff, onClose, onSaved }: { staff: StaffDTO[]; onClose: 
             Cancel
           </Button>
           <Button type="submit" touch disabled={saving || !form.staff_id}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />} Request
+            {saving && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} Request
           </Button>
         </DialogFooter>
       </form>
@@ -332,7 +337,7 @@ function BalanceDialog({ staff, year, onClose, onSaved }: { staff: StaffDTO[]; y
             Cancel
           </Button>
           <Button type="submit" touch disabled={saving || !form.staff_id}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save
+            {saving && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />} Save
           </Button>
         </DialogFooter>
       </form>
