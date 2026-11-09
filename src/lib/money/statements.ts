@@ -1,4 +1,4 @@
-import { query, queryOne } from "@/lib/dsql";
+import { isUndefinedColumn, query, queryOne } from "@/lib/dsql";
 import { tableExists } from "@/lib/table-exists";
 
 /**
@@ -96,12 +96,20 @@ export async function loadStatementEntries(dataId: string, contactId: string): P
     entries.push({ date: iso(i.issued), kind: "invoice", ref: i.number, description: `Invoice ${i.number}`, currency: i.currency, amount_minor: Number(i.total_minor), invoice_id: i.id, entity_id: i.id });
   }
   if (invoices.length > 0) {
-    const pays = await query<{ id: string; invoice_id: string; number: string; provider: string; amount_minor: string; currency: string; created_at: Date | string; refunded_minor: string | null; refunded_at: Date | string | null }>(
-      `SELECT p.id, p.invoice_id, i.number, p.provider, p.amount_minor, p.currency, p.created_at, p.refunded_minor, p.refunded_at
-         FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id
-        WHERE i.user_id = $1 AND i.contact_id = $2 AND p.status = 'succeeded'`,
+    type PayRow = { id: string; invoice_id: string; number: string; provider: string; amount_minor: string; currency: string; created_at: Date | string; refunded_minor: string | null; refunded_at: Date | string | null };
+    const payWhere = `FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id WHERE i.user_id = $1 AND i.contact_id = $2 AND p.status = 'succeeded'`;
+    // Pre-migration deployments lack the refund columns: fall back to a refund-less read rather
+    // than dropping every payment (which would show a fully paid customer as owing everything).
+    const pays = await query<PayRow>(
+      `SELECT p.id, p.invoice_id, i.number, p.provider, p.amount_minor, p.currency, p.created_at, p.refunded_minor, p.refunded_at ${payWhere}`,
       [dataId, contactId]
-    ).catch(() => [] as never[]);
+    ).catch((err: unknown) => {
+      if (!isUndefinedColumn(err)) throw err;
+      return query<PayRow>(
+        `SELECT p.id, p.invoice_id, i.number, p.provider, p.amount_minor, p.currency, p.created_at, NULL::bigint AS refunded_minor, NULL::timestamptz AS refunded_at ${payWhere}`,
+        [dataId, contactId]
+      );
+    });
     for (const p of pays) {
       entries.push({ date: iso(p.created_at), kind: "payment", ref: p.number, description: `Payment (${p.provider}) on ${p.number}`, currency: p.currency, amount_minor: -Number(p.amount_minor), invoice_id: p.invoice_id, entity_id: p.id });
       const refunded = Number(p.refunded_minor ?? 0);

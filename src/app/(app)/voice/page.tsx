@@ -460,6 +460,7 @@ function AudienceEditor({ value, onChange }: { value: AudienceState; onChange: (
     if (value.source !== "filter") return;
     const signal = nextSignal();
     const params = new URLSearchParams();
+    params.set("limit", "200");
     if (value.lifecycle) params.set("lifecycle", value.lifecycle);
     if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
     fetch(`/api/crm/contacts?${params.toString()}`, { cache: "no-store", signal })

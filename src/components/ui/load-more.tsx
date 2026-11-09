@@ -39,6 +39,18 @@ export function LoadMore({
   const sentinel = useRef<HTMLDivElement | null>(null);
   const onMoreRef = useRef(onMore);
   onMoreRef.current = onMore;
+  // One request at a time: the sentinel and the button share this guard so a
+  // click while the observer already fired (or vice versa) never double-fetches.
+  const inFlight = useRef(false);
+  const request = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await onMoreRef.current();
+    } finally {
+      inFlight.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     if (!auto || !hasMore || loading) return;
@@ -46,13 +58,13 @@ export function LoadMore({
     if (!el || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) void onMoreRef.current();
+        if (entries.some((e) => e.isIntersecting)) void request();
       },
       { rootMargin: "240px 0px" }
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [auto, hasMore, loading, count]);
+  }, [auto, hasMore, loading, count, request]);
 
   return (
     <div className={cn("flex flex-col items-center gap-2 py-3", className)}>
@@ -61,7 +73,7 @@ export function LoadMore({
         {hasMore ? " · more available" : count > 0 ? " · end of list" : ""}
       </p>
       {hasMore && (
-        <Button variant="outline" size="sm" touch onClick={() => void onMore()} disabled={loading} aria-busy={loading || undefined}>
+        <Button variant="outline" size="sm" touch onClick={() => void request()} disabled={loading} aria-busy={loading || undefined}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
           {loading ? "Loading…" : "Load more"}
         </Button>
@@ -117,8 +129,10 @@ export function usePagedList<T>(fetchPage: (cursor: string | null) => Promise<{ 
     }
   }, []);
 
+  const moreInFlight = useRef(false);
   const more = useCallback(async () => {
-    if (!cursor || loadingMore) return;
+    if (!cursor || loadingMore || moreInFlight.current) return;
+    moreInFlight.current = true;
     const my = gen.current;
     setLoadingMore(true);
     try {
@@ -133,6 +147,7 @@ export function usePagedList<T>(fetchPage: (cursor: string | null) => Promise<{ 
       if (my !== gen.current) return;
       setError(e instanceof Error ? e.message : "Could not load more.");
     } finally {
+      moreInFlight.current = false;
       if (my === gen.current) setLoadingMore(false);
     }
   }, [cursor, loadingMore]);

@@ -137,31 +137,43 @@ export async function getCreditNote(dataId: string, id: string): Promise<CreditN
   return row ? toDTO(row) : null;
 }
 
+/** Sum of non-draft credit notes already recorded against an invoice (minor units). */
+async function creditedAgainstInvoice(dataId: string, invoiceId: string, excludeId: string | null = null): Promise<number> {
+  const prior = await queryOne<{ total: string | null }>(
+    `SELECT SUM(total_minor) AS total FROM credit_notes WHERE invoice_id = $1 AND user_id = $2 AND status <> 'draft' AND ($3::text IS NULL OR id <> $3)`,
+    [invoiceId, dataId, excludeId]
+  );
+  return Number(prior?.total ?? 0);
+}
+
 export async function createCreditNote(dataId: string, input: CreditNoteInput): Promise<CreditNoteDTO> {
   let items = input.items ?? null;
   let contactId = input.contact_id ?? null;
   let currency = input.currency?.toUpperCase() ?? null;
+  // A caller-supplied contact must belong to this org, whether or not an invoice is referenced.
+  if (contactId) {
+    const c = await queryOne(`SELECT id FROM crm_contacts WHERE id = $1 AND user_id = $2`, [contactId, dataId]);
+    if (!c) throw new Error("Contact not found");
+  }
+  let inv: Awaited<ReturnType<typeof getInvoice>> = null;
   if (input.invoice_id) {
-    const inv = await getInvoice(dataId, input.invoice_id);
+    inv = await getInvoice(dataId, input.invoice_id);
     if (!inv) throw new Error("Invoice not found");
     if (inv.status === "draft") throw new Error("Issue the invoice before crediting it");
     if (!items) items = inv.items;
     contactId = contactId ?? inv.contact_id;
+    // The cap below compares minor units, which only means something in the invoice's currency.
+    if (currency && currency !== inv.currency.toUpperCase()) throw new Error(`Credit note currency ${currency} does not match invoice currency ${inv.currency}`);
     currency = currency ?? inv.currency;
-    // Credits against an invoice can never exceed what was invoiced.
-    const prior = await queryOne<{ total: string | null }>(
-      `SELECT SUM(total_minor) AS total FROM credit_notes WHERE invoice_id = $1 AND status <> 'draft'`,
-      [inv.id]
-    );
-    const totals = await resolveDocumentTotals(dataId, items);
-    if (Number(prior?.total ?? 0) + totals.total_minor > inv.total_minor) throw new Error("Credit exceeds the invoice total");
-  } else if (contactId) {
-    const c = await queryOne(`SELECT id FROM crm_contacts WHERE id = $1 AND user_id = $2`, [contactId, dataId]);
-    if (!c) throw new Error("Contact not found");
   }
   if (!items || items.length === 0) throw new Error("Add at least one line item or reference an invoice");
 
   const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, items)]);
+  if (inv) {
+    // Credits against an invoice can never exceed what was invoiced.
+    const prior = await creditedAgainstInvoice(dataId, inv.id);
+    if (prior + totals.total_minor > inv.total_minor) throw new Error("Credit exceeds the invoice total");
+  }
   const number = await nextDocNumber(dataId, "credit_note", settings.credit_note_prefix);
   const id = randomUUID();
   await query(
@@ -179,6 +191,13 @@ export async function issueCreditNote(dataId: string, id: string): Promise<Credi
   const cn = await getCreditNote(dataId, id);
   if (!cn) throw new Error("Credit note not found");
   if (cn.status !== "draft") throw new Error(`Credit note is already ${cn.status}`);
+  if (cn.invoice_id) {
+    // Re-check the cap at issue time: several drafts can each pass the create-time check.
+    const inv = await getInvoice(dataId, cn.invoice_id);
+    if (!inv) throw new Error("Invoice not found");
+    const prior = await creditedAgainstInvoice(dataId, inv.id, cn.id);
+    if (prior + cn.total_minor > inv.total_minor) throw new Error("Credit exceeds the invoice total");
+  }
   const next: CreditNoteStatus = cn.invoice_id ? "applied" : "issued";
   const flipped = await query<{ id: string }>(
     `UPDATE credit_notes SET status = $3, issued_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2 AND status = 'draft' RETURNING id`,
@@ -244,18 +263,34 @@ export async function refundPayment(dataId: string, invoiceId: string, body: Ref
     if (!cn) throw new Error("Credit note not found");
     if (cn.status === "draft") throw new Error("Issue the credit note before refunding it");
     if (cn.status === "refunded") throw new Error("Credit note was already refunded");
+    if (cn.invoice_id && cn.invoice_id !== invoiceId) throw new Error("Credit note belongs to a different invoice");
+    if (body.amount_minor > cn.total_minor) throw new Error(`Refund exceeds the credit note total (${cn.total_minor} minor units)`);
   }
 
   const provider = getProvider(p.provider === "manual" ? "simulated" : p.provider);
-  const result = await provider.refund({ providerRef: p.provider_ref ?? p.id, amountMinor: body.amount_minor, currency: p.currency, invoiceId, reason: body.reason ?? null });
 
-  // Conditional on the previous refunded total so concurrent refunds cannot over-refund.
-  const updated = await query<{ id: string }>(
-    `UPDATE invoice_payments SET refunded_minor = COALESCE(refunded_minor, 0) + $2, refunded_at = NOW(), refund_ref = $3
-      WHERE id = $1 AND COALESCE(refunded_minor, 0) = $4 RETURNING id`,
-    [p.id, body.amount_minor, result.refundRef, already]
+  // Claim the amount on the payment row *before* money moves: the conditional UPDATE on the
+  // previous refunded total means two concurrent refunds can never both reach the provider.
+  const claimed = await query<{ id: string }>(
+    `UPDATE invoice_payments SET refunded_minor = COALESCE(refunded_minor, 0) + $2, refunded_at = NOW()
+      WHERE id = $1 AND COALESCE(refunded_minor, 0) = $3 RETURNING id`,
+    [p.id, body.amount_minor, already]
   );
-  if (updated.length === 0) throw new Error("Payment changed while refunding; reload and try again");
+  if (claimed.length === 0) throw new Error("Payment changed while refunding; reload and try again");
+
+  let result: Awaited<ReturnType<typeof provider.refund>>;
+  try {
+    result = await provider.refund({ providerRef: p.provider_ref ?? p.id, amountMinor: body.amount_minor, currency: p.currency, invoiceId, reason: body.reason ?? null });
+  } catch (err) {
+    // Provider refused: release the claim (only our own increment) so the amount stays refundable.
+    await query(
+      `UPDATE invoice_payments SET refunded_minor = COALESCE(refunded_minor, 0) - $2, refunded_at = CASE WHEN COALESCE(refunded_minor, 0) - $2 > 0 THEN refunded_at ELSE NULL END
+        WHERE id = $1 AND COALESCE(refunded_minor, 0) = $3`,
+      [p.id, body.amount_minor, already + body.amount_minor]
+    ).catch((e) => console.error(`[credit-notes] could not release refund claim on payment ${p.id}:`, e));
+    throw err;
+  }
+  await query(`UPDATE invoice_payments SET refund_ref = $2 WHERE id = $1`, [p.id, result.refundRef]);
   if (cn) await query(`UPDATE credit_notes SET status = 'refunded', updated_at = NOW() WHERE id = $1 AND user_id = $2`, [cn.id, dataId]);
   const status = await recomputeInvoiceStatus(invoiceId);
   await emitEvent(dataId, {

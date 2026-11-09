@@ -28,7 +28,9 @@ export const FxRateInputSchema = z
   .object({
     base: CurrencySchema,
     quote: CurrencySchema,
-    rate: z.union([z.number().positive().finite(), z.string().trim().regex(/^\d+(\.\d{1,10})?$/)]),
+    rate: z
+      .union([z.number().positive().finite().max(1e12), z.string().trim().max(32).regex(/^\d{1,15}(\.\d{1,10})?$/)])
+      .refine((v) => Number(v) > 0, { message: "rate must be greater than zero" }),
     as_of: z.string().datetime({ offset: true }).optional(),
   })
   .strict();

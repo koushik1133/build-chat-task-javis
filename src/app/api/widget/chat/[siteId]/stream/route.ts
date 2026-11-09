@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { resolveSession } from "@/lib/webchat/session";
 import { pollMessages } from "@/lib/webchat/service";
 import { sseComment, sseFrame } from "@/lib/webchat/config";
-import { enforceLimits, isUuid, jsonWith, sessionTokenFrom, widgetCors, widgetPreflight, withHeaders } from "@/lib/webchat/http";
+import { clientIp, enforceLimits, isUuid, jsonWith, sessionTokenFrom, widgetCors, widgetPreflight, withHeaders } from "@/lib/webchat/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,9 +24,13 @@ export async function GET(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   if (!isUuid(siteId)) return jsonWith(cors, { error: "not_found" }, 404);
-  const session = await resolveSession(siteId, sessionTokenFrom(req));
+  const session = await resolveSession(siteId, sessionTokenFrom(req, { allowQuery: true }));
   if (!session) return jsonWith(cors, { error: "unauthorized" }, 401);
-  const limited = await enforceLimits(cors, [{ key: `webchat:stream:${session.id}`, limit: 30, windowMs: 60_000 }]);
+  if (session.status === "closed") return jsonWith(cors, { error: "session_closed" }, 410);
+  const limited = await enforceLimits(cors, [
+    { key: `webchat:stream:${session.id}`, limit: 30, windowMs: 60_000 },
+    { key: `webchat:stream:ip:${clientIp(req)}`, limit: 60, windowMs: 60_000 },
+  ]);
   if (limited) return limited;
 
   let since = new URL(req.url).searchParams.get("since");

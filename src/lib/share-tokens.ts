@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "crypto";
-import { query, queryOne } from "@/lib/dsql";
+import { isUndefinedColumn, query, queryOne } from "@/lib/dsql";
 
 /**
  * Public share links. Only the sha256 of the token is stored; the token
@@ -46,13 +46,17 @@ export async function issueShareToken(
   const recipient = opts.recipient?.trim().toLowerCase() || null;
   const id = randomUUID();
   if (recipient) {
-    // Pre-migration fallback: the column may not exist yet; the token still works unbound.
+    // Pre-migration fallback: only when the `recipient` column itself is missing does the token
+    // get stored unbound. Any other failure (timeout, conflict, connection reset) propagates, so a
+    // transient error can never silently downgrade a recipient-bound link to an open one.
     await query(
       `INSERT INTO share_tokens (id, user_id, kind, entity_id, token_hash, expires_at, recipient) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [id, dataId, kind, entityId, hashToken(token), expiresAt, recipient]
-    ).catch(() =>
-      query(`INSERT INTO share_tokens (id, user_id, kind, entity_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`, [id, dataId, kind, entityId, hashToken(token), expiresAt])
-    );
+    ).catch((err: unknown) => {
+      if (!isUndefinedColumn(err)) throw err;
+      console.warn("[share-tokens] share_tokens.recipient column missing; issuing unbound token (apply aws/phase6/a.sql)");
+      return query(`INSERT INTO share_tokens (id, user_id, kind, entity_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`, [id, dataId, kind, entityId, hashToken(token), expiresAt]);
+    });
   } else {
     await query(
       `INSERT INTO share_tokens (id, user_id, kind, entity_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`,

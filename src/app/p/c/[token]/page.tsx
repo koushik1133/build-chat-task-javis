@@ -146,8 +146,10 @@ export default function ClientPortalPage() {
                 {data.balances.map((b) => money(b.closing_minor, b.currency)).join(" · ")}
               </span>
             </span>
-            <Button asChild variant="outline" size="sm">
-              <a href={`/api/p/portal/${params.token}/statement?format=pdf`} target="_blank" rel="noopener">Statement</a>
+            <Button asChild variant="outline" size="sm" touch>
+              <a href={`/api/p/portal/${params.token}/statement?format=pdf`} target="_blank" rel="noopener">
+                Statement (PDF)<span className="sr-only">, opens in a new tab</span>
+              </a>
             </Button>
           </div>
         )}

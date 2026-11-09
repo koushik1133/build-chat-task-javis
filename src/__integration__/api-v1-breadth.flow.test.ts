@@ -220,7 +220,14 @@ describeDb("api v1 breadth flow", () => {
     const decide = await import("@/app/api/v1/approvals/[id]/decide/route");
     const pending = await api<Env<Array<{ id: string; input: Record<string, unknown> }>>>(approvals.GET, "/api/v1/approvals", { query: { status: "pending" }, headers: bearer(fullKey), expect: 200 });
     expect(pending.body.data.find((a) => a.id === approvalId)?.input).toEqual({ title: "Approved via API" });
-    const decided = await api<Env<{ status: string; outcome: string | null }>>(decide.POST, `/api/v1/approvals/${approvalId}/decide`, { json: { decision: "approved" }, params: { id: approvalId }, headers: bearer(fullKey), expect: 200 });
+    // write:agents alone cannot approve (= execute) a tool from another area: the "full" key has no write:tasks.
+    const refused = await api<{ error: { code: string } }>(decide.POST, `/api/v1/approvals/${approvalId}/decide`, { json: { decision: "approved" }, params: { id: approvalId }, headers: bearer(fullKey), expect: 403 });
+    expect(refused.body.error.code).toBe("forbidden");
+    expect(await sql(`SELECT status FROM approvals WHERE id = $1`, [approvalId])).toEqual([{ status: "pending" }]);
+    expect(await sql(`SELECT id FROM tasks WHERE user_id = $1 AND title = 'Approved via API'`, [org.dataId])).toHaveLength(0);
+    const keys = await import("@/app/api/api-keys/route");
+    const tasksKey = await api<{ key: string }>(keys.POST, "/api/api-keys", { json: { name: "breadth agents+tasks", scopes: ["write:agents", "write:tasks"] }, expect: 201 });
+    const decided = await api<Env<{ status: string; outcome: string | null }>>(decide.POST, `/api/v1/approvals/${approvalId}/decide`, { json: { decision: "approved" }, params: { id: approvalId }, headers: bearer(tasksKey.body.key), expect: 200 });
     expect(decided.body.data.status).toBe("approved");
     expect(decided.body.data.outcome).toMatch(/^Done/);
     expect(await sql(`SELECT id FROM tasks WHERE user_id = $1 AND title = 'Approved via API'`, [org.dataId])).toHaveLength(1);

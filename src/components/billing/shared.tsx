@@ -139,52 +139,63 @@ export const BLANK_ITEM: LineItem = { description: "", qty: 1, unit_minor: 0, ta
  * notes. Tax is picked from the catalogue when one exists; otherwise a manual
  * percentage is typed. Totals (with breakdown) are computed client-side.
  */
-export function LineItemsEditor({ items, onChange, rates, max = 100 }: {
+export function LineItemsEditor({ items, onChange, rates, max = 100, currency }: {
   items: LineItem[];
   onChange: (next: LineItem[]) => void;
   rates: TaxRateOption[];
   max?: number;
+  /** When given, each line shows its net amount (useful on phones where columns stack). */
+  currency?: string;
 }) {
   const hasCatalogue = rates.length > 0;
   const setItem = (i: number, patch: Partial<LineItem>) => onChange(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   return (
     <fieldset className="min-w-0">
       <legend className="mb-2 text-xs font-medium">Line items</legend>
-      <div className="space-y-3">
+      <ol className="space-y-3" aria-label="Line items">
         {items.map((it, i) => {
-          const srOnly = i > 0 ? "[&>label]:sr-only" : "";
+          // Labels stay visible on phones (fields stack); from `sm` up only the first row shows them as column headers.
+          const srOnly = i > 0 ? "sm:[&>label]:sr-only" : "";
+          const net = Math.floor(it.qty * it.unit_minor + 0.5);
           return (
-            <div key={i} className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_5rem_7rem_8rem_2.75rem]">
-              <Field label="Description" className={`col-span-2 sm:col-span-1 ${srOnly}`}>
-                <Input placeholder="Service or product" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} />
-              </Field>
-              <Field label="Qty" className={srOnly}>
-                <Input type="number" inputMode="decimal" min={0} step="0.01" value={it.qty} onChange={(e) => setItem(i, { qty: Number(e.target.value) || 0 })} />
-              </Field>
-              <Field label="Unit price" className={srOnly}>
-                <Input type="number" inputMode="decimal" min={0} step="0.01" value={(it.unit_minor / 100).toString()} onChange={(e) => setItem(i, { unit_minor: Math.round((Number(e.target.value) || 0) * 100) })} />
-              </Field>
-              {hasCatalogue ? (
-                <Field label="Tax rate" className={srOnly}>
-                  <Select value={it.tax_rate_id ?? ""} onChange={(e) => setItem(i, { tax_rate_id: e.target.value || null, tax_rate_bp: 0 })}>
-                    <option value="">No tax</option>
-                    {rates.map((r) => (
-                      <option key={r.id} value={r.id}>{rateLabel(r)}{r.compound ? " (compound)" : ""}</option>
-                    ))}
-                  </Select>
+            <li key={i} className="rounded-lg border border-border p-3 sm:border-0 sm:p-0">
+              <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_5rem_7rem_8rem_2.75rem]">
+                <Field label={`Description${i > 0 ? ` (line ${i + 1})` : ""}`} className={`col-span-2 sm:col-span-1 ${srOnly}`}>
+                  <Input placeholder="Service or product" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} />
                 </Field>
-              ) : (
-                <Field label="Tax %" className={srOnly}>
-                  <Input type="number" inputMode="decimal" min={0} max={100} step="0.01" value={(it.tax_rate_bp / 100).toString()} onChange={(e) => setItem(i, { tax_rate_bp: Math.round((Number(e.target.value) || 0) * 100) })} />
+                <Field label="Qty" className={srOnly}>
+                  <Input type="number" inputMode="decimal" min={0} step="0.01" value={it.qty} onChange={(e) => setItem(i, { qty: Number(e.target.value) || 0 })} />
                 </Field>
+                <Field label="Unit price" className={srOnly}>
+                  <Input type="number" inputMode="decimal" min={0} step="0.01" value={(it.unit_minor / 100).toString()} onChange={(e) => setItem(i, { unit_minor: Math.round((Number(e.target.value) || 0) * 100) })} />
+                </Field>
+                {hasCatalogue ? (
+                  <Field label="Tax rate" className={srOnly}>
+                    <Select value={it.tax_rate_id ?? ""} onChange={(e) => setItem(i, { tax_rate_id: e.target.value || null, tax_rate_bp: 0 })}>
+                      <option value="">No tax</option>
+                      {rates.map((r) => (
+                        <option key={r.id} value={r.id}>{rateLabel(r)}{r.compound ? " (compound)" : ""}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : (
+                  <Field label="Tax %" className={srOnly}>
+                    <Input type="number" inputMode="decimal" min={0} max={100} step="0.01" value={(it.tax_rate_bp / 100).toString()} onChange={(e) => setItem(i, { tax_rate_bp: Math.round((Number(e.target.value) || 0) * 100) })} />
+                  </Field>
+                )}
+                <Button type="button" variant="ghost" size="icon" touch className="justify-self-end" onClick={() => onChange(items.filter((_, idx) => idx !== i))} aria-label={`Remove line ${i + 1}`} disabled={items.length === 1}>
+                  <X className="h-4 w-4" aria-hidden />
+                </Button>
+              </div>
+              {currency && (
+                <p className="mt-1.5 text-right text-xs tabular-nums text-muted-foreground sm:hidden">
+                  Line amount <span className="font-medium text-foreground">{fmtMoney(net, currency)}</span>
+                </p>
               )}
-              <Button type="button" variant="ghost" size="icon" touch className="justify-self-end" onClick={() => onChange(items.filter((_, idx) => idx !== i))} aria-label={`Remove line ${i + 1}`} disabled={items.length === 1}>
-                <X className="h-4 w-4" aria-hidden />
-              </Button>
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ol>
       <Button type="button" size="sm" variant="outline" touch className="mt-3" onClick={() => onChange([...items, { ...BLANK_ITEM, tax_rate_id: rates.find((r) => r.is_default)?.id ?? null }])} disabled={items.length >= max}>
         <Plus className="h-3.5 w-3.5" aria-hidden /> Add line
       </Button>
@@ -198,15 +209,20 @@ export function useDocTotals(items: LineItem[], rates: TaxRateOption[], opts: { 
 }
 
 export function TotalsSummary({ totals, currency, inclusive }: { totals: ReturnType<typeof computeTaxTotals>; currency: string; inclusive?: boolean }) {
+  const rows: Array<[string, number]> = [["Subtotal", totals.subtotal_minor]];
+  if (totals.breakdown.length > 0) for (const b of totals.breakdown) rows.push([rateLabel(b), b.tax_minor]);
+  else rows.push(["Tax", totals.tax_minor]);
   return (
-    <span className="tabular-nums">
-      Subtotal {fmtMoney(totals.subtotal_minor, currency)}
-      {totals.breakdown.length > 0
-        ? totals.breakdown.map((b, i) => <span key={i}> · {rateLabel(b)} {fmtMoney(b.tax_minor, currency)}</span>)
-        : <> · Tax {fmtMoney(totals.tax_minor, currency)}</>}
-      {" · "}
-      <span className="font-semibold text-foreground">Total {fmtMoney(totals.total_minor, currency)}</span>
-      {inclusive && <span className="ml-1 text-xs text-muted-foreground">(prices include tax)</span>}
-    </span>
+    <dl className="grid w-full grid-cols-[auto_auto] justify-between gap-x-4 gap-y-0.5 text-xs tabular-nums sm:w-auto sm:min-w-[16rem]" aria-label="Totals">
+      {rows.map(([label, minor]) => (
+        <div key={label} className="contents">
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="text-right">{fmtMoney(minor, currency)}</dd>
+        </div>
+      ))}
+      <dt className="mt-1 border-t border-border pt-1 text-sm font-semibold text-foreground">Total</dt>
+      <dd className="mt-1 border-t border-border pt-1 text-right text-sm font-semibold text-foreground">{fmtMoney(totals.total_minor, currency)}</dd>
+      {inclusive && <dd className="col-span-2 text-[11px] text-muted-foreground">Prices include tax</dd>}
+    </dl>
   );
 }

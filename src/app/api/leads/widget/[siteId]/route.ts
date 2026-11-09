@@ -3,7 +3,7 @@ import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
 import { enrichLead } from "@/lib/lead-enrichment";
 import { emitEvent } from "@/lib/events/bus";
-import { readCappedText, sanitiseLeadPayload, rateLimitAsync } from "@/lib/request-limits";
+import { clientIp, readCappedText, sanitiseLeadPayload, rateLimitAsync } from "@/lib/request-limits";
 import { corsHeadersFor, corsPreflight, siteAllowedOrigins } from "@/lib/cors";
 import { recordConsent } from "@/lib/privacy/consent";
 
@@ -42,6 +42,10 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
     if (!z.string().uuid().safeParse(siteId).success) {
       return corsResponse(NextResponse.json({ error: "Invalid site ID format" }, { status: 400 }));
+    }
+    const ip = clientIp(req);
+    if (!(await rateLimitAsync(`leads-widget:ip:${ip}`, 30, 60 * 60 * 1000)).allowed || !(await rateLimitAsync(`leads-widget:site:${siteId}`, 600, 60 * 60 * 1000)).allowed) {
+      return corsResponse(NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": "3600" } }));
     }
 
     const raw = await readCappedText(req);
@@ -91,7 +95,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     void emitEvent(site.user_id, { type: "lead.captured", entity: "site_lead", entityId: leadId, data: { siteId, source: "widget" } });
 
     if (marketingConsent !== null) {
-      const evidence = { ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null, ua: req.headers.get("user-agent"), text_version: `site:${siteId}` };
+      const evidence = { ip: ip === "unknown" ? null : ip, ua: req.headers.get("user-agent"), text_version: `site:${siteId}` };
       for (const purpose of ["marketing_email", "marketing_sms"] as const) {
         void recordConsent(site.user_id, { kind: "lead", id: leadId }, purpose, marketingConsent ? "granted" : "withdrawn", "form", evidence).catch(() => undefined);
       }

@@ -202,13 +202,14 @@ export async function createInvoiceFromQuote(dataId: string, quoteId: string, op
   const q = await getQuote(dataId, quoteId);
   if (!q) throw new Error("Quote not found");
   if (q.items.length === 0) throw new Error("Quote has no line items");
-  const dueDays = opts.due_days ?? 14;
+  // Without explicit `due_days` the invoice carries the org's default payment terms and
+  // `due_at` is derived from the send date (sendInvoice), like any other invoice.
   return createInvoice(dataId, {
     contact_id: q.contact_id,
     quote_id: q.id,
     currency: q.currency,
     items: q.items,
-    due_at: new Date(Date.now() + dueDays * 86_400_000).toISOString(),
+    due_at: opts.due_days !== undefined ? new Date(Date.now() + opts.due_days * 86_400_000).toISOString() : null,
     notes: q.notes,
   });
 }
@@ -322,6 +323,9 @@ export async function sendInvoice(
     [id, dataId]
   );
   await recomputeInvoiceStatus(id);
+  // Re-read after the UPDATE: on the first send `due_at` was just derived from the terms.
+  const out = await getInvoice(dataId, id);
+  const dueAt = out?.due_at ?? inv.due_at;
   await enqueueNotification(dataId, {
     channel: "email",
     recipient: to,
@@ -330,10 +334,9 @@ export async function sendInvoice(
       `${opts.message?.trim() ? opts.message.trim() + "\n\n" : ""}` +
       `${from} has sent you invoice ${inv.number} for ${formatMoney(inv.total_minor, inv.currency)}.\n\n` +
       `View and pay it here: ${link.url}\n\n` +
-      (inv.due_at ? `Due ${new Date(inv.due_at).toDateString()}.\n` : ""),
+      (dueAt ? `Due ${new Date(dueAt).toDateString()}.\n` : ""),
     data: { kind: "invoice", invoice_id: id, number: inv.number, url: link.url },
   });
-  const out = await getInvoice(dataId, id);
   void emitEvent(dataId, { type: "invoice.sent", entity: "invoice", entityId: id, data: { number: inv.number, to, total_minor: inv.total_minor, currency: inv.currency } });
   return { invoice: out ?? inv, url: link.url, path: link.path };
 }

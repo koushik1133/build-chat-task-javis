@@ -81,18 +81,27 @@ export function CreditNoteDialog({ invoice, onClose, onCreated }: { invoice: Inv
   const [error, setError] = useState<string | null>(null);
   const opts = useMemo(() => ({ inclusive, rounding }), [inclusive, rounding]);
   const totals = useDocTotals(full ? invoice.items : items, rates, opts);
+  const [touched, setTouched] = useState(false);
+  // Inline validation for a partial credit: at least one described line, a positive total, never more than was invoiced.
+  const itemsError = full
+    ? null
+    : items.filter((it) => it.description.trim()).length === 0
+      ? "Add at least one line item."
+      : totals.total_minor <= 0
+        ? "The credit must be more than " + fmtMoney(0, invoice.currency) + "."
+        : totals.total_minor > invoice.total_minor
+          ? `The credit cannot exceed the invoiced ${fmtMoney(invoice.total_minor, invoice.currency)}.`
+          : null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    setTouched(true);
+    if (itemsError) return;
     setSaving(true);
     setError(null);
     try {
       const body: Record<string, unknown> = { invoice_id: invoice.id, reason: reason || null, issue: issueNow };
-      if (!full) {
-        const clean = items.filter((it) => it.description.trim());
-        if (clean.length === 0) throw new Error("Add at least one line item.");
-        body.items = clean;
-      }
+      if (!full) body.items = items.filter((it) => it.description.trim());
       const r = await api<{ credit_note: { number: string; status: string } }>("/api/credit-notes", { method: "POST", body: JSON.stringify(body) });
       onCreated(`Credit note ${r.credit_note.number} ${r.credit_note.status === "draft" ? "drafted" : "issued"} against ${invoice.number}.`);
     } catch (err) {
@@ -110,14 +119,21 @@ export function CreditNoteDialog({ invoice, onClose, onCreated }: { invoice: Inv
           {invoice.contact_name ?? "No contact"} · invoiced {fmtMoney(invoice.total_minor, invoice.currency)}{invoice.paid_minor > 0 ? ` · paid ${fmtMoney(invoice.paid_minor, invoice.currency)}` : ""}
         </p>
         <Checkbox label="Credit the full invoice" checked={full} onChange={(e) => setFull(e.target.checked)} />
-        {!full && <LineItemsEditor items={items} onChange={setItems} rates={rates} />}
+        {!full && (
+          <div>
+            <LineItemsEditor items={items} onChange={setItems} rates={rates} currency={invoice.currency} />
+            {touched && itemsError && (
+              <p role="alert" className="mt-2 text-xs text-destructive">{itemsError}</p>
+            )}
+          </div>
+        )}
         <Field label="Reason" hint="Printed on the credit note">
           <Textarea rows={2} value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} />
         </Field>
         <Checkbox label="Issue immediately (otherwise saved as a draft)" checked={issueNow} onChange={(e) => setIssueNow(e.target.checked)} />
         <DialogFooter start={<TotalsSummary totals={totals} currency={invoice.currency} inclusive={inclusive} />}>
           <Button type="button" variant="ghost" touch onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button type="submit" touch disabled={saving}>{saving && spinner} {issueNow ? "Issue credit note" : "Save draft"}</Button>
+          <Button type="submit" touch disabled={saving || (touched && Boolean(itemsError))}>{saving && spinner} {issueNow ? "Issue credit note" : "Save draft"}</Button>
         </DialogFooter>
       </form>
     </Dialog>
@@ -155,15 +171,26 @@ export function RefundDialog({ invoice, onClose, onDone }: { invoice: InvoiceLit
 
   const selected = payments?.find((p) => p.id === paymentId) ?? null;
   const refundable = selected ? selected.amount_minor - selected.refunded_minor : 0;
+  const minor = Math.round((Number(amount) || 0) * 100);
+  const amountError = !selected
+    ? null
+    : amount.trim() === "" || !Number.isFinite(Number(amount))
+      ? "Enter an amount."
+      : minor <= 0
+        ? `Enter more than ${fmtMoney(0, selected.currency)}.`
+        : minor > refundable
+          ? `Enter at most ${fmtMoney(refundable, selected.currency)} (what is left on this payment).`
+          : null;
+  const [amountTouched, setAmountTouched] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    setAmountTouched(true);
+    if (amountError) return;
     setSaving(true);
     setError(null);
     try {
-      const minor = Math.round((Number(amount) || 0) * 100);
       if (!selected) throw new Error("Pick a payment to refund.");
-      if (minor <= 0 || minor > refundable) throw new Error(`Enter an amount up to ${fmtMoney(refundable, selected.currency)}.`);
       const r = await api<{ refund_ref: string; invoice_status: string | null }>(`/api/invoices/${invoice.id}/refund`, {
         method: "POST",
         body: JSON.stringify({ paymentId: selected.id, amount_minor: minor, credit_note_id: creditNoteId || null, reason: reason || null }),
@@ -181,7 +208,7 @@ export function RefundDialog({ invoice, onClose, onDone }: { invoice: InvoiceLit
       <form onSubmit={submit} className="space-y-4">
         {error && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
         {payments === null ? (
-          <p className="text-sm text-muted-foreground">Loading payments…</p>
+          <p role="status" className="text-sm text-muted-foreground">Loading payments…</p>
         ) : payments.length === 0 ? (
           <Banner tone="info">No refundable payments on this invoice.</Banner>
         ) : (
@@ -193,8 +220,13 @@ export function RefundDialog({ invoice, onClose, onDone }: { invoice: InvoiceLit
                 ))}
               </Select>
             </Field>
-            <Field label="Amount" hint={selected ? `Up to ${fmtMoney(refundable, selected.currency)}` : undefined}>
-              <Input type="number" inputMode="decimal" min={0.01} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <Field
+              label={`Amount${selected ? ` (${selected.currency})` : ""}`}
+              hint={selected ? `Up to ${fmtMoney(refundable, selected.currency)}${minor > 0 && !amountError ? ` · refunding ${fmtMoney(minor, selected.currency)}` : ""}` : undefined}
+              error={amountTouched ? amountError : null}
+              required
+            >
+              <Input type="number" inputMode="decimal" min={0.01} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} onBlur={() => setAmountTouched(true)} />
             </Field>
             {notes.length > 0 && (
               <Field label="Link to credit note" hint="Marks the note as refunded">
@@ -211,7 +243,9 @@ export function RefundDialog({ invoice, onClose, onDone }: { invoice: InvoiceLit
         )}
         <DialogFooter>
           <Button type="button" variant="ghost" touch onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button type="submit" touch disabled={saving || !selected}>{saving && spinner} Refund</Button>
+          <Button type="submit" touch disabled={saving || !selected || (amountTouched && Boolean(amountError))}>
+            {saving && spinner} {selected && !amountError && minor > 0 ? `Refund ${fmtMoney(minor, selected.currency)}` : "Refund"}
+          </Button>
         </DialogFooter>
       </form>
     </Dialog>

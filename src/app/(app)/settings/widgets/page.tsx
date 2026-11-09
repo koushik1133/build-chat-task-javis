@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Check, Copy, Download, ExternalLink, Loader2, MessageSquareCode, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
@@ -39,6 +40,21 @@ const MODE_META: Record<WidgetMode, { label: string; hint: string }> = {
   help: { label: "Help centre", hint: "Search your public knowledge base and open a ticket." },
 };
 
+/** Lines that are not a bare http(s) origin (scheme + host, optional port, no path/query). Mirrors what the server keeps. */
+function invalidOrigins(raw: string): string[] {
+  const bad: string[] = [];
+  for (const line of raw.split(/[\n,]/).map((o) => o.trim()).filter(Boolean)) {
+    try {
+      const u = new URL(line);
+      const ok = (u.protocol === "http:" || u.protocol === "https:") && u.pathname === "/" && !u.search && !u.hash && !u.username && u.origin === line.replace(/\/$/, "");
+      if (!ok) bad.push(line);
+    } catch {
+      bad.push(line);
+    }
+  }
+  return bad;
+}
+
 async function readError(res: Response, fallback: string): Promise<string> {
   const d = await res.json().catch(() => null);
   return d && (d.detail || d.error) ? String(typeof d.detail === "string" ? d.detail : d.error) : `${fallback} (${res.status})`;
@@ -53,13 +69,19 @@ function CopyButton({ text }: { text: string }) {
       setTimeout(() => setCopied(false), 1500);
     } catch {
       setCopied(false);
+      window.prompt("Copy the snippet:", text);
     }
   }
   return (
-    <Button type="button" size="sm" variant="outline" touch onClick={copy} aria-live="polite">
-      {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
-      <span className="ml-1.5">{copied ? "Copied" : "Copy snippet"}</span>
-    </Button>
+    <>
+      <Button type="button" size="sm" variant="outline" touch onClick={copy} aria-describedby="widget-copy-status">
+        {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+        <span className="ml-1.5">{copied ? "Copied" : "Copy snippet"}</span>
+      </Button>
+      <span id="widget-copy-status" role="status" aria-live="polite" className="sr-only">
+        {copied ? "Embed snippet copied to the clipboard." : ""}
+      </span>
+    </>
   );
 }
 
@@ -126,6 +148,15 @@ export default function WidgetSettingsPage() {
 
   async function save() {
     if (!site || !config) return;
+    if (badOrigins.length > 0) {
+      setNotice({ tone: "error", text: "Fix the allowed origins before saving." });
+      document.getElementById("widget-origins")?.focus();
+      return;
+    }
+    if (enabledCount === 0) {
+      setNotice({ tone: "error", text: "Enable at least one mode before saving." });
+      return;
+    }
     setSaving(true);
     setNotice(null);
     try {
@@ -168,6 +199,8 @@ export default function WidgetSettingsPage() {
   }
 
   const enabledCount = config ? WIDGET_MODES.filter((m) => config.modes[m]).length : 0;
+  const badOrigins = useMemo(() => invalidOrigins(origins), [origins]);
+  const originError = badOrigins.length > 0 ? `Not a valid origin: ${badOrigins.slice(0, 3).join(", ")}${badOrigins.length > 3 ? "…" : ""}. Use the scheme and host only, e.g. https://www.example.com.` : null;
 
   return (
     <PageContainer
@@ -177,24 +210,33 @@ export default function WidgetSettingsPage() {
       icon={<MessageSquareCode className="h-5 w-5" aria-hidden />}
       actions={
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" touch onClick={() => void load()} aria-label="Reload">
+          <Button type="button" variant="outline" size="sm" touch onClick={() => void load()} aria-label="Reload widget settings">
             <RefreshCw className="h-4 w-4" aria-hidden />
           </Button>
-          <Button type="button" size="sm" touch onClick={save} disabled={!site || saving}>
+          <Button type="button" size="sm" touch onClick={save} disabled={!site || saving} aria-busy={saving || undefined}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Check className="h-4 w-4" aria-hidden />}
             <span className="ml-1.5">Save</span>
           </Button>
         </div>
       }
     >
-      {notice && <Banner tone={notice.tone}>{notice.text}</Banner>}
+      {notice && <Banner tone={notice.tone} onDismiss={() => setNotice(null)}>{notice.text}</Banner>}
 
       {loadError ? (
         <ErrorState message={loadError} onRetry={() => void load()} />
       ) : !data ? (
         <Loading label="Loading widget settings…" />
       ) : data.sites.length === 0 ? (
-        <Empty title="No sites yet" text="Create a site in the builder first — each widget is tied to a site so its leads and chats land in the right place." />
+        <Empty
+          icon={<MessageSquareCode className="h-5 w-5" />}
+          title="No sites yet"
+          text="Create a site in the builder first — each widget is tied to a site so its leads and chats land in the right place."
+          action={
+            <Button asChild touch>
+              <Link href="/build">Open the site builder</Link>
+            </Button>
+          }
+        />
       ) : !config || !site ? (
         <Loading />
       ) : (
@@ -202,7 +244,7 @@ export default function WidgetSettingsPage() {
           <div className="space-y-6">
             <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
               <div className="flex flex-wrap items-end gap-3">
-                <Field label="Site" className="min-w-[220px] flex-1">
+                <Field label="Site" className="w-full flex-1 sm:w-auto sm:min-w-[220px]">
                   <Select value={siteId} onChange={(e) => setSiteId(e.target.value)}>
                     {data.sites.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -224,8 +266,8 @@ export default function WidgetSettingsPage() {
               <p className="mt-1 text-xs text-muted-foreground">Pick what visitors can do. Several modes show as tabs inside the panel.</p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {WIDGET_MODES.map((m) => (
-                  <label key={m} className={cn("flex cursor-pointer gap-3 rounded-lg border p-3 text-sm", config.modes[m] ? "border-primary/50 bg-primary/5" : "border-border")}>
-                    <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-primary" checked={config.modes[m]} onChange={(e) => toggleMode(m, e.target.checked)} />
+                  <label key={m} className={cn("flex min-h-11 cursor-pointer gap-3 rounded-lg border p-3 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring", config.modes[m] ? "border-primary/50 bg-primary/5" : "border-border")}>
+                    <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-primary focus-visible:outline-none" checked={config.modes[m]} onChange={(e) => toggleMode(m, e.target.checked)} />
                     <span>
                       <span className="font-medium">{MODE_META[m].label}</span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">{MODE_META[m].hint}</span>
@@ -233,7 +275,7 @@ export default function WidgetSettingsPage() {
                   </label>
                 ))}
               </div>
-              {enabledCount === 0 && <p className="mt-2 text-xs text-destructive">Enable at least one mode or the widget will not render.</p>}
+              {enabledCount === 0 && <p role="alert" className="mt-2 text-xs text-destructive">Enable at least one mode or the widget will not render.</p>}
               <Field label="Open on" className="mt-4 max-w-xs" hint="Which tab is selected when the panel opens.">
                 <Select value={config.defaultMode} onChange={(e) => patch("defaultMode", e.target.value as WidgetMode)}>
                   {WIDGET_MODES.filter((m) => config.modes[m]).map((m) => (
@@ -262,7 +304,7 @@ export default function WidgetSettingsPage() {
                     />
                     <Input value={effectiveColor} readOnly aria-label="Colour hex value" className="font-mono" />
                     {config.color && (
-                      <Button type="button" variant="ghost" size="sm" onClick={() => patch("color", null)}>
+                      <Button type="button" variant="ghost" size="sm" touch onClick={() => patch("color", null)}>
                         Reset
                       </Button>
                     )}
@@ -304,9 +346,10 @@ export default function WidgetSettingsPage() {
               <Field
                 label="Websites that may embed this widget"
                 hint="One per line, e.g. https://www.example.com. Leave empty to allow any site (the widget is public by design)."
+                error={originError}
                 className="mt-3"
               >
-                <Textarea rows={3} value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder={"https://www.example.com\nhttps://example.com"} className="font-mono text-xs" />
+                <Textarea id="widget-origins" rows={3} value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder={"https://www.example.com\nhttps://example.com"} className="font-mono text-base sm:text-xs" spellCheck={false} autoCapitalize="off" />
               </Field>
             </section>
           </div>
@@ -315,8 +358,9 @@ export default function WidgetSettingsPage() {
             <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold">Install</h2>
-                <a href={previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline">
+                <a href={previewUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">
                   Open demo page <ExternalLink className="h-3 w-3" aria-hidden />
+                  <span className="sr-only">(opens in a new tab)</span>
                 </a>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">Paste before <code>&lt;/body&gt;</code> on any site. Save first so the snippet reflects your settings.</p>
@@ -342,13 +386,22 @@ export default function WidgetSettingsPage() {
             <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold">Live preview</h2>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setPreviewKey((k) => k + 1)} aria-label="Refresh preview">
+                <Button type="button" variant="ghost" size="sm" touch onClick={() => setPreviewKey((k) => k + 1)} aria-label="Refresh preview">
                   <RefreshCw className="h-3.5 w-3.5" aria-hidden />
                 </Button>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">Unsaved colour, position, greeting and consent changes are previewed live; mode toggles apply after saving.</p>
               <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
-                <iframe key={previewUrl} src={previewUrl} title="Widget preview" className="h-[520px] w-full" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+                <iframe
+                  key={previewUrl}
+                  src={previewUrl}
+                  title="Widget preview of the sample page"
+                  width={420}
+                  height={520}
+                  loading="lazy"
+                  className="block h-[min(520px,70dvh)] min-h-[360px] w-full"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                />
               </div>
             </section>
           </aside>

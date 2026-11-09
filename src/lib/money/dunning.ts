@@ -107,7 +107,12 @@ export async function sendReminders(limit = 100, now = new Date()): Promise<Remi
       ORDER BY i.due_at ASC LIMIT $1`,
     // Widest pre-due window the schedule allows is 60 days; never remind twice within 20h.
     [cap, new Date(now.getTime() + 60 * DAY_MS).toISOString(), new Date(now.getTime() - 20 * 3_600_000).toISOString()]
-  ).catch(() => [] as Candidate[]);
+  ).catch((err: unknown) => {
+    // Pre-migration (reminder_count / last_reminder_at / opt-out columns missing) or a DB error:
+    // nothing to remind, but never silently — the cron log must show why zero reminders went out.
+    console.error("[dunning] reminder candidate query failed:", err instanceof Error ? err.message : err);
+    return [] as Candidate[];
+  });
   out.scanned = rows.length;
 
   const settingsCache = new Map<string, Awaited<ReturnType<typeof getBillingSettings>>>();

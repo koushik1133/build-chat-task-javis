@@ -93,7 +93,7 @@ export function DialogFooter({ children, start, className }: { children: React.R
         className
       )}
     >
-      {start && <div className="mr-auto min-w-0 text-sm text-muted-foreground">{start}</div>}
+      {start && <div className="mr-auto min-w-0 basis-full text-sm text-muted-foreground sm:basis-auto">{start}</div>}
       {children}
     </div>
   );

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Sparkles, X, Send, Loader2, Wrench, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useModal } from "@/components/ui/hooks";
 import { COPILOT_PACKS, describePage, moduleFromPath, pageContextFrom, type CopilotModule, type PageContext } from "@/lib/copilot/modules";
 
 /**
@@ -73,15 +74,13 @@ export function CopilotDrawer() {
 
   const close = useCallback(() => setOpen(false), []);
 
-  // Keyboard shortcut + external open event.
+  // Keyboard shortcut + external open event. Escape, the focus trap and focus
+  // restore are handled by useModal on the panel itself.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
         setOpen((o) => !o);
-      } else if (e.key === "Escape" && open) {
-        e.preventDefault();
-        close();
       }
     }
     function onOpen() {
@@ -93,15 +92,7 @@ export function CopilotDrawer() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener(OPEN_COPILOT_EVENT, onOpen);
     };
-  }, [open, close]);
-
-  // Focus the textarea when opening.
-  useEffect(() => {
-    if (open) {
-      const t = window.setTimeout(() => textareaRef.current?.focus(), 30);
-      return () => window.clearTimeout(t);
-    }
-  }, [open]);
+  }, []);
 
   // Keep the newest message in view.
   useEffect(() => {
@@ -182,28 +173,19 @@ export function CopilotDrawer() {
           onClick={() => setOpen(true)}
           aria-label="Open copilot (Cmd/Ctrl+J)"
           title="Ask copilot (⌘J)"
-          className="fixed bottom-5 right-5 z-40 inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-5 z-40 inline-flex h-11 w-11 touch-manipulation items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none"
         >
-          <Sparkles className="h-5 w-5" />
+          <Sparkles className="h-5 w-5" aria-hidden />
         </button>
       )}
 
       {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close copilot"
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px]"
-            onClick={close}
-          />
-          <aside
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${MODULE_LABEL[pageModule]} copilot`}
-            className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-border bg-card shadow-2xl"
-          >
-            <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-              <Sparkles className="h-4 w-4 text-primary" />
+        <CopilotPanel
+          label={`${MODULE_LABEL[pageModule]} copilot`}
+          onClose={close}
+        >
+            <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-4 py-1.5">
+              <Sparkles className="h-4 w-4 text-primary" aria-hidden />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">Copilot</p>
                 <p className="truncate text-[11px] text-muted-foreground">
@@ -214,14 +196,15 @@ export function CopilotDrawer() {
               <button
                 type="button"
                 onClick={close}
-                aria-label="Close"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                aria-label="Close copilot"
+                data-dialog-close=""
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:w-8"
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4" aria-hidden />
               </button>
             </header>
 
-            <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+            <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3" aria-live="polite" aria-relevant="additions">
               {messages.length === 0 && (
                 <div className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
                   Ask about what is on this page, or tell me what to do — for example &ldquo;summarise my new leads&rdquo;
@@ -255,7 +238,7 @@ export function CopilotDrawer() {
                               t.ok ? "border-border bg-card text-muted-foreground" : "border-destructive/40 text-destructive"
                             )}
                           >
-                            <Wrench className="h-3 w-3 shrink-0" />
+                            <Wrench className="h-3 w-3 shrink-0" aria-hidden />
                             <span className="truncate">{t.name}</span>
                           </li>
                         ))}
@@ -264,7 +247,7 @@ export function CopilotDrawer() {
 
                     {m.approvals && m.approvals.length > 0 && (
                       <div className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px]">
-                        <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+                        <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
                         <span>
                           {m.approvals.length} action{m.approvals.length === 1 ? "" : "s"} waiting for your approval.{" "}
                           <Link href="/approvals" onClick={close} className="font-medium underline underline-offset-2">
@@ -278,15 +261,15 @@ export function CopilotDrawer() {
               ))}
 
               {busy && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
                   Thinking…
                 </div>
               )}
             </div>
 
             <form
-              className="shrink-0 border-t border-border p-3"
+              className="shrink-0 border-t border-border p-3 [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))]"
               onSubmit={(e) => {
                 e.preventDefault();
                 void send();
@@ -295,6 +278,7 @@ export function CopilotDrawer() {
               <div className="flex items-end gap-2">
                 <textarea
                   ref={textareaRef}
+                  data-autofocus=""
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={onTextareaKey}
@@ -302,22 +286,46 @@ export function CopilotDrawer() {
                   maxLength={4000}
                   placeholder={`Ask the ${MODULE_LABEL[pageModule]} copilot…`}
                   aria-label="Message the copilot"
-                  className="min-h-[44px] flex-1 resize-none rounded-md border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
+                  className="min-h-[44px] flex-1 resize-none rounded-md border border-border bg-background px-3 py-2 text-base outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
                 />
                 <button
                   type="submit"
                   disabled={busy || !input.trim()}
-                  aria-label="Send"
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground disabled:opacity-50"
+                  aria-label="Send message"
+                  className="inline-flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-md bg-primary text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-50 sm:h-10 sm:w-10"
                 >
-                  <Send className="h-4 w-4" />
+                  <Send className="h-4 w-4" aria-hidden />
                 </button>
               </div>
-              <p className="mt-1.5 text-[10px] text-muted-foreground">Enter to send · Shift+Enter for a new line · Esc to close</p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">Enter to send · Shift+Enter for a new line · Esc to close</p>
             </form>
-          </aside>
-        </>
+        </CopilotPanel>
       )}
     </>
+  );
+}
+
+/** Modal side panel: focus trapped inside, Escape closes, focus returns to the launcher, page scroll locked. */
+function CopilotPanel({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  useModal(ref, onClose);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-[1px]"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <aside
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        tabIndex={-1}
+        className="flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-2xl outline-none"
+      >
+        {children}
+      </aside>
+    </div>
   );
 }

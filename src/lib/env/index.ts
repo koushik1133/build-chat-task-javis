@@ -42,7 +42,8 @@ function isLocalDb(env: EnvSource): boolean {
 }
 
 function checkFormat(spec: VarSpec, value: string): string | null {
-  if (spec.enum && !spec.enum.includes(value)) return `${spec.name} must be one of ${spec.enum.join(", ")} (got "${value}")`;
+  // Never echo a secret's value back, even when it fails validation.
+  if (spec.enum && !spec.enum.includes(value)) return `${spec.name} must be one of ${spec.enum.join(", ")}${spec.secret ? "" : ` (got "${value}")`}`;
   if (spec.format === "url") {
     try { new URL(value); } catch { return `${spec.name} must be an absolute URL`; }
   }
@@ -89,7 +90,7 @@ export function validateEnv(opts: { strict?: boolean; env?: EnvSource } = {}): E
     if (problem) invalid.push(problem);
     if (spec.devOnly && production) {
       const enabled = value === "1" || value === "true";
-      if (enabled) promote(`${spec.name}=${value} is a development-only switch and NODE_ENV is production`);
+      if (enabled) promote(`${spec.name}=${spec.secret ? "<set>" : value} is a development-only switch and NODE_ENV is production`);
     }
   }
 

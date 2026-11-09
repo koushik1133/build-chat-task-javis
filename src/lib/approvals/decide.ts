@@ -2,6 +2,7 @@ import { queryOne } from "@/lib/dsql";
 import { enqueueJob } from "@/lib/agents/queue";
 import { getTool } from "@/lib/agents/registry";
 import { rememberCorrection } from "@/lib/agents/memory";
+import { keyMayUseTool, scopeForTool } from "@/lib/agents/tool-scopes";
 import type { ToolContext } from "@/lib/agents/types";
 
 /**
@@ -35,7 +36,7 @@ export const APPROVAL_COLUMNS = `id, run_id, agent_id, tool_name, input, preview
 export class ApprovalError extends Error {
   constructor(
     message: string,
-    public readonly status: 400 | 404 | 409
+    public readonly status: 400 | 403 | 404 | 409
   ) {
     super(message);
     this.name = "ApprovalError";
@@ -45,6 +46,26 @@ export class ApprovalError extends Error {
 export interface DecideInput {
   decision: "approved" | "rejected";
   edited_input?: Record<string, unknown>;
+}
+
+export interface DecideOptions {
+  /**
+   * API-key scopes of the caller. When set, approving is refused (403) unless
+   * the key could call the approval's tool itself — `write:agents` alone must
+   * not become a way to execute billing/crm/… writes queued by another key.
+   * Omit for in-app operators, whose role check happens at the route.
+   */
+  allowedScopes?: readonly string[];
+}
+
+/** Throws ApprovalError 403 when `scopes` cannot execute `toolName`. Unknown tools are left to the executor. */
+export function assertScopesMayExecute(toolName: string, scopes: readonly string[] | undefined): void {
+  if (!scopes) return;
+  const spec = getTool(toolName);
+  if (!spec) return;
+  if (!keyMayUseTool(scopes, spec)) {
+    throw new ApprovalError(`This API key lacks the "${scopeForTool(spec)}" scope needed to approve ${toolName}`, 403);
+  }
 }
 
 export interface DecideResult {
@@ -102,17 +123,20 @@ export async function getApproval(dataId: string, id: string): Promise<ApprovalR
 }
 
 /** Decide a pending approval. Throws `ApprovalError` (400/404/409). */
-export async function decideApproval(dataId: string, id: string, input: DecideInput, actorId: string = dataId): Promise<DecideResult> {
+export async function decideApproval(dataId: string, id: string, input: DecideInput, actorId: string = dataId, opts: DecideOptions = {}): Promise<DecideResult> {
   const { decision, edited_input } = input;
 
   let editedJson: string | null = null;
   let original: ApprovalRow | null = null;
-  if (edited_input && decision === "approved") {
+  if (decision === "approved" && (edited_input || opts.allowedScopes)) {
     original = await getApproval(dataId, id);
     if (!original) throw new ApprovalError("not found", 404);
     if (original.status !== "pending") throw new ApprovalError(`already ${original.status}`, 409);
     const { ensureToolsLoaded } = await import("@/lib/agents/tools/index");
     ensureToolsLoaded();
+    assertScopesMayExecute(original.tool_name, opts.allowedScopes);
+  }
+  if (edited_input && decision === "approved" && original) {
     const v = validateEditedInput(original.tool_name, edited_input);
     if (!v.ok) throw new ApprovalError(v.error, 400);
     editedJson = JSON.stringify(v.input);

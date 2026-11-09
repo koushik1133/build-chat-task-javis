@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import { z } from "zod";
 import { CONSENT_MODES, WIDGET_MODES, WIDGET_POSITIONS } from "@/lib/webchat/config";
+import { WidgetStatus } from "./widget-status";
 
 /**
  * Public sample business page with the widget installed. Used by the
@@ -28,7 +29,7 @@ export default async function WidgetDemoPage({ searchParams }: { searchParams: P
   const p = parsed.success ? parsed.data : {};
 
   return (
-    <main className="min-h-screen bg-[#faf7f2] text-zinc-900">
+    <main className="min-h-dvh bg-[#faf7f2] text-zinc-900">
       <header className="border-b border-zinc-200 bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-5 py-4">
           <span className="text-lg font-bold tracking-tight">Bluebird Dental</span>
@@ -54,11 +55,13 @@ export default async function WidgetDemoPage({ searchParams }: { searchParams: P
         </div>
       </section>
       {!p.site ? (
-        <p role="status" className="mx-auto max-w-4xl px-5 pb-10 text-sm text-zinc-500">
-          Add <code className="rounded bg-zinc-100 px-1">?site=&lt;site id&gt;</code> to the URL to load a widget here.
+        <p role="status" className="mx-auto max-w-4xl px-5 pb-10 text-sm text-zinc-600">
+          No widget is loaded. Add <code className="rounded bg-zinc-100 px-1">?site=&lt;site id&gt;</code> to the URL, or open this page from Settings → Website widgets.
         </p>
       ) : (
-        <Script
+        <>
+          <WidgetStatus />
+          <Script
           key={`${p.site}-${p.v ?? ""}-${p.mode ?? ""}-${p.color ?? ""}-${p.position ?? ""}-${p.consent ?? ""}`}
           src={`/api/widget.js${p.v ? `?v=${encodeURIComponent(p.v)}` : ""}`}
           strategy="afterInteractive"
@@ -67,8 +70,9 @@ export default async function WidgetDemoPage({ searchParams }: { searchParams: P
           data-color={p.color}
           data-position={p.position}
           data-consent={p.consent}
-          data-greeting={p.greeting}
-        />
+            data-greeting={p.greeting}
+          />
+        </>
       )}
     </main>
   );

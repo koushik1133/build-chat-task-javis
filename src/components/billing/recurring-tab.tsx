@@ -81,9 +81,9 @@ export function RecurringTab({ onNotice, onInvoiceCreated }: { onNotice: (n: { t
 
   return (
     <div aria-busy={loading || undefined}>
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">Invoices created automatically on a cadence. Pause any time; Run now creates the next one immediately.</p>
-        <Button touch size="sm" onClick={() => setDialog({ mode: "create" })}>
+        <Button touch size="sm" className="self-start sm:self-auto" onClick={() => setDialog({ mode: "create" })}>
           <Plus className="h-4 w-4" aria-hidden /> New schedule
         </Button>
       </div>
@@ -112,8 +112,8 @@ export function RecurringTab({ onNotice, onInvoiceCreated }: { onNotice: (n: { t
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{s.name}</span>
-                    <Pill tone={STATUS_TONE[s.status]}>{s.status}</Pill>
-                    {s.auto_send && <Pill tone="info">auto-send</Pill>}
+                    <Pill tone={STATUS_TONE[s.status]} className="capitalize">{s.status}</Pill>
+                    {s.auto_send && <Pill tone="info">Auto-send</Pill>}
                   </div>
                   <p className="mt-0.5 truncate text-sm text-muted-foreground">
                     {s.contact_name ?? "No contact"} · {cadenceLabel(s)} · {s.status === "ended" ? "ended" : `next ${fmtDate(s.next_run_at)}`} · {s.run_count} run{s.run_count === 1 ? "" : "s"}
@@ -201,7 +201,7 @@ function ScheduleDialog({ schedule, onClose, onSaved }: { schedule: Schedule | n
 
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch("/api/crm/contacts", { signal: ctrl.signal })
+    fetch("/api/crm/contacts?limit=200", { signal: ctrl.signal })
       .then((r) => r.json())
       .then((d) => setContacts(d.contacts ?? []))
       .catch(() => setContacts([]));
@@ -271,7 +271,7 @@ function ScheduleDialog({ schedule, onClose, onSaved }: { schedule: Schedule | n
           </Field>
           <Field label="Repeats">
             <Select value={interval} onChange={(e) => setInterval_(e.target.value as ScheduleInterval)}>
-              {SCHEDULE_INTERVALS.map((i) => <option key={i} value={i}>{i}</option>)}
+              {SCHEDULE_INTERVALS.map((i) => <option key={i} value={i}>{i.charAt(0).toUpperCase() + i.slice(1)}</option>)}
             </Select>
           </Field>
           <Field label="Every">
@@ -292,10 +292,10 @@ function ScheduleDialog({ schedule, onClose, onSaved }: { schedule: Schedule | n
         </div>
         {preview.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            Next runs: {preview.map((d) => d.toISOString().slice(0, 10)).join(" → ")}
+            Next runs: {preview.map((d) => fmtDate(d.toISOString())).join(" → ")}
           </p>
         )}
-        <LineItemsEditor items={items} onChange={setItems} rates={rates} />
+        <LineItemsEditor items={items} onChange={setItems} rates={rates} currency={currency} />
         <Field label="Notes" hint="Printed on every invoice">
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>

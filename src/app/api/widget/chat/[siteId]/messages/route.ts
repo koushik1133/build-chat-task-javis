@@ -59,6 +59,8 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     const limited = await enforceLimits(cors, [
       { key: `webchat:msg:session:${session.id}`, limit: 30, windowMs: 60_000 },
       { key: `webchat:msg:ip:${clientIp(req)}`, limit: 60, windowMs: 60_000 },
+      // Every visitor turn is an LLM call billed to the site owner: cap per site per hour.
+      { key: `webchat:msg:site:${siteId}`, limit: 1_500, windowMs: 60 * 60 * 1000 },
     ]);
     if (limited) return limited;
     const body = await parseBody(req, PostSchema, cors, 8_192);

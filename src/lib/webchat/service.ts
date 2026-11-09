@@ -109,11 +109,18 @@ export async function requestHandoff(session: ChatSessionRow, input: HandoffInpu
   const phone = input.phone?.trim() || null;
   const name = input.name.trim().slice(0, 120);
 
+  // The visitor's email is unverified, so it must never bind this session to an
+  // existing contact (that would let anyone attach transcripts and flip consent
+  // on a known customer's record). An email match is surfaced to staff as a
+  // merge hint on the lead instead; the session only ever links a contact it
+  // created itself.
   let contactId: string | null = session.contact_id;
+  let matchedContactId: string | null = null;
   if (!contactId && email) {
     const existing = await queryOne<{ id: string }>(`SELECT id FROM crm_contacts WHERE user_id = $1 AND LOWER(email) = $2 LIMIT 1`, [session.user_id, email]).catch(() => null);
-    contactId = existing?.id ?? null;
+    matchedContactId = existing?.id ?? null;
   }
+  let createdContact = false;
   if (!contactId) {
     const created = await queryOne<{ id: string }>(
       `INSERT INTO crm_contacts (id, user_id, full_name, email, phone, lifecycle, tags, notes, created_at)
@@ -121,7 +128,8 @@ export async function requestHandoff(session: ChatSessionRow, input: HandoffInpu
       [randomUUID(), session.user_id, name || "Website visitor", email, phone, `Started from web chat${session.page_url ? ` on ${session.page_url}` : ""}`]
     );
     contactId = created?.id ?? null;
-    if (contactId) void emitEvent(session.user_id, { type: "crm.contact.created", entity: "crm_contact", entityId: contactId, data: { source: "webchat" } });
+    createdContact = Boolean(contactId);
+    if (contactId) void emitEvent(session.user_id, { type: "crm.contact.created", entity: "crm_contact", entityId: contactId, data: { source: "webchat", possible_duplicate_of: matchedContactId } });
   }
   if (!contactId) throw new Error("could not create contact");
 
@@ -130,7 +138,7 @@ export async function requestHandoff(session: ChatSessionRow, input: HandoffInpu
   const leadId = randomUUID();
   await query(
     `INSERT INTO site_leads (id, site_id, user_id, data, status, created_at) VALUES ($1, $2, $3, $4, 'new', NOW())`,
-    [leadId, session.site_id, session.user_id, JSON.stringify({ name, email, phone, message: input.message?.trim().slice(0, 2000) || null, source: "webchat", page_url: session.page_url, transcript: transcript.slice(0, 4000) })]
+    [leadId, session.site_id, session.user_id, JSON.stringify({ name, email, phone, message: input.message?.trim().slice(0, 2000) || null, source: "webchat", page_url: session.page_url, transcript: transcript.slice(0, 4000), possible_contact_id: matchedContactId })]
   );
   void emitEvent(session.user_id, { type: "lead.captured", entity: "site_lead", entityId: leadId, data: { siteId: session.site_id, source: "webchat" } });
 
@@ -138,7 +146,8 @@ export async function requestHandoff(session: ChatSessionRow, input: HandoffInpu
     const evidence = { ip: input.evidence?.ip ?? null, ua: input.evidence?.ua ?? null, text_version: `site:${session.site_id}` };
     const status = input.consent.marketing ? "granted" : "withdrawn";
     for (const purpose of ["marketing_email", "marketing_sms"] as const) {
-      void recordConsent(session.user_id, { kind: "contact", id: contactId }, purpose, status, "form", evidence).catch(() => undefined);
+      // Contact-level consent only for a contact this handoff created (or one this session already owns).
+      if (createdContact || session.contact_id) void recordConsent(session.user_id, { kind: "contact", id: contactId }, purpose, status, "form", evidence).catch(() => undefined);
       void recordConsent(session.user_id, { kind: "lead", id: leadId }, purpose, status, "form", evidence).catch(() => undefined);
     }
   }

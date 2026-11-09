@@ -71,6 +71,17 @@ interface Row {
 const iso = (v: string | Date): string => (v instanceof Date ? v.toISOString() : String(v));
 const isoOrNull = (v: string | Date | null | undefined): string | null => (v === null || v === undefined ? null : iso(v));
 
+/**
+ * Timestamps are stored at millisecond precision. pg hands TIMESTAMPTZ back
+ * as a JS Date (ms), and `runSchedule` claims a row with `next_run_at = <DTO
+ * value>`, so a value written with microseconds (zod's datetime() accepts any
+ * fractional precision) would never compare equal and the schedule would
+ * never run. Normalising on write keeps the claim exact.
+ */
+export function normaliseInstant(v: string): string {
+  return new Date(v).toISOString();
+}
+
 function toDTO(r: Row): ScheduleDTO {
   return {
     id: r.id,
@@ -155,7 +166,7 @@ export async function createSchedule(dataId: string, input: ScheduleInput): Prom
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'active', 0)`,
     [
       id, dataId, input.contact_id ?? null, input.name, JSON.stringify(input.items), (input.currency ?? "USD").toUpperCase(),
-      input.interval, input.interval_count, input.day_of_month ?? null, input.next_run_at, input.end_at ?? null,
+      input.interval, input.interval_count, input.day_of_month ?? null, normaliseInstant(input.next_run_at), input.end_at ? normaliseInstant(input.end_at) : null,
       input.auto_send, input.terms_days ?? null, input.notes ?? null,
     ]
   );
@@ -185,8 +196,8 @@ export async function updateSchedule(dataId: string, id: string, patch: Schedule
   if (patch.interval !== undefined) push("interval", patch.interval);
   if (patch.interval_count !== undefined) push("interval_count", patch.interval_count);
   if (patch.day_of_month !== undefined) push("day_of_month", patch.day_of_month);
-  if (patch.next_run_at !== undefined) push("next_run_at", patch.next_run_at);
-  if (patch.end_at !== undefined) push("end_at", patch.end_at);
+  if (patch.next_run_at !== undefined) push("next_run_at", normaliseInstant(patch.next_run_at));
+  if (patch.end_at !== undefined) push("end_at", patch.end_at ? normaliseInstant(patch.end_at) : null);
   if (patch.auto_send !== undefined) push("auto_send", patch.auto_send);
   if (patch.terms_days !== undefined) push("terms_days", patch.terms_days);
   if (patch.notes !== undefined) push("notes", patch.notes);
@@ -266,6 +277,17 @@ export async function runSchedule(dataId: string, id: string, opts: { force?: bo
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
     console.error(`[recurring] schedule ${id} failed:`, err);
+    if (!invoiceId) {
+      // Nothing was billed: hand the period back so the next sweep retries it
+      // instead of silently skipping a billing cycle. Conditional on our own
+      // claim so a concurrent operator edit is never overwritten.
+      await query(
+        `UPDATE invoice_schedules SET next_run_at = $3, status = 'active', updated_at = NOW()
+          WHERE id = $1 AND user_id = $2 AND next_run_at = $4 AND status = $5`,
+        [id, dataId, s.next_run_at, next.toISOString(), ended ? "ended" : "active"]
+      ).catch((e) => console.error(`[recurring] could not release claim for ${id}:`, e));
+      return { schedule_id: id, invoice_id: null, sent: false, status: "active", next_run_at: s.next_run_at, error };
+    }
   }
   return { schedule_id: id, invoice_id: invoiceId, sent, status: ended ? "ended" : "active", next_run_at: ended ? null : next.toISOString(), error };
 }

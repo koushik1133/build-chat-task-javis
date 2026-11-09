@@ -45,11 +45,15 @@ export async function parseBody<T>(req: Request, schema: z.ZodType<T>, cors: Rec
   return { data: parsed.data };
 }
 
-/** Bearer token from `Authorization: Bearer …` or `?token=`. */
-export function sessionTokenFrom(req: Request): string | null {
+/**
+ * Bearer token from `Authorization: Bearer …`. `?token=` is accepted only when
+ * `allowQuery` is set (the SSE stream, where EventSource cannot send headers);
+ * everywhere else a token in the URL would land in proxy/CDN logs for nothing.
+ */
+export function sessionTokenFrom(req: Request, opts: { allowQuery?: boolean } = {}): string | null {
   const auth = req.headers.get("authorization");
   if (auth?.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
-  return new URL(req.url).searchParams.get("token");
+  return opts.allowQuery ? new URL(req.url).searchParams.get("token") : null;
 }
 
 export interface LimitRule {

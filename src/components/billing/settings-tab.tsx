@@ -25,6 +25,7 @@ interface BillingSettings {
 }
 interface FxRate { id: string; base: string; quote: string; rate: string; as_of: string }
 
+const KIND_LABEL: Record<string, string> = { vat: "VAT", gst: "GST", sales: "Sales tax", other: "Other" };
 const spinner = <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -141,10 +142,10 @@ function TaxRatesCard({ rates, canEdit, onChanged, onNotice }: { rates: TaxRateO
             <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm" aria-busy={busyId === r.id || undefined}>
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className={r.active ? "font-medium" : "font-medium text-muted-foreground line-through"}>{rateLabel(r)}</span>
-                <Pill tone="neutral">{r.kind}</Pill>
-                {r.compound && <Pill tone="violet">compound</Pill>}
-                {r.is_default && <Pill tone="success">default</Pill>}
-                {!r.active && <Pill tone="warning">inactive</Pill>}
+                <Pill tone="neutral">{r.kind ? (KIND_LABEL[r.kind] ?? r.kind) : "Other"}</Pill>
+                {r.compound && <Pill tone="violet">Compound</Pill>}
+                {r.is_default && <Pill tone="success">Default</Pill>}
+                {!r.active && <Pill tone="warning">Inactive</Pill>}
               </div>
               {canEdit && (
                 <div className="flex items-center gap-1">
@@ -168,7 +169,7 @@ function TaxRatesCard({ rates, canEdit, onChanged, onNotice }: { rates: TaxRateO
             <Field label="Rate %"><Input required type="number" inputMode="decimal" min={0} max={100} step="0.01" value={pct} onChange={(e) => setPct(e.target.value)} /></Field>
             <Field label="Kind">
               <Select value={kind} onChange={(e) => setKind(e.target.value)}>
-                {TAX_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+                {TAX_KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k] ?? k}</option>)}
               </Select>
             </Field>
             <Field label="Jurisdiction" hint="Optional"><Input maxLength={80} placeholder="UK" value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)} /></Field>
@@ -235,16 +236,16 @@ function PreferencesCard({ settings, canEdit, onSaved }: { settings: BillingSett
     <Card title="Tax ID, numbering & payment terms" description="Your tax registration prints on every document. Prefixes apply to new numbers only. Reminder days are relative to the due date (negative = before).">
       <form onSubmit={save} className="space-y-3">
         {err && <Banner tone="error" onDismiss={() => setErr(null)}>{err}</Banner>}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid gap-2 sm:grid-cols-2">
           <Field label="Tax ID label" hint='e.g. "VAT ID", "GSTIN"'><Input maxLength={40} value={form.tax_id_label} disabled={!canEdit} onChange={(e) => set("tax_id_label", e.target.value)} /></Field>
           <Field label="Tax number"><Input maxLength={64} value={form.tax_number} disabled={!canEdit} onChange={(e) => set("tax_number", e.target.value)} /></Field>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid gap-2 sm:grid-cols-3">
           <Field label="Quote prefix"><Input maxLength={8} value={form.quote_prefix} disabled={!canEdit} onChange={(e) => set("quote_prefix", e.target.value.toUpperCase())} /></Field>
           <Field label="Invoice prefix"><Input maxLength={8} value={form.invoice_prefix} disabled={!canEdit} onChange={(e) => set("invoice_prefix", e.target.value.toUpperCase())} /></Field>
           <Field label="Credit note prefix"><Input maxLength={8} value={form.credit_note_prefix} disabled={!canEdit} onChange={(e) => set("credit_note_prefix", e.target.value.toUpperCase())} /></Field>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid gap-2 sm:grid-cols-2">
           <Field label="Default payment terms (days)"><Input type="number" min={0} max={365} value={form.default_terms_days} disabled={!canEdit} onChange={(e) => set("default_terms_days", e.target.value)} /></Field>
           <Field label="Reminder schedule (days)" hint="Comma separated"><Input value={form.dunning_schedule} disabled={!canEdit} onChange={(e) => set("dunning_schedule", e.target.value)} /></Field>
           <Field label="Tax rounding">
@@ -304,10 +305,10 @@ function FxCard({ rates, canEdit, onChanged, onNotice }: { rates: FxRate[]; canE
       ) : (
         <ul className="mb-3 divide-y divide-border rounded-lg border border-border text-sm" aria-label="Exchange rates">
           {rates.map((r) => (
-            <li key={r.id} className="flex items-center justify-between gap-2 px-3 py-2">
+            <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
               <span className="tabular-nums">1 {r.base} = {r.rate} {r.quote} <span className="text-xs text-muted-foreground">· {new Date(r.as_of).toLocaleDateString()}</span></span>
               {canEdit && (
-                <Button size="sm" variant="ghost" touch onClick={() => void remove(r.id)} aria-label={`Delete rate ${r.base}/${r.quote}`}>
+                <Button size="sm" variant="ghost" touch onClick={() => { if (window.confirm(`Delete the ${r.base}/${r.quote} rate?`)) void remove(r.id); }} aria-label={`Delete rate ${r.base}/${r.quote}`}>
                   <Trash2 className="h-3.5 w-3.5" aria-hidden />
                 </Button>
               )}

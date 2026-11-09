@@ -264,7 +264,7 @@ function VitalsSection({ vitals }: { vitals: VitalsSummary | null }) {
   return (
     <section aria-labelledby="vitals-heading" className="rounded-xl border border-border bg-card p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="vitals-heading" className="text-sm font-semibold">Web Vitals (p75 by route)</h2>
+        <h2 id="vitals-heading" className="text-sm font-semibold">Web vitals (p75 by route)</h2>
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
           <Pill tone="info">Global · all workspaces</Pill>
           {vitals ? `last ${vitals.windowHours} h · 10% sample` : null}

@@ -367,18 +367,18 @@ export default function CrmPage() {
                           <div className="flex items-center gap-1 justify-end">
                             <a href={`/api/crm/contacts/${contact.id}/statement?format=pdf`} target="_blank" rel="noopener"
                               title="Customer statement (PDF)" aria-label={`Statement for ${contact.full_name}`}
-                              className="h-7 w-7 rounded flex items-center justify-center hover:bg-secondary transition-colors">
-                              <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                              className="flex h-11 w-11 touch-manipulation items-center justify-center rounded hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors motion-reduce:transition-none sm:h-7 sm:w-7">
+                              <FileText className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                             </a>
-                            <button onClick={() => openEdit(contact)}
-                              className="h-7 w-7 rounded flex items-center justify-center hover:bg-secondary transition-colors">
-                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                            <button type="button" onClick={() => openEdit(contact)} aria-label={`Edit ${contact.full_name}`}
+                              className="flex h-11 w-11 touch-manipulation items-center justify-center rounded hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors motion-reduce:transition-none sm:h-7 sm:w-7">
+                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                             </button>
-                            <button onClick={() => handleDelete(contact.id)} disabled={deletingId === contact.id}
-                              className="h-7 w-7 rounded flex items-center justify-center hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+                            <button type="button" onClick={() => handleDelete(contact.id)} disabled={deletingId === contact.id} aria-label={`Delete ${contact.full_name}`} aria-busy={deletingId === contact.id || undefined}
+                              className="flex h-11 w-11 touch-manipulation items-center justify-center rounded hover:bg-red-50 dark:hover:bg-red-950/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors motion-reduce:transition-none sm:h-7 sm:w-7">
                               {deletingId === contact.id
-                                ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                                : <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-red-500" />
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none text-muted-foreground" aria-hidden />
+                                : <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-red-500" aria-hidden />
                               }
                             </button>
                           </div>

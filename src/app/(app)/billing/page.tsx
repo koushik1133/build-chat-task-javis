@@ -168,7 +168,7 @@ export default function BillingPage() {
       }
     >
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Tabs id="billing" label="Billing section" tabs={tabs} value={tab} onChange={setTab} className="w-fit max-w-full" />
+        <Tabs id="billing" label="Billing section" tabs={tabs} value={tab} onChange={setTab} className="w-full sm:w-fit" />
         {active && (
           <p className="text-xs text-muted-foreground">
             Payments: <span className="font-medium capitalize">{active.id}</span>
@@ -552,7 +552,7 @@ function NewDocDialog({ kind, onClose, onCreated }: { kind: "quote" | "invoice";
 
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch("/api/crm/contacts", { signal: ctrl.signal })
+    fetch("/api/crm/contacts?limit=200", { signal: ctrl.signal })
       .then((r) => r.json())
       .then((d) => setContacts(d.contacts ?? []))
       .catch(() => setContacts([]));
@@ -613,7 +613,7 @@ function NewDocDialog({ kind, onClose, onCreated }: { kind: "quote" | "invoice";
           )}
         </div>
 
-        <LineItemsEditor items={items} onChange={setItems} rates={rates} />
+        <LineItemsEditor items={items} onChange={setItems} rates={rates} currency={currency} />
 
         <Field label="Notes" hint="Visible to the client">
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

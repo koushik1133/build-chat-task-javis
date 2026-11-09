@@ -103,7 +103,7 @@ export function ErrorState({ message, onRetry, className }: { message: string; o
     <div role="alert" className={cn("rounded-xl border border-red-500/30 bg-red-500/5 p-8 text-center", className)}>
       <p className="text-sm font-medium text-red-700 dark:text-red-300">{message}</p>
       {onRetry && (
-        <Button size="sm" variant="outline" className="mt-3" onClick={onRetry}>
+        <Button size="sm" variant="outline" touch className="mt-3" onClick={onRetry}>
           Try again
         </Button>
       )}

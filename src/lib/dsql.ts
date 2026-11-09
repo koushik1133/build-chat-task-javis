@@ -82,6 +82,19 @@ export function isDbError(e: unknown): e is DbError {
   return e instanceof DbError || (e instanceof Error && e.name === "DbError");
 }
 
+/**
+ * Postgres 42703 (undefined_column): the query named a column the deployed
+ * schema does not have yet. Callers use it to fall back to a pre-migration
+ * statement without swallowing unrelated failures.
+ */
+export function isUndefinedColumn(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = "code" in err ? String((err as { code?: unknown }).code ?? "") : "";
+  const cause = "cause" in err ? (err as { cause?: { code?: unknown } }).cause : null;
+  const message = err instanceof Error ? err.message : "";
+  return code === "42703" || String(cause?.code ?? "") === "42703" || /column .* does not exist/i.test(message);
+}
+
 /** True for DSQL optimistic-concurrency conflicts (retryable). */
 function isConcurrencyConflict(e: unknown): boolean {
   const err = isDbError(e) ? e.cause : e;
