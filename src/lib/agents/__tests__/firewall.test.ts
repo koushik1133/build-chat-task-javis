@@ -41,3 +41,25 @@ describe("action firewall", () => {
     expect(hasUntrustedOutput(mk("x.y", "read", { untrustedOutput: true }))).toBe(true);
   });
 });
+
+describe("sec9: firewall hardening", () => {
+  it("config/bulk-state writes are high risk so taint gates them", () => {
+    for (const n of ["snapshots.apply", "automations.install_template", "automations.toggle", "orders.fulfil", "agents.run_agent", "billing.create_recurring"]) {
+      expect(taintForcesApproval(mk(n, "write"), ctx("auto", true))).toBe(true);
+    }
+  });
+});
+
+describe("sec9: output guard on auto-sent text", () => {
+  it("auto run with key-like text in an outbound send is forced to approval", () => {
+    const send = mk("comms.send_email", "write");
+    expect(needsApproval(send, { to: "a@b.c", body: "key sk-abcdefghijklmnopqrstuv" }, ctx("auto", false))).toBe(true);
+    expect(needsApproval(send, { to: "a@b.c", body: "Hello, see you at 3pm." }, ctx("auto", false))).toBe(false);
+  });
+});
+
+describe("sec9: customer-text read tools are wrapped", () => {
+  it("flags order/invoice/report readers as untrusted output", () => {
+    for (const n of ["orders.list", "billing.list_invoices", "reports.run", "tasks.list", "documents.status"]) expect(hasUntrustedOutput(mk(n, "read"))).toBe(true);
+  });
+});

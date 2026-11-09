@@ -71,3 +71,31 @@ describe("natural keys and hashing", () => {
     expect(sha256("x")).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+describe("sec9 snapshot hardening", () => {
+  it("flags the expanded credential key vocabulary", () => {
+    for (const k of ["cookie", "session_id", "otp", "hash", "signature", "refresh", "access_key", "auth", "enc", "encrypted_blob", "passphrase", "hmac", "pwd", "private_key", "bearer"]) {
+      expect(findSecretPaths({ [k]: "x" }).length, k).toBeGreaterThan(0);
+    }
+  });
+  it("fails closed when nesting exceeds the scan depth", () => {
+    let v: unknown = { leaf: "sk_live_abcdefgh12345678" };
+    for (let i = 0; i < 60; i++) v = { w: v };
+    expect(findSecretPaths(v).length).toBeGreaterThan(0);
+  });
+  it("rejects prototype-pollution keys on import", async () => {
+    const { parseSnapshot } = await import("../schema");
+    const text = '{"schema":1,"name":"x","sections":{"record_types":[{"slug":"a","name":"A","fields":[{"__proto__":{"polluted":true}}],"stages":[]}]}}';
+    const r = parseSnapshot(text);
+    expect(r.ok).toBe(false);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+  it("resume cursors are signed per workspace", async () => {
+    const { signResume, verifyResume } = await import("../tenant-export");
+    const sig = signResume("org-a", "tasks", "id1");
+    expect(verifyResume("org-a", "tasks", "id1", sig)).toBe(true);
+    expect(verifyResume("org-b", "tasks", "id1", sig)).toBe(false);
+    expect(verifyResume("org-a", "tasks", "id2", sig)).toBe(false);
+    expect(verifyResume("org-a", "tasks", "id1", null)).toBe(false);
+  });
+});

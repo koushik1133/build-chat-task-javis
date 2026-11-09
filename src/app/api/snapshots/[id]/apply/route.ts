@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const found = await getSnapshotDoc(scope.dataId, id);
     if (!found) return NextResponse.json({ error: "not_found" }, { status: 404 });
-    const result = await applySnapshot(scope.dataId, found.doc, { ...parsed.data, actorId: scope.userId, snapshotId: found.meta.id, snapshotSha: found.meta.sha256 });
+    const result = await applySnapshot(scope.dataId, found.doc, { ...parsed.data, actorId: scope.userId, snapshotId: found.meta.id, snapshotSha: found.meta.sha256, can: scope.can });
     return NextResponse.json({ result }, { status: result.status === "failed" ? 422 : 200 });
   } catch (err) {
     if (err instanceof SnapshotError) return NextResponse.json({ error: err.message }, { status: err.status });

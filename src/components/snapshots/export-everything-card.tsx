@@ -8,6 +8,7 @@ import { Banner } from "@/components/ui/feedback";
 interface Resume {
   table: string;
   after: string | null;
+  sig?: string;
 }
 
 /** Last line of an NDJSON blob (the manifest), parsed leniently. */
@@ -28,12 +29,13 @@ export function ExportEverythingCard() {
   const [msg, setMsg] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
   const [resume, setResume] = useState<Resume | null>(null);
   const [part, setPart] = useState(1);
+  const [rows, setRows] = useState(0);
 
   async function run(from: Resume | null) {
     setBusy(true);
     setMsg(null);
     try {
-      const qs = from ? `?table=${encodeURIComponent(from.table)}${from.after ? `&after=${encodeURIComponent(from.after)}` : ""}` : "";
+      const qs = from ? `?table=${encodeURIComponent(from.table)}${from.after ? `&after=${encodeURIComponent(from.after)}` : ""}${from.sig ? `&sig=${encodeURIComponent(from.sig)}` : ""}` : "";
       const res = await fetch(`/api/workspace/export${qs}`, { method: "POST" });
       if (!res.ok) {
         const d = (await res.json().catch(() => null)) as { detail?: string; error?: string } | null;
@@ -50,6 +52,7 @@ export function ExportEverythingCard() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
       setPart(n);
+      setRows((r) => (from ? r : 0) + (manifest?.rows ?? 0));
       if (manifest && manifest.complete === false && manifest.resume) {
         setResume(manifest.resume);
         setMsg({ tone: "info", text: `Part ${n} downloaded (${manifest.rows ?? 0} rows). The export is large: continue to get the rest.` });
@@ -75,18 +78,28 @@ export function ExportEverythingCard() {
             Download all of this workspace&apos;s data as newline-delimited JSON for backup or migration. Credentials, API keys, tokens and OAuth connections are never included. Owner only, 3 per day.
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           {resume && (
             <Button variant="outline" touch disabled={busy} onClick={() => run(resume)}>
               Continue export
             </Button>
           )}
-          <Button touch disabled={busy} onClick={() => { setPart(1); setResume(null); void run(null); }}>
+          <Button touch disabled={busy} onClick={() => { setPart(1); setRows(0); setResume(null); void run(null); }}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <DatabaseBackup className="h-4 w-4" aria-hidden />}
             {busy ? "Preparing…" : "Export everything"}
           </Button>
         </div>
       </div>
+      {(busy || resume) && (
+        <div className="mt-3 space-y-1" role="status" aria-live="polite">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-secondary" role="progressbar" aria-label="Export progress" aria-valuetext={busy ? `Preparing part ${resume ? part + 1 : part}` : `${part} part${part === 1 ? "" : "s"} downloaded, more to go`}>
+            <div className={busy ? "h-full w-1/3 animate-pulse rounded-full bg-primary motion-reduce:animate-none" : "h-full w-2/3 rounded-full bg-primary"} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {busy ? `Preparing part ${resume ? part + 1 : part}…` : `${part} part${part === 1 ? "" : "s"} downloaded (${rows} rows so far). Use Continue export for the next part.`}
+          </p>
+        </div>
+      )}
       {msg && (
         <Banner tone={msg.tone} onDismiss={() => setMsg(null)} className="mt-3">
           {msg.text}

@@ -8,6 +8,7 @@
     { "name": "CRON_SECRET", "group": "core", "required": true, "secret": true, "minLength": 16, "description": "Bearer token for /api/cron/agents. openssl rand -hex 32." },
     { "name": "MARKETING_TRACKING_SECRET", "group": "core", "secret": true, "minLength": 16, "description": "HMAC secret signing marketing open/click/unsubscribe links. Required in production. openssl rand -hex 32." },
     { "name": "MARKETING_TRACKING_SECRET_PREVIOUS", "group": "core", "secret": true, "minLength": 16, "description": "Previous tracking secret kept during rotation so already-sent links still verify." },
+    { "name": "MARKETING_TRACKING_ACCEPT_LEGACY", "group": "flag", "description": "Set to false (with MARKETING_TRACKING_SECRET set) to stop accepting tracking links signed with the legacy CRON_SECRET-derived key, once old links have aged out.", "default": "true" },
     { "name": "TRUSTED_PROXY_HOPS", "group": "core", "description": "Number of trusted reverse-proxy hops in X-Forwarded-For (client IP is taken that many entries from the right). Default 1 on Vercel/production, 0 otherwise.", "default": "1" },
     { "name": "NEXT_PUBLIC_APP_URL", "group": "core", "required": true, "format": "url", "description": "Canonical public origin (links in emails, OAuth redirects, portal URLs)." },
 

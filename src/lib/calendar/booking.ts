@@ -619,17 +619,20 @@ export async function rescheduleBooking(
     return [...b, ...k].map((r) => ({ start: new Date(r.starts_at), end: new Date(r.ends_at) }));
   };
 
+  // Customers/agents must also respect the owner's synced external (Google/Outlook) busy time; staff may override.
+  const external = by !== "staff" ? await externalBusyIntervals(dataId, new Date(start.getTime() - 24 * 60 * MS_PER_MIN), new Date(end.getTime() + 24 * 60 * MS_PER_MIN)) : [];
+
   if (by !== "staff") {
     const rules = await listRules(existing.calendar_id);
     const busy = await loadBusy((s, p) => query<{ starts_at: string; ends_at: string }>(s, p));
     const t = type ?? { duration_minutes: Math.round(durationMs / MS_PER_MIN), buffer_before: 0, buffer_after: 0, min_notice_minutes: 0, max_days_ahead: 365 };
-    const slots = listSlots({ rules, existing: busy, blocks: [], type: t, from: new Date(start.getTime() - 1), to: new Date(end.getTime() + 1), now, timezone: cal.timezone });
+    const slots = listSlots({ rules, existing: busy, blocks: [], busy: external, type: t, from: new Date(start.getTime() - 1), to: new Date(end.getTime() + 1), now, timezone: cal.timezone });
     if (!slots.includes(start.toISOString())) throw new BookingConflictError();
   }
 
   await transaction(async (client) => {
     const busy = await loadBusy(async (s, p) => (await client.query<{ starts_at: string; ends_at: string }>(s, p)).rows);
-    if (wouldClash({ start, end }, busy, buffers)) throw new BookingConflictError();
+    if (wouldClash({ start, end }, [...busy, ...external], buffers)) throw new BookingConflictError();
     await client.query(`UPDATE bookings SET starts_at = $3, ends_at = $4, updated_at = NOW() WHERE user_id = $1 AND id = $2`, [dataId, existing.id, start.toISOString(), end.toISOString()]);
   });
 

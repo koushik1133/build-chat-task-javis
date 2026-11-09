@@ -79,13 +79,21 @@ export const NEVER_INCLUDED = [
 /* ─── Secret scanning (used on export AND import) ───────────────────────── */
 
 /** Key names that indicate a credential. Matched case-insensitively on every object key. */
-export const SECRET_KEY_RE = /(secret|passw(or)?d|token|api[_-]?key|private[_-]?key|credential|authorization|bearer|webhook[_-]?(url|secret)|_enc$|key_hash|otp_hash)/i;
+export const SECRET_KEY_RE =
+  /(secret|passw(or)?d|passwd|pwd|passphrase|token|api[_-]?key|apikey|private[_-]?key|privatekey|credential|authoriz|(^|[_.-])auth($|[_.-])|bearer|cookie|session[_-]?(id|key|secret)|(^|[_.-])otp($|[_.-])|hmac|signature|refresh|access[_-]?(key|code)|webhook[_-]?(url|secret)|(^|[_.-])enc($|[_.-])|encrypted|_enc$|(^|[_.-])hash($|[_.-])|_hash$|key_hash|otp_hash)/i;
+/** Object keys that can poison prototypes when merged or assigned downstream. */
+export const FORBIDDEN_KEY_RE = /^(__proto__|constructor|prototype)$/;
 /** Value shapes that look like credentials regardless of the key. */
 export const SECRET_VALUE_RE = /(sk_(live|test)_[A-Za-z0-9]{8,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[abprs]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|hooks\.slack\.com\/services)/;
 
 /** Returns paths of suspicious keys/values (empty = clean). Walks arrays and objects. */
 export function findSecretPaths(value: unknown, path = "$", out: string[] = [], depth = 0): string[] {
-  if (depth > 40 || out.length >= 50) return out;
+  if (out.length >= 50) return out;
+  // Fail closed: content nested deeper than we scan could hide a credential.
+  if (depth > 40) {
+    out.push(`${path} (nested too deeply)`);
+    return out;
+  }
   if (typeof value === "string") {
     if (SECRET_VALUE_RE.test(value)) out.push(path);
   } else if (Array.isArray(value)) {
@@ -94,6 +102,19 @@ export function findSecretPaths(value: unknown, path = "$", out: string[] = [], 
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (SECRET_KEY_RE.test(k)) out.push(`${path}.${k}`);
       else findSecretPaths(v, `${path}.${k}`, out, depth + 1);
+    }
+  }
+  return out;
+}
+
+/** Paths of prototype-pollution keys anywhere in a parsed document. */
+export function findForbiddenKeys(value: unknown, path = "$", out: string[] = [], depth = 0): string[] {
+  if (out.length >= 20 || depth > 41) return out;
+  if (Array.isArray(value)) value.forEach((v, i) => findForbiddenKeys(v, `${path}[${i}]`, out, depth + 1));
+  else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (FORBIDDEN_KEY_RE.test(k)) out.push(`${path}.${k}`);
+      else findForbiddenKeys(v, `${path}.${k}`, out, depth + 1);
     }
   }
   return out;

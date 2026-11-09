@@ -1,7 +1,7 @@
 import { principalFromScope } from "@/lib/agents/principal";
 import { NextResponse } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
-import { AgentNotFoundError, getRun, startRun } from "@/lib/agents/runner";
+import { AgentNotFoundError, getRun, retryTriggerKind, startRun } from "@/lib/agents/runner";
 
 export const runtime = "nodejs";
 
@@ -18,7 +18,8 @@ export async function POST(_req: Request, ctx: { params: Promise<{ runId: string
   try {
     const newRunId = await startRun(scope.dataId, run.agent_id, {
       prompt: run.prompt,
-      triggerKind: "manual",
+      // Keep the original trigger kind so a retried webhook/event/inbound run stays tainted (action firewall).
+      triggerKind: retryTriggerKind(run.trigger_kind),
       triggerRef: run.id,
       automationId: run.automation_id,
       principal: principalFromScope(scope),

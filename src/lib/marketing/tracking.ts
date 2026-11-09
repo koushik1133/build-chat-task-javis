@@ -45,9 +45,12 @@ function verifyKeys(): Buffer[] {
   const previous = process.env.MARKETING_TRACKING_SECRET_PREVIOUS?.trim();
   const legacy = process.env.CRON_SECRET?.trim();
   if (current) add(keyFrom(current));
-  else add(signingKey());
+  else if (process.env.NODE_ENV !== "production") add(signingKey()); // dev fallback only; never throws so legacy links still verify
   if (previous) add(keyFrom(previous));
-  if (legacy) add(keyFrom(legacy));
+  // Once links sent under the CRON_SECRET-derived key have aged out, set MARKETING_TRACKING_ACCEPT_LEGACY=false
+  // (with a dedicated secret) so a leaked cron secret can no longer forge tracking tokens.
+  const legacyOff = process.env.MARKETING_TRACKING_ACCEPT_LEGACY?.trim().toLowerCase() === "false" && Boolean(current);
+  if (legacy && !legacyOff) add(keyFrom(legacy));
   return keys;
 }
 

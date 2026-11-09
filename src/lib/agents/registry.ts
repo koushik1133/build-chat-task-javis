@@ -1,3 +1,4 @@
+import { guardCustomerReply } from "@/lib/ai/output-guard";
 import type { ToolContext, ToolSpec } from "./types";
 
 /**
@@ -53,11 +54,18 @@ const HIGH_RISK_TOOLS = new Set([
   "accounting.push_invoice", "accounting.push", "documents.send", "voice.start_campaign", "social.publish_post",
   "marketing.enroll", "marketing.launch", "chat.send", "records.delete", "marketplace.install", "procurement.create_po",
   "privacy.open_request", "kb.publish_article",
+  // Configuration / standing-rule / bulk-state changes that a customer must never be able to steer.
+  "snapshots.apply", "automations.install_template", "automations.toggle", "billing.create_recurring",
+  "orders.fulfil", "orders.unfulfil", "social.schedule_post", "inventory.adjust_stock", "agents.run_agent",
+  "calendar.cancel_booking", "calendar.reschedule",
 ]);
 const HIGH_RISK_ACTION = /^(send|refund|void|delete|erase|purge|launch|push|invite|grant|revoke|set_role|decide|approve|create_api_key|create_webhook|create_key)/;
 const UNTRUSTED_OUTPUT_TOOLS = new Set([
   "helpdesk.get_ticket", "helpdesk.list_tickets", "crm.get_contact", "crm.search_contacts", "webchat.sessions",
   "records.search", "messaging.list", "mail.read", "mail.search",
+  // Read tools that surface customer-typed names, notes, order comments or document text.
+  "orders.list", "billing.list_invoices", "billing.list_quotes", "billing.statement", "documents.status", "reports.run",
+  "tasks.list", "knowledge.search", "production.list_cards", "projects.list", "projects.status", "social.list_posts",
 ]);
 
 /** Effective risk: explicit spec value, else name-based classification (reads are low). */
@@ -79,11 +87,32 @@ export function taintForcesApproval(spec: ToolSpec, ctx: ToolContext): boolean {
   return ctx.tainted === true && spec.scope === "write" && riskOf(spec) === "high";
 }
 
+/** Tools whose text argument goes to a customer/public audience. */
+const OUTBOUND_TEXT_TOOLS = new Set([
+  "comms.send_email", "messaging.reply", "helpdesk.reply", "social.publish_post", "social.schedule_post", "documents.send",
+  "chat.send", "billing.send_quote", "marketing.launch", "marketing.enroll",
+]);
+const TEXT_FIELDS = ["body", "text", "message", "content", "html", "caption", "subject", "note"];
+
+/** True when an outbound-text tool's argument fails the customer-reply output guard (leaked keys/prompt/ids). */
+export function outboundTextUnsafe(spec: ToolSpec, input: unknown): boolean {
+  if (!OUTBOUND_TEXT_TOOLS.has(spec.name) || !input || typeof input !== "object") return false;
+  for (const f of TEXT_FIELDS) {
+    const v = (input as Record<string, unknown>)[f];
+    if (typeof v !== "string" || !v.trim()) continue;
+    // Only secrecy/leak checks matter here; length and emptiness are the tool's own business.
+    const g = guardCustomerReply(v, { maxChars: 100_000 });
+    if (!g.ok) return true;
+  }
+  return false;
+}
+
 export const TAINT_REASON = "Requires approval: run contains customer-supplied content";
 
 /** Decide whether a call must pause for a human, given the agent's autonomy. */
 export function needsApproval(spec: ToolSpec, input: unknown, ctx: ToolContext): boolean {
   if (taintForcesApproval(spec, ctx)) return true;
+  if (spec.scope === "write" && outboundTextUnsafe(spec, input)) return true;
   if (ctx.autonomy === "draft") return spec.scope === "write";
   if (ctx.autonomy === "auto") return false;
   // "approve": defer to the tool's own rule; default write tools to gated.

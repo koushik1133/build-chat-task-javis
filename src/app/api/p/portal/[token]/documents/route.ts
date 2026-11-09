@@ -1,3 +1,4 @@
+import { clientIp as trustedClientIp } from "@/lib/request-limits";
 import { NextResponse, type NextRequest } from "next/server";
 import { rateLimitAsync } from "@/lib/request-limits";
 import { resolveShareToken } from "@/lib/share-tokens";
@@ -8,7 +9,7 @@ export const runtime = "nodejs";
 type Ctx = { params: Promise<{ token: string }> };
 
 function ip(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
+  return trustedClientIp(req);
 }
 
 /** GET /api/p/portal/[token]/documents — the contact's sent/signed documents (whitelisted fields; drafts hidden). */

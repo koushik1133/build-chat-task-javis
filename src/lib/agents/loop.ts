@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { completeWithTools } from "@/lib/llm/router";
 import { assertBudget } from "@/lib/llm/budgets";
+import { clampMaxTokens } from "@/lib/llm/clamp";
 import { recordUsage } from "@/lib/llm/metering";
 import { parseModelJson } from "@/lib/model-json";
 import { getDefaultSystemPrompt } from "@/lib/agent-templates";
@@ -34,6 +35,9 @@ import {
  */
 
 /** The subset of an `agent_runs` row the loop needs. */
+/** Trigger kinds whose prompt is assembled from externally supplied data. */
+const TAINTED_TRIGGERS = new Set(["webhook", "automation", "playbook", "event", "inbound"]);
+
 export interface LoopRun {
   id: string;
   user_id: string;
@@ -41,6 +45,8 @@ export interface LoopRun {
   prompt: string;
   /** JSON area->{view,edit} of the principal that triggered the run (null = owner matrix). */
   principal_permissions?: string | null;
+  /** How the run started; webhook/automation/playbook prompts carry external data. */
+  trigger_kind?: string | null;
 }
 
 /** Enough state to rebuild the loop after a human decision. */
@@ -362,7 +368,7 @@ export async function runAgentLoop(run: LoopRun, agent: AgentDefinition, opts: L
   }
 
   // Taint: untrusted content already in the context (inbound prompt, or a resumed run's history).
-  if (containsUntrusted(run.prompt) || messages.some((m) => m.role !== "system" && typeof m.content === "string" && containsUntrusted(m.content))) {
+  if (TAINTED_TRIGGERS.has(run.trigger_kind ?? "") || containsUntrusted(run.prompt) || messages.some((m) => m.role !== "system" && typeof m.content === "string" && containsUntrusted(m.content))) {
     ctx.tainted = true;
   }
 
@@ -402,7 +408,7 @@ export async function runAgentLoop(run: LoopRun, agent: AgentDefinition, opts: L
       tools,
       model: agent.model,
       allowlist: budget.allowlist,
-      ...(budget.maxTokensPerCall != null ? { maxTokens: budget.maxTokensPerCall } : {}),
+      maxTokens: clampMaxTokens(budget, 1500),
     });
     turn++;
 

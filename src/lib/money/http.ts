@@ -1,3 +1,4 @@
+import { clientIp as sharedClientIp } from "@/lib/request-limits";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { scopeErrorResponse } from "@/lib/auth/scope";
@@ -67,8 +68,8 @@ export function errorResponse(err: unknown, log: string): NextResponse {
 }
 
 export function clientIp(req: NextRequest): string | null {
-  const fwd = req.headers.get("x-forwarded-for");
-  return (fwd?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || null) ?? null;
+  const ip = sharedClientIp(req);
+  return ip === "unknown" ? null : ip;
 }
 
 /** 60 requests / minute / ip for anonymous token routes. Returns a 429 response or null. */

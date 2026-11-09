@@ -71,9 +71,10 @@ export async function completeWithTools(
   const timeoutMs = opts.timeoutMs ?? 25_000;
   let lastError: unknown;
 
-  for (const p of providers) {
+  for (const [idx, p] of providers.entries()) {
     const client = new OpenAI({ apiKey: p.apiKey, baseURL: p.baseURL, timeout: timeoutMs, maxRetries: 0 });
-    const model = opts.model && opts.model.trim() ? opts.model : opts.tier === "fast" ? FAST_MODELS[p.id] ?? p.model : p.model;
+    // An explicit model name belongs to the preferred (first) provider; failover providers use their own default.
+    const model = idx === 0 && opts.model && opts.model.trim() ? opts.model : opts.tier === "fast" ? FAST_MODELS[p.id] ?? p.model : p.model;
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {

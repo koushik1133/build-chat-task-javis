@@ -16,7 +16,12 @@ export interface IcsEvent {
 
 /** Escape TEXT values (backslash, semicolon, comma, newline). */
 export function escapeIcsText(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
+  return s
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/g, " ") // control chars cannot be smuggled into a content line
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r\n|\r|\n/g, "\\n");
 }
 
 /** UTC basic format: 20261110T150000Z. */

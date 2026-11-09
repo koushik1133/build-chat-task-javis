@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { assertBudget } from "@/lib/llm/budgets";
+import { clampMaxTokens } from "@/lib/llm/clamp";
 import { recordUsage } from "@/lib/llm/metering";
 import { completeWithTools } from "@/lib/llm/router";
 import { parseModelJson } from "@/lib/model-json";
@@ -177,7 +178,7 @@ export async function runSandboxCase(agent: AgentRow, userId: string, evalRunId:
   while (turns < maxTurns) {
     const budget = await assertBudget(userId, "other");
     const started = Date.now();
-    const result = await completeWithTools(messages, { tools, model: agent.model, allowlist: budget.allowlist });
+    const result = await completeWithTools(messages, { tools, model: agent.model, allowlist: budget.allowlist, maxTokens: clampMaxTokens(budget, 1500) });
     turns++;
     model = model ?? `${result.provider}/${result.model}`;
     costMicros += await recordUsage(userId, {

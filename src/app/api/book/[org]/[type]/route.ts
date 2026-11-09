@@ -1,3 +1,4 @@
+import { clientIp as trustedClientIp } from "@/lib/request-limits";
 import { NextRequest, NextResponse } from "next/server";
 import { rateLimitAsync, readCappedText } from "@/lib/request-limits";
 import {
@@ -19,7 +20,7 @@ const NO_STORE = { "Cache-Control": "no-store, max-age=0" } as const;
 type Ctx = { params: Promise<{ org: string; type: string }> };
 
 function clientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "anon";
+  return trustedClientIp(req);
 }
 
 async function limited(req: NextRequest): Promise<NextResponse | null> {

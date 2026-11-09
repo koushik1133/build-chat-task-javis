@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { rateLimitAsync } from "@/lib/request-limits";
 import { resolveShareToken } from "@/lib/share-tokens";
 import { getPortalData } from "@/lib/portal";
-import { cancelBooking, getBooking } from "@/lib/calendar/booking";
+import { bookingChangeWindowHours, cancelBooking, getBooking } from "@/lib/calendar/booking";
+import { withinChangeWindow } from "@/lib/portal-rules";
+import { clientIp } from "@/lib/portal-auth";
 
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ token: string }> };
 
-function ip(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
-}
+const ip = (req: NextRequest): string => clientIp(req);
 
 /** GET /api/p/portal/[token] — the client's portal data. */
 export async function GET(req: NextRequest, ctx: Ctx) {
@@ -19,7 +19,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const { token } = await ctx.params;
     const t = await resolveShareToken("portal", token);
     if (!t) return NextResponse.json({ error: "not_found" }, { status: 404 });
-    const data = await getPortalData(t.user_id, t.entity_id, { issueLinks: true });
+    // Each load mints order/sign links; cap minting per portal contact so a looping client cannot bloat share_tokens.
+    const mint = (await rateLimitAsync(`portal-mint:${t.user_id}:${t.entity_id}`, 12, 3_600_000)).allowed;
+    const data = await getPortalData(t.user_id, t.entity_id, { issueLinks: mint });
     if (!data) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json(data);
   } catch (err) {
@@ -39,6 +41,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (body.action !== "cancel_booking" || !body.bookingId) return NextResponse.json({ error: "unsupported action" }, { status: 400 });
     const booking = await getBooking(t.user_id, body.bookingId);
     if (!booking || booking.contact_id !== t.entity_id) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    if (booking.status !== "cancelled") {
+      const hours = await bookingChangeWindowHours(t.user_id);
+      if (!withinChangeWindow(booking.starts_at, hours)) {
+        return NextResponse.json({ error: "outside_change_window", message: `Appointments can only be cancelled at least ${hours} hours in advance. Please contact us directly.` }, { status: 403 });
+      }
+    }
     const updated = await cancelBooking(t.user_id, booking.id, "Cancelled via client portal");
     return NextResponse.json({ ok: true, booking: { id: booking.id, status: updated?.status ?? "cancelled" } });
   } catch (err) {

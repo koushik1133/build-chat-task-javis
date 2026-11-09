@@ -59,7 +59,7 @@ registerTool<ApplyT>({
     try {
       const found = await getSnapshotDoc(ctx.userId, input.snapshot_id);
       if (!found) return fail("Snapshot not found");
-      const r = await applySnapshot(ctx.userId, found.doc, { sections: input.sections, mode: input.mode, actorId: null, snapshotId: found.meta.id, snapshotSha: found.meta.sha256 });
+      const r = await applySnapshot(ctx.userId, found.doc, { sections: input.sections, mode: input.mode, actorId: null, snapshotId: found.meta.id, snapshotSha: found.meta.sha256, can: ctx.can });
       return { ok: r.status !== "failed", data: { created: r.created, updated: r.updated, skipped: r.skipped, errors: r.errors, status: r.status }, summary: `Applied "${found.meta.name}": ${r.created} created, ${r.updated} updated, ${r.skipped} skipped, ${r.errors.length} errors` };
     } catch (err) {
       return fail(`Apply failed: ${errMsg(err)}`);

@@ -12,16 +12,17 @@ function secret(): string {
   return "calsync-oauth-dev-secret";
 }
 
-function sign(payload: string): string {
-  return createHmac("sha256", secret()).update(payload).digest("base64url");
+function sign(payload: string, binding = ""): string {
+  return createHmac("sha256", secret()).update(`${payload}|${binding}`).digest("base64url");
 }
 
-export function createOauthState(provider: CalendarProviderId, now = Date.now()): string {
+/** `binding` (the initiating org/user id) is signed but not embedded, so a state minted for one session cannot complete in another. */
+export function createOauthState(provider: CalendarProviderId, now = Date.now(), binding = ""): string {
   const payload = `${provider}.${now}.${randomBytes(12).toString("base64url")}`;
-  return `${payload}.${sign(payload)}`;
+  return `${payload}.${sign(payload, binding)}`;
 }
 
-export function verifyOauthState(state: string | null, cookieValue: string | null | undefined, provider: CalendarProviderId, now = Date.now()): boolean {
+export function verifyOauthState(state: string | null, cookieValue: string | null | undefined, provider: CalendarProviderId, now = Date.now(), binding = ""): boolean {
   if (!state || !cookieValue) return false;
   const a = Buffer.from(state);
   const b = Buffer.from(cookieValue);
@@ -32,7 +33,7 @@ export function verifyOauthState(state: string | null, cookieValue: string | nul
   if (p !== provider) return false;
   const issued = Number(ts);
   if (!Number.isFinite(issued) || now - issued > TTL_MS || issued > now + 60_000) return false;
-  const expected = Buffer.from(sign(`${p}.${ts}.${nonce}`));
+  const expected = Buffer.from(sign(`${p}.${ts}.${nonce}`, binding));
   const given = Buffer.from(sig);
   return expected.length === given.length && timingSafeEqual(expected, given);
 }

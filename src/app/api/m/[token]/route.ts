@@ -1,3 +1,4 @@
+import { clientIp as trustedClientIp } from "@/lib/request-limits";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { rateLimitAsync } from "@/lib/request-limits";
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ token: string }> };
 
 function ip(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
+  return trustedClientIp(req);
 }
 
 const NO_STORE = { "Cache-Control": "no-store" };

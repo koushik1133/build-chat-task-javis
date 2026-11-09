@@ -20,11 +20,11 @@ async function readError(res: Response, fallback: string): Promise<string> {
   return d?.error ? String(d.error) : `${fallback} (${res.status})`;
 }
 
-const URL_HINT: Record<ChatProviderId, string> = {
-  slack: "https://hooks.slack.com/services/…",
-  teams: "https://…webhook.office.com/… or …logic.azure.com/…",
-  discord: "https://discord.com/api/webhooks/…",
-  webhook: "Any public https URL",
+const URL_HINT: Record<ChatProviderId, { shape: string; help: string }> = {
+  slack: { shape: "https://hooks.slack.com/services/T000/B000/XXXX", help: "In Slack, create an incoming webhook for the channel and paste its URL." },
+  teams: { shape: "https://example.webhook.office.com/webhookb2/…", help: "In Teams, add a Workflows or incoming webhook to the channel and copy its URL." },
+  discord: { shape: "https://discord.com/api/webhooks/0000/XXXX", help: "In Discord, open channel settings, then Integrations, then Webhooks, and copy the URL." },
+  webhook: { shape: "https://example.com/hooks/kernelhub", help: "Any public https endpoint that accepts a JSON POST." },
 };
 
 export default function ChatAppsPage() {
@@ -40,6 +40,7 @@ export default function ChatAppsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [remove, setRemove] = useState<ChatIntegrationView | null>(null);
+  const [replacing, setReplacing] = useState<ChatIntegrationView | null>(null);
 
   const load = useCallback(async () => {
     const signal = nextSignal();
@@ -128,7 +129,10 @@ export default function ChatAppsPage() {
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h3 className="truncate text-sm font-semibold">{i.name} <span className="font-normal text-muted-foreground">{providers.find((p) => p.id === i.provider)?.label ?? i.provider}{i.channel_label ? ` · ${i.channel_label}` : ""}</span></h3>
-                  <p className="mt-0.5 break-all text-xs text-muted-foreground">{i.webhook_url_masked}</p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 break-all text-xs text-muted-foreground">
+                    <span><span className="sr-only">Webhook URL, masked: </span>{i.webhook_url_masked}</span>
+                    {canEdit && <Button size="sm" variant="ghost" touch className="h-7 px-2 text-xs" disabled={busy !== null} onClick={() => setReplacing(i)}>Replace URL</Button>}
+                  </p>
                 </div>
                 <Pill tone={i.last_status === "ok" ? "success" : i.last_status === "error" ? "danger" : "neutral"}>{i.last_status ?? "not used yet"}</Pill>
               </div>
@@ -149,6 +153,14 @@ export default function ChatAppsPage() {
       )}
 
       {adding && <AddDialog providers={providers} eventTypes={eventTypes} onClose={() => setAdding(false)} onSaved={async () => { setAdding(false); setNotice({ tone: "success", text: "Integration added." }); await load(); }} />}
+
+      {replacing && (
+        <ReplaceDialog
+          item={replacing}
+          onClose={() => setReplacing(null)}
+          onSaved={async () => { setReplacing(null); setNotice({ tone: "success", text: "Webhook URL replaced." }); await load(); }}
+        />
+      )}
 
       {remove && (
         <Dialog title={`Delete ${remove.name}?`} description="Notifications to this channel stop. The channel itself is not touched." onClose={() => busy === null && setRemove(null)} size="sm">
@@ -201,7 +213,7 @@ function AddDialog({ providers, eventTypes, onClose, onSaved }: { providers: Arr
           </Select>
         </Field>
         <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Sales channel" /></Field>
-        <Field label="Webhook URL" required hint={`Stored encrypted and shown masked afterwards. ${URL_HINT[provider]}`}>
+        <Field label="Webhook URL" required hint={`Stored encrypted and shown masked afterwards. ${URL_HINT[provider].help} Looks like ${URL_HINT[provider].shape}`}>
           <Input value={url} onChange={(e) => setUrl(e.target.value)} type="url" autoComplete="off" spellCheck={false} />
         </Field>
         <Field label="Channel label (optional)"><Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} placeholder="#sales" /></Field>
@@ -220,6 +232,40 @@ function AddDialog({ providers, eventTypes, onClose, onSaved }: { providers: Arr
         <Button variant="ghost" touch onClick={onClose} disabled={saving}>Cancel</Button>
         <Button touch onClick={() => void save()} disabled={saving || !name.trim() || !url.trim()}>{saving && spinner}Save</Button>
       </DialogFooter>
+    </Dialog>
+  );
+}
+
+function ReplaceDialog({ item, onClose, onSaved }: { item: ChatIntegrationView; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [url, setUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/chat-integrations/${encodeURIComponent(item.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ webhook_url: url }) });
+      if (!res.ok) throw new Error(await readError(res, "Could not save"));
+      await onSaved();
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Could not save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <Dialog title={`Replace webhook URL for ${item.name}`} description="The current URL stays hidden. Paste the new one to overwrite it." onClose={() => !saving && onClose()} size="md">
+      <form onSubmit={save} className="space-y-3">
+        {err && <Banner tone="error">{err}</Banner>}
+        <Field label="New webhook URL" required hint={`${URL_HINT[item.provider].help} Looks like ${URL_HINT[item.provider].shape}`}>
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} type="url" autoComplete="off" spellCheck={false} />
+        </Field>
+        <DialogFooter>
+          <Button type="button" variant="ghost" touch onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button type="submit" touch disabled={saving || url.trim().length < 10}>{saving && spinner}Replace URL</Button>
+        </DialogFooter>
+      </form>
     </Dialog>
   );
 }

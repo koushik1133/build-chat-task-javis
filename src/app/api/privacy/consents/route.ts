@@ -1,3 +1,4 @@
+import { clientIp as trustedClientIp } from "@/lib/request-limits";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { query } from "@/lib/dsql";
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest) {
     const row = await recordConsent(s.scope.dataId, { kind: d.subject_kind as "contact" | "lead" | "member", id: d.subject_id }, d.purpose, d.status, "manual", {
       actor: s.scope.userId,
       text: d.note ?? null,
-      ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      ip: (trustedClientIp(req) === "unknown" ? null : trustedClientIp(req)),
       ua: req.headers.get("user-agent"),
     });
     return NextResponse.json({ consent: row }, { status: 201 });

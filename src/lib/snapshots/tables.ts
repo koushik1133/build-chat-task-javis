@@ -184,7 +184,7 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
  * even inside an otherwise exportable table.
  */
 export const COLUMN_DENYLIST_RE =
-  /(^auth$|(^|_)token$|token_hash$|(^|_)secret|_enc$|key_hash$|password|otp_hash$|_hash$|credential|^api_key$|^access_token$|^refresh_token$|webhook_url)/i;
+  /(^auth$|(^|_)auth_|_auth$|(^|_)token($|_)|token_hash$|(^|_)secret|_enc$|(^|_)enc$|encrypted|key_hash$|passw|passphrase|(^|_)pwd|(^|_)otp($|_code|_value)|_hash$|(^|_)hash$|credential|api_?key|access_?(key|token|code)|refresh|private_?key|(^|_)(cookie|signature|bearer|hmac|salt)($|_)|webhook_url)/i;
 
 export function isDeniedColumn(name: string): boolean {
   return COLUMN_DENYLIST_RE.test(name);

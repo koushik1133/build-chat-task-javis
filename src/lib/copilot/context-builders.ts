@@ -183,7 +183,7 @@ async function tasksContext(userId: string): Promise<string> {
   const done = await count(`SELECT COUNT(*)::int AS n FROM tasks WHERE user_id = $1 AND done = TRUE`, [userId]);
   const lines = [`## Tasks snapshot`, `- ${open} open, ${done} done`];
   const recent = await rows(`SELECT id, title, created_at FROM tasks WHERE user_id = $1 AND done = FALSE ORDER BY created_at DESC LIMIT 10`, [userId]);
-  for (const r of recent) lines.push(`  - ${s(r.title, 80)} [id ${r.id}]`);
+  for (const r of recent) lines.push(`  - ${u("task_title", r.title, 100)} [id ${r.id}]`);
   return lines.join("\n");
 }
 
@@ -312,7 +312,7 @@ async function calendarContext(userId: string): Promise<string> {
   const upcoming = await rows(`SELECT id, name, starts_at, ends_at, status FROM bookings WHERE user_id = $1 AND status <> 'cancelled' AND starts_at >= NOW() ORDER BY starts_at ASC LIMIT 8`, [userId]);
   const types = await rows(`SELECT id, slug, name, duration_minutes FROM booking_types WHERE user_id = $1 AND active = TRUE LIMIT 10`, [userId]);
   const lines = [`## Calendar snapshot`, `- Booking types: ${types.map((t) => `${t.name} (${t.slug}, ${t.duration_minutes}m)`).join(", ") || "none"}`, `- Upcoming: ${upcoming.length}`];
-  for (const b of upcoming) lines.push(`  - ${String(b.starts_at).slice(0, 16)} ${s(b.name, 40)} (${b.status}) [id ${b.id}]`);
+  for (const b of upcoming) lines.push(`  - ${String(b.starts_at).slice(0, 16)} ${u("booking_name", b.name, 60)} (${b.status}) [id ${b.id}]`);
   return lines.join("\n");
 }
 

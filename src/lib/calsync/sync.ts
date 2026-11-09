@@ -45,18 +45,22 @@ export async function pushBooking(connId: string, bookingId: string): Promise<Pu
       await query(`DELETE FROM calendar_event_links WHERE id = $1`, [link.id]);
       return "deleted";
     }
-    const r = await provider.upsertEvent(
-      auth,
-      calendarId,
-      {
-        bookingId,
-        summary: bookingSummary(booking.name),
-        description: "Booked via KernelHub",
-        startsAt: new Date(booking.starts_at).toISOString(),
-        endsAt: new Date(booking.ends_at).toISOString(),
-      },
-      link?.external_event_id ?? null
-    );
+    const pushEvent = {
+      bookingId,
+      summary: bookingSummary(booking.name),
+      description: "Booked via KernelHub",
+      startsAt: new Date(booking.starts_at).toISOString(),
+      endsAt: new Date(booking.ends_at).toISOString(),
+    };
+    let r: { externalId: string; etag: string | null };
+    try {
+      r = await provider.upsertEvent(auth, calendarId, pushEvent, link?.external_event_id ?? null);
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      // The external event was deleted by the user: recreate it instead of failing forever.
+      if (link && (status === 404 || status === 410)) r = await provider.upsertEvent(auth, calendarId, pushEvent, null);
+      else throw err;
+    }
     if (link) {
       await query(`UPDATE calendar_event_links SET external_event_id = $1, etag = $2, last_pushed_at = NOW() WHERE id = $3`, [r.externalId, r.etag, link.id]);
       return "updated";
@@ -120,6 +124,16 @@ async function pushMissing(conn: ConnectionRow, limit = 50): Promise<number> {
   for (const r of rows) {
     if ((await pushBooking(conn.id, r.id)) === "created") n++;
   }
+  // Reconcile existing links: cancelled bookings whose external event is still there, and edits made since the last push
+  // (a failed cancel/reschedule push is otherwise never retried because the event cursor moved on).
+  const stale = await query<{ id: string }>(
+    `SELECT b.id FROM bookings b JOIN calendar_event_links l ON l.booking_id = b.id AND l.connection_id = $2
+      WHERE b.user_id = $1 AND b.starts_at > NOW() - INTERVAL '1 day'
+        AND (b.status = 'cancelled' OR b.updated_at > l.last_pushed_at)
+      ORDER BY b.starts_at ASC LIMIT $3`,
+    [conn.user_id, conn.id, limit]
+  );
+  for (const r of stale) await pushBooking(conn.id, r.id);
   return n;
 }
 
@@ -156,7 +170,8 @@ export async function syncDue(limit = 20, staleMinutes = 10): Promise<{ scanned:
 const PUSH_EVENTS = new Set(["booking.created", "booking.rescheduled", "booking.cancelled"]);
 
 /** Cursor-based event processor (same watermark pattern as webhooks fan-out). */
-export async function processCalendarEvents(limit = 200): Promise<{ scanned: number; pushed: number; failed: number }> {
+export async function processCalendarEvents(limit = 200, budgetMs = 25_000): Promise<{ scanned: number; pushed: number; failed: number }> {
+  const deadline = Date.now() + budgetMs;
   const cur = await queryOne<{ name: string }>(`SELECT name FROM calsync_cursors WHERE name = 'events'`);
   if (!cur) {
     await ensureCalsyncCursor();
@@ -176,7 +191,10 @@ export async function processCalendarEvents(limit = 200): Promise<{ scanned: num
   const connsByUser = new Map<string, string[]>();
   let pushed = 0;
   let failed = 0;
+  let done = 0;
   for (const evt of events) {
+    if (done > 0 && Date.now() > deadline) break; // resume from the next event on the following tick
+    done++;
     if (!PUSH_EVENTS.has(evt.type)) continue;
     let ids = connsByUser.get(evt.user_id);
     if (!ids) {
@@ -196,7 +214,7 @@ export async function processCalendarEvents(limit = 200): Promise<{ scanned: num
       }
     }
   }
-  const last = events[events.length - 1];
+  const last = events[done - 1];
   await query(`UPDATE calsync_cursors SET last_event_at = (SELECT created_at FROM events WHERE id = $2), last_event_id = $2, updated_at = NOW() WHERE name = $1`, ["events", last.id]);
-  return { scanned: events.length, pushed, failed };
+  return { scanned: done, pushed, failed };
 }

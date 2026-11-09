@@ -1,3 +1,4 @@
+import { clientIp as sharedClientIp } from "@/lib/request-limits";
 import type { NextRequest } from "next/server";
 import { queryOne } from "@/lib/dsql";
 import { resolveShareToken } from "@/lib/share-tokens";
@@ -7,8 +8,9 @@ export interface PortalAuth {
   contactId: string;
 }
 
+/** Trusted-hop aware caller IP (the leftmost X-Forwarded-For entry is client-controlled). */
 export function clientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
+  return sharedClientIp(req);
 }
 
 /** Resolve a portal token to its org + contact; null when invalid/expired/revoked or the contact is gone. */

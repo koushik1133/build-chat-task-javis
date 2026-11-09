@@ -45,18 +45,31 @@ export function toPublicMessage(m: PortalMessageRow): PortalMessageDTO {
   return { id: m.id, direction: m.direction, body: m.body, read: Boolean(m.read_at), created_at: new Date(m.created_at).toISOString() };
 }
 
-/** Thread for one contact, oldest first. `since` is an ISO cursor (exclusive) on created_at. */
-export async function listThread(dataId: string, contactId: string, opts: { since?: string | null; limit?: number } = {}): Promise<PortalMessageRow[]> {
+/** The public DTO exposes created_at at millisecond precision, so the cursor must compare at ms precision too. */
+const TS_MS = "date_trunc('milliseconds', created_at)";
+
+/**
+ * Thread for one contact, oldest first. `since` is the ISO `created_at` of the last row the caller saw (exclusive);
+ * `sinceId` breaks ties for rows in the same millisecond. Comparing at ms precision (not the stored microseconds)
+ * stops the last-seen row from being returned again on every poll.
+ */
+export async function listThread(dataId: string, contactId: string, opts: { since?: string | null; sinceId?: string | null; limit?: number } = {}): Promise<PortalMessageRow[]> {
   if (!(await tableExists("portal_messages"))) return [];
   const params: unknown[] = [dataId, contactId];
   let sql = `SELECT ${COLS} FROM portal_messages WHERE user_id = $1 AND contact_id = $2`;
   if (opts.since && !Number.isNaN(Date.parse(opts.since))) {
-    params.push(opts.since);
-    sql += ` AND created_at > $${params.length}`;
+    params.push(new Date(opts.since).toISOString());
+    const at = `$${params.length}::timestamptz`;
+    if (opts.sinceId) {
+      params.push(opts.sinceId);
+      sql += ` AND (${TS_MS} > ${at} OR (${TS_MS} = ${at} AND id > $${params.length}))`;
+    } else {
+      sql += ` AND ${TS_MS} > ${at}`;
+    }
   }
   params.push(Math.min(Math.max(opts.limit ?? 100, 1), 200));
   // Newest N, returned oldest-first.
-  const rows = await query<PortalMessageRow>(`${sql} ORDER BY created_at DESC, id DESC LIMIT $${params.length}`, params);
+  const rows = await query<PortalMessageRow>(`${sql} ORDER BY ${TS_MS} DESC, id DESC LIMIT $${params.length}`, params);
   return rows.reverse();
 }
 
@@ -160,7 +173,8 @@ export async function listThreads(dataId: string, limit = 50): Promise<PortalThr
       ORDER BY m.created_at DESC LIMIT $2`,
     [dataId, Math.min(Math.max(limit, 1), 200)]
   );
-  const out = rows.map((r) => ({ contact_id: r.contact_id, contact_name: r.contact_name ?? "Unknown contact", last_body: r.last_body.slice(0, 200), last_direction: r.last_direction, last_at: new Date(r.last_at).toISOString(), unread: Number(r.unread) }));
+  const seen = new Set<string>(); // two messages can share the max created_at: keep one row per contact
+  const out = rows.filter((r) => !seen.has(r.contact_id) && seen.add(r.contact_id)).map((r) => ({ contact_id: r.contact_id, contact_name: r.contact_name ?? "Unknown contact", last_body: r.last_body.slice(0, 200), last_direction: r.last_direction, last_at: new Date(r.last_at).toISOString(), unread: Number(r.unread) }));
   return out.sort((a, b) => (a.unread > 0 ? 0 : 1) - (b.unread > 0 ? 0 : 1) || b.last_at.localeCompare(a.last_at));
 }
 

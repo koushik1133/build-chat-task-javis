@@ -1,5 +1,6 @@
 import { principalFromCan, type RunPrincipal } from "@/lib/agents/principal";
 import { z } from "zod";
+import { wrapUntrusted } from "@/lib/ai/untrusted";
 import { query, queryOne } from "@/lib/dsql";
 import { registerTool } from "@/lib/agents/registry";
 import type { ToolResult } from "@/lib/agents/types";
@@ -92,7 +93,8 @@ registerTool<RunInputT>({
       if (!startRun) return fail("Agent runtime is not available on this deployment");
 
       const runId = await startRun(ctx.userId, agent.id, {
-        prompt: input.prompt,
+        // A tainted parent must not launder customer text into an untainted child run.
+        prompt: ctx.tainted ? `Delegated task (derived from untrusted content):\n${wrapUntrusted("delegated_task", input.prompt, { maxChars: 4000 })}` : input.prompt,
         triggerKind: "manual",
         triggerRef: ctx.runId || null,
         principal: ctx.can ? principalFromCan(ctx.can) : null,

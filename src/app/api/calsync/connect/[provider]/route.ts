@@ -34,7 +34,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
   if (!provider.configured()) return back(req, { error: provider.unavailableReason() ?? `${provider.label} is not configured.` });
   if (!isEncryptionConfigured()) return back(req, { error: "Set CREDENTIAL_ENCRYPTION_KEY before connecting a calendar. Tokens are stored encrypted." });
 
-  const state = createOauthState(provider.id);
+  const state = createOauthState(provider.id, Date.now(), scope.dataId);
   const res = NextResponse.redirect(provider.oauthStartUrl(state, calsyncRedirectUri(provider.id, req.url)));
   res.cookies.set(CALSYNC_STATE_COOKIE, state, { httpOnly: true, sameSite: "lax", secure: req.nextUrl.protocol === "https:", path: "/api/calsync/callback", maxAge: 600 });
   return res;

@@ -68,7 +68,9 @@ export async function sendChat(integrationId: string, message: ChatMessage, opts
     await record(row, "error", err);
     return { ok: false, status: res.status, error: err };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "request failed";
+    // Never persist or surface the webhook URL (its path is the secret) from a transport error.
+    const raw = err instanceof Error ? err.message : "request failed";
+    const msg = raw.split(url).join("[webhook-url]").replace(/https?:\/\/[^\s"']+/gi, "[url]").slice(0, 200);
     await record(row, "error", msg);
     return { ok: false, status: null, error: msg };
   }

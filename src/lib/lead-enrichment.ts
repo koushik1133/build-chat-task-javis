@@ -1,5 +1,6 @@
 import { query, queryOne } from "@/lib/dsql";
 import { complete } from "@/lib/llm";
+import { UNTRUSTED_PREAMBLE, wrapUntrusted } from "@/lib/ai/untrusted";
 
 export interface EnrichmentResult {
   research: string;
@@ -37,10 +38,12 @@ export async function enrichLead(
     leadData = lead.data;
   }
 
-  const serialised = JSON.stringify(leadData).slice(0, 4000);
+  // Lead-form fields are public input: wrap them so injected instructions stay data.
+  const serialised = wrapUntrusted("lead_form", JSON.stringify(leadData), { maxChars: 4000 });
 
   const research = await complete(
     [
+      { role: "system", content: UNTRUSTED_PREAMBLE },
       {
         role: "user",
         content: `Given this lead info: ${serialised}, research and summarize: company overview, likely pain points, and why they'd be interested in an AI business platform. Be concise (100 words).`,
@@ -51,9 +54,10 @@ export async function enrichLead(
 
   const outreachRaw = await complete(
     [
+      { role: "system", content: UNTRUSTED_PREAMBLE },
       {
         role: "user",
-        content: `Given this lead: ${serialised} and research: ${research}, write a personalized cold email.
+        content: `Given this lead: ${serialised} and research: ${wrapUntrusted("lead_research", research, { maxChars: 2000 })}, write a personalized cold email.
 Format your response exactly like this:
 Subject: [Your Subject Here]
 Body:

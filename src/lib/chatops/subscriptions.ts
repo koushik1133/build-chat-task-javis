@@ -30,7 +30,9 @@ export function sealUrl(url: string): string {
 }
 
 export function openUrl(stored: string): string | null {
-  return stored.startsWith("plain:") ? stored.slice(6) : decryptSecret(stored);
+  // The dev-only plaintext form is never honoured in production (fail closed).
+  if (stored.startsWith("plain:")) return process.env.NODE_ENV === "production" ? null : stored.slice(6);
+  return decryptSecret(stored);
 }
 
 export function parseEvents(raw: string | null | undefined): string[] {

@@ -46,12 +46,20 @@ function safeLabel(label: string): string {
   return label.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 40) || "content";
 }
 
+/** Slice to `max` UTF-16 units without leaving half of a surrogate pair at the cut. */
+function cutClean(s: string, max: number): string {
+  let end = max;
+  const c = s.charCodeAt(end - 1);
+  if (c >= 0xd800 && c <= 0xdbff) end--;
+  return s.slice(0, end);
+}
+
 /** Wrap external text for inclusion in a prompt. */
 export function wrapUntrusted(label: string, text: string, opts: WrapOptions = {}): string {
   const nonce = opts.nonce ?? randomBytes(8).toString("hex");
   const max = opts.maxChars ?? 4000;
   let body = sanitizeUntrusted(text, nonce);
-  if (body.length > max) body = `${body.slice(0, max)} …[truncated]`;
+  if (body.length > max) body = `${cutClean(body, max)} …[truncated]`;
   return `${OPEN}:${safeLabel(label)}:${nonce}\n${body}\n${nonce}${CLOSE_SUFFIX}`;
 }
 
@@ -70,6 +78,6 @@ export function wrapUntrustedJson(label: string, value: unknown, maxChars = 2000
     json = String(value);
   }
   let body = sanitizeUntrusted(json, nonce);
-  if (body.length > maxChars * 4) body = `${body.slice(0, maxChars * 4)} …[truncated]`;
+  if (body.length > maxChars * 4) body = `${cutClean(body, maxChars * 4)} …[truncated]`;
   return `${OPEN}:${safeLabel(label)}:${nonce}\n${body}\n${nonce}${CLOSE_SUFFIX}`;
 }

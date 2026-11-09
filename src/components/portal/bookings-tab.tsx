@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Loader2 } from "lucide-react";
+import { CalendarDays, Check, Globe, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Banner, SkeletonList } from "@/components/ui/feedback";
@@ -23,7 +23,7 @@ export function BookingsTab({ data, token, onChanged }: { data: PortalData; toke
 
   return (
     <div className="space-y-4">
-      {notice && <div aria-live="polite"><Banner tone={notice.tone} onDismiss={() => setNotice(null)}>{notice.text}</Banner></div>}
+      {notice && <div role="status"><Banner tone={notice.tone} onDismiss={() => setNotice(null)}>{notice.text}</Banner></div>}
       <Section
         icon={CalendarDays}
         title="Upcoming appointments"
@@ -31,7 +31,10 @@ export function BookingsTab({ data, token, onChanged }: { data: PortalData; toke
         aside={data.bookPath ? <Button asChild size="sm" variant="outline" touch><a href={data.bookPath}>Book a time</a></Button> : undefined}
       >
         {data.upcomingBookings.length === 0 ? (
-          <EmptyNote text="No upcoming appointments." />
+          <div className="flex flex-wrap items-center gap-3">
+            <EmptyNote text="You have no upcoming appointments." />
+            {data.bookPath && <Button asChild size="sm" touch><a href={data.bookPath}>Book a time</a></Button>}
+          </div>
         ) : (
           <ul className="divide-y divide-border/60">
             {data.upcomingBookings.map((b) => (
@@ -118,16 +121,25 @@ function RescheduleDialog({ booking, token, onClose, onDone }: { booking: Portal
     void load();
   }, [load]);
 
-  const byDay = useMemo(() => {
-    const out = new Map<string, string[]>();
-    if (!slots) return out;
-    const fmt = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: slots.timezone });
+  const days = useMemo(() => {
+    const out = new Map<string, { label: string; short: string; morning: string[]; afternoon: string[] }>();
+    if (!slots) return [] as Array<{ key: string; label: string; short: string; morning: string[]; afternoon: string[] }>;
+    const tz = slots.timezone;
+    const keyFmt = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: tz });
+    const hourFmt = new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone: tz });
+    const long = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", timeZone: tz });
+    const short = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", timeZone: tz });
     for (const s of slots.slots) {
-      const k = fmt.format(new Date(s));
-      out.set(k, [...(out.get(k) ?? []), s]);
+      const d = new Date(s);
+      const k = keyFmt.format(d);
+      const cur = out.get(k) ?? { label: long.format(d), short: short.format(d), morning: [], afternoon: [] };
+      (Number(hourFmt.format(d)) < 12 ? cur.morning : cur.afternoon).push(s);
+      out.set(k, cur);
     }
-    return out;
+    return [...out.entries()].map(([key, v]) => ({ key, ...v }));
   }, [slots]);
+  const [dayKey, setDayKey] = useState<string | null>(null);
+  const activeDay = days.find((d) => d.key === dayKey) ?? days[0] ?? null;
 
   async function confirm() {
     if (!picked) return;
@@ -157,28 +169,59 @@ function RescheduleDialog({ booking, token, onClose, onDone }: { booking: Portal
       {error && <Banner tone="error">{error}</Banner>}
       {!slots ? (
         <SkeletonList count={3} itemClassName="h-10" label="Loading available times…" />
-      ) : byDay.size === 0 ? (
-        <EmptyNote text="No open times in the next two weeks. Please contact us." />
+      ) : days.length === 0 ? (
+        <EmptyNote text="No open times in the next two weeks. Please contact us to arrange a time." />
       ) : (
-        <div className="max-h-72 space-y-3 overflow-y-auto" role="group" aria-label="Available times">
-          {[...byDay.entries()].map(([day, list]) => (
-            <div key={day}>
-              <div className="mb-1 text-xs font-medium text-muted-foreground">{day}</div>
-              <div className="flex flex-wrap gap-1.5">
-                {list.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    aria-pressed={picked === s}
-                    onClick={() => setPicked(s)}
-                    className={`min-h-11 rounded-md border px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8 ${picked === s ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-secondary/60"}`}
-                  >
-                    {timeFmt?.format(new Date(s))}
-                  </button>
-                ))}
-              </div>
+        <div className="space-y-4">
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Globe className="h-3.5 w-3.5" aria-hidden /> Times shown in {slots.timezone}</p>
+          <div role="group" aria-label="Choose a day" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2">
+            {days.map((d) => {
+              const on = activeDay?.key === d.key;
+              const has = picked !== null && [...d.morning, ...d.afternoon].includes(picked);
+              return (
+                <button
+                  key={d.key}
+                  type="button"
+                  aria-pressed={on}
+                  aria-label={d.label}
+                  onClick={() => setDayKey(d.key)}
+                  className={`relative min-h-11 shrink-0 touch-manipulation rounded-lg border px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${on ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-secondary/60"}`}
+                >
+                  {d.short}
+                  {has && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white" aria-hidden><Check className="h-3 w-3" /></span>}
+                </button>
+              );
+            })}
+          </div>
+          {activeDay && (
+            <div className="max-h-64 space-y-3 overflow-y-auto" role="group" aria-label={`Available times on ${activeDay.label}`}>
+              {([["Morning", activeDay.morning], ["Afternoon and evening", activeDay.afternoon]] as const).map(([title, list]) =>
+                list.length === 0 ? null : (
+                  <div key={title}>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">{title}</div>
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                      {list.map((s) => {
+                        const on = picked === s;
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => setPicked(s)}
+                            className={`inline-flex min-h-11 touch-manipulation items-center justify-center gap-1 rounded-md border px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9 ${on ? "border-primary bg-primary font-semibold text-primary-foreground ring-2 ring-primary/40" : "border-border hover:bg-secondary/60"}`}
+                          >
+                            {on && <Check className="h-3.5 w-3.5" aria-hidden />}
+                            {timeFmt?.format(new Date(s))}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              )}
             </div>
-          ))}
+          )}
+          <p className="sr-only" role="status">{picked && timeFmt ? `Selected ${timeFmt.format(new Date(picked))}` : ""}</p>
         </div>
       )}
       <DialogFooter>

@@ -67,7 +67,7 @@ export function formatForProvider(provider: ChatProviderId, msg: ChatMessage): R
 const PATHS: Record<string, string> = {
   booking: "/calendar", invoice: "/invoices", quote: "/quotes", ticket: "/helpdesk", order: "/orders", crm: "/crm", lead: "/leads",
   task: "/tasks", project: "/projects", record: "/r", product: "/inventory", document: "/documents", message: "/messaging", automation: "/automations",
-  calsync: "/settings/calendar-sync", chat: "/settings/chat-apps",
+  campaign: "/marketing", sequence: "/marketing", snapshot: "/settings/snapshots", calsync: "/settings/calendar-sync", chat: "/settings/chat-apps",
 };
 
 export interface EventLike {

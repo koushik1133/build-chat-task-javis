@@ -28,7 +28,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: s
   const providerError = q.get("error_description") ?? q.get("error");
   if (providerError) return back(req, { error: `${provider.label}: ${providerError.slice(0, 200)}` });
   const code = q.get("code");
-  if (!code || !verifyOauthState(q.get("state"), req.cookies.get(CALSYNC_STATE_COOKIE)?.value, provider.id)) {
+  if (!code || !verifyOauthState(q.get("state"), req.cookies.get(CALSYNC_STATE_COOKIE)?.value, provider.id, Date.now(), scope.dataId)) {
     return back(req, { error: "The sign-in link was invalid or expired. Please try connecting again." });
   }
   try {

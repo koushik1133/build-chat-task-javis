@@ -3,7 +3,7 @@ import { bookingSummary, buildIcs, escapeIcsText, foldLine, icsDate, icsUid } fr
 
 describe("ics builder", () => {
   it("escapes text values", () => {
-    expect(escapeIcsText("a,b;c\\d\ne")).toBe("a\\,b\;c\\\\d\\ne");
+    expect(escapeIcsText("a,b;c\\d\ne")).toBe("a\\,b\\;c\\\\d\\ne");
   });
   it("formats UTC dates", () => {
     expect(icsDate("2026-11-10T15:00:00.000Z")).toBe("20261110T150000Z");

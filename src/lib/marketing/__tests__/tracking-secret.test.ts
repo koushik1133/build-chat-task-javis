@@ -37,3 +37,20 @@ describe("tracking secret rotation", () => {
     expect(verifyToken(openToken("r5"))).not.toBeNull();
   });
 });
+
+describe("sec9 legacy key switch", () => {
+  it("MARKETING_TRACKING_ACCEPT_LEGACY=false stops CRON_SECRET-derived tokens verifying", () => {
+    vi.stubEnv("CRON_SECRET", "cron-secret-0123456789");
+    const legacy = unsubscribeToken("r9");
+    vi.stubEnv("MARKETING_TRACKING_SECRET", "new-secret-0123456789");
+    expect(verifyToken(legacy)).not.toBeNull();
+    vi.stubEnv("MARKETING_TRACKING_ACCEPT_LEGACY", "false");
+    expect(verifyToken(legacy)).toBeNull();
+  });
+  it("production without a dedicated secret still verifies legacy links instead of throwing", () => {
+    vi.stubEnv("CRON_SECRET", "cron-secret-0123456789");
+    const legacy = unsubscribeToken("r10");
+    vi.stubEnv("NODE_ENV", "production");
+    expect(verifyToken(legacy)).toEqual({ kind: "unsub", recipientId: "r10" });
+  });
+});

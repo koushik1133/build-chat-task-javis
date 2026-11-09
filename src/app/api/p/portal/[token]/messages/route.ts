@@ -15,7 +15,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const auth = await authPortalToken((await ctx.params).token);
     if (!auth) return NextResponse.json({ error: "not_found" }, { status: 404 });
-    const rows = await listThread(auth.dataId, auth.contactId, { since: req.nextUrl.searchParams.get("since") });
+    const rows = await listThread(auth.dataId, auth.contactId, { since: req.nextUrl.searchParams.get("since"), sinceId: req.nextUrl.searchParams.get("sinceId")?.slice(0, 64) ?? null });
     if (req.nextUrl.searchParams.get("markRead") === "1") await markReadByContact(auth.dataId, auth.contactId);
     return NextResponse.json({ messages: rows.map(toPublicMessage) });
   } catch (err) {
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const auth = await authPortalToken((await ctx.params).token);
     if (!auth) return NextResponse.json({ error: "not_found" }, { status: 404 });
     // Per contact (not just per IP) so a shared link cannot flood the staff inbox.
-    const limited = !(await rateLimitAsync(`portal-msg:${auth.contactId}`, 10, 60_000)).allowed || !(await rateLimitAsync(`portal-msg-ip:${clientIp(req)}`, 20, 60_000)).allowed;
+    const limited = !(await rateLimitAsync(`portal-msg:${auth.contactId}`, 10, 60_000)).allowed || !(await rateLimitAsync(`portal-msg-hr:${auth.contactId}`, 100, 3_600_000)).allowed || !(await rateLimitAsync(`portal-msg-ip:${clientIp(req)}`, 20, 60_000)).allowed;
     if (limited) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
     const parsed = Body.safeParse(await req.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: "invalid_request", message: `Message is too long (max ${PORTAL_MESSAGE_MAX} characters).` }, { status: 400 });

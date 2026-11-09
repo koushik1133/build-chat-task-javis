@@ -268,13 +268,24 @@ export function trustedProxyHops(): number {
  * Nth entry from the right; anything further left is client-controlled and
  * ignored. N=0 (dev) uses the first entry. A shorter list falls back to its first entry.
  */
+/** Canonical form for rate-limit keys: unwraps IPv4-mapped IPv6 (::ffff:1.2.3.4), `[v6]:port` and `v4:port`, lowercases IPv6. */
+export function normalizeIp(raw: string): string {
+  let ip = raw.trim();
+  const bracket = ip.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracket) ip = bracket[1];
+  else if (/^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(ip)) ip = ip.slice(0, ip.lastIndexOf(":"));
+  const mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+  if (mapped) return mapped[1];
+  return ip.includes(":") ? ip.toLowerCase() : ip;
+}
+
 export function clientIp(req: Request, hops: number = trustedProxyHops()): string {
   const fwd = req.headers.get("x-forwarded-for");
   if (fwd) {
     const parts = fwd.split(",").map((p) => p.trim()).filter(Boolean);
     if (parts.length) {
       const idx = hops <= 0 ? 0 : Math.max(0, parts.length - hops);
-      return parts[idx] || "unknown";
+      return normalizeIp(parts[idx]) || "unknown";
     }
   }
   return req.headers.get("x-real-ip")?.trim() || "unknown";

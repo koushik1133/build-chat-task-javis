@@ -114,6 +114,12 @@ export async function getRun(runId: string, userId?: string): Promise<RunRow | n
 }
 
 /** Insert a queued run and a job to execute it. Returns the run id. */
+const TRIGGER_KINDS: readonly TriggerKind[] = ["manual", "schedule", "event", "webhook", "inbound", "playbook", "automation"];
+/** Trigger kind for a retry: the original one (so taint rules persist), falling back to manual. */
+export function retryTriggerKind(kind: string | null | undefined): TriggerKind {
+  return TRIGGER_KINDS.find((k) => k === kind) ?? "manual";
+}
+
 export async function startRun(userId: string, agentId: string, opts: StartRunOptions = {}): Promise<string> {
   const agent = await loadAgent(userId, agentId);
   if (!agent) throw new AgentNotFoundError(agentId);
@@ -199,7 +205,7 @@ export async function executeRun(runId: string, workerId = "inline"): Promise<Ru
   if (!agent) return finalize(run, { status: "failed", error: "agent not found" });
 
   await markRunning(run.id, workerId);
-  const loopRun: LoopRun = { id: run.id, user_id: run.user_id, agent_id: run.agent_id, prompt: run.prompt ?? buildAgentPrompt(agent), principal_permissions: run.principal_permissions ?? null };
+  const loopRun: LoopRun = { id: run.id, user_id: run.user_id, agent_id: run.agent_id, prompt: run.prompt ?? buildAgentPrompt(agent), principal_permissions: run.principal_permissions ?? null, trigger_kind: run.trigger_kind ?? null };
 
   try {
     const outcome = await runAgentLoop(loopRun, agent);
@@ -264,7 +270,7 @@ export async function resumeRun(runId: string, approvalId: string, workerId = "i
   if (!cp) return finalize(run, { status: "failed", error: "checkpoint not found; cannot resume" });
 
   await markRunning(run.id, workerId);
-  const loopRun: LoopRun = { id: run.id, user_id: run.user_id, agent_id: run.agent_id, prompt: run.prompt ?? "", principal_permissions: run.principal_permissions ?? null };
+  const loopRun: LoopRun = { id: run.id, user_id: run.user_id, agent_id: run.agent_id, prompt: run.prompt ?? "", principal_permissions: run.principal_permissions ?? null, trigger_kind: run.trigger_kind ?? null };
   const messages: RouterMessage[] = [...cp.messages];
 
   try {

@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { query } from "@/lib/dsql";
 import { EXPORT_TABLES, isDeniedColumn } from "./tables";
 
@@ -17,6 +17,8 @@ import { EXPORT_TABLES, isDeniedColumn } from "./tables";
  */
 
 export const BATCH_SIZE = 500;
+/** Key-less tables (composite / user_id PKs) are read in one query; more rows than this are reported in the manifest, never silently dropped. */
+export const KEYLESS_ROW_LIMIT = 10_000;
 export const DEFAULT_ROW_BUDGET = 250_000;
 export const DEFAULT_TIME_BUDGET_MS = 25_000;
 
@@ -36,9 +38,33 @@ export function projectRow(row: Record<string, unknown>): Record<string, unknown
   return out;
 }
 
-export function manifestLine(args: { counts: Record<string, number>; sha256: string; complete: boolean; resume: { table: string; after: string | null } | null }): string {
+function resumeSecret(): string {
+  const k = process.env.CREDENTIAL_ENCRYPTION_KEY?.trim() || process.env.CRON_SECRET?.trim();
+  if (k) return k;
+  if (process.env.NODE_ENV === "production") throw new Error("Tenant export resume cursors need CREDENTIAL_ENCRYPTION_KEY (or CRON_SECRET).");
+  return "tenant-export-dev-secret";
+}
+
+/** HMAC over (workspace, table, after): proves a resume cursor was issued by this server for this workspace. */
+export function signResume(dataId: string, table: string, after: string | null): string {
+  return createHmac("sha256", resumeSecret()).update(`${dataId}|${table}|${after ?? ""}`).digest("base64url");
+}
+
+export function verifyResume(dataId: string, table: string, after: string | null, sig: string | null | undefined): boolean {
+  if (!sig) return false;
+  let expected: Buffer;
+  try {
+    expected = Buffer.from(signResume(dataId, table, after));
+  } catch {
+    return false;
+  }
+  const given = Buffer.from(sig);
+  return expected.length === given.length && timingSafeEqual(expected, given);
+}
+
+export function manifestLine(args: { counts: Record<string, number>; sha256: string; complete: boolean; resume: { table: string; after: string | null; sig?: string } | null; truncated?: string[] }): string {
   const rows = Object.values(args.counts).reduce((a, b) => a + b, 0);
-  return frameLine({ type: "manifest", counts: args.counts, rows, sha256: args.sha256, complete: args.complete, resume: args.resume });
+  return frameLine({ type: "manifest", counts: args.counts, rows, sha256: args.sha256, complete: args.complete, resume: args.resume, ...(args.truncated?.length ? { truncated: args.truncated } : {}) });
 }
 
 /** Tables present in the database AND allow-listed, sorted. Columns exclude the denylist. */
@@ -79,6 +105,7 @@ export function tenantExportStream(dataId: string, opts: TenantExportOptions = {
   const deadline = Date.now() + (opts.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
   const hash = createHash("sha256");
   const counts: Record<string, number> = {};
+  const truncated: string[] = [];
   let total = 0;
   let tables: TableInfo[] | null = null;
   let ti = 0;
@@ -94,7 +121,8 @@ export function tenantExportStream(dataId: string, opts: TenantExportOptions = {
   };
   const finish = (c: ReadableStreamDefaultController<Uint8Array>, resume: { table: string; after: string | null } | null) => {
     enqueued = true;
-    c.enqueue(enc.encode(manifestLine({ counts, sha256: hash.digest("hex"), complete: resume === null, resume })));
+    const signed = resume ? { ...resume, sig: signResume(dataId, resume.table, resume.after) } : null;
+    c.enqueue(enc.encode(manifestLine({ counts, sha256: hash.digest("hex"), complete: resume === null, resume: signed, truncated })));
     c.close();
     done = true;
   };
@@ -137,7 +165,11 @@ export function tenantExportStream(dataId: string, opts: TenantExportOptions = {
         );
       } else {
         // Key-less tables (counters, settings) are tiny: one read.
-        rows = await query<Record<string, unknown>>(`SELECT ${cols} FROM ${q(t.table)} WHERE user_id = $1 LIMIT 10000`, [dataId]);
+        rows = await query<Record<string, unknown>>(`SELECT ${cols} FROM ${q(t.table)} WHERE user_id = $1 LIMIT ${KEYLESS_ROW_LIMIT + 1}`, [dataId]);
+        if (rows.length > KEYLESS_ROW_LIMIT) {
+          truncated.push(t.table);
+          rows = rows.slice(0, KEYLESS_ROW_LIMIT);
+        }
       }
       for (const r of rows) write(c, frameLine({ table: t.table, row: projectRow(r) }));
       counts[t.table] = (counts[t.table] ?? 0) + rows.length;

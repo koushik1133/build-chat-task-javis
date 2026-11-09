@@ -81,3 +81,24 @@ describe("event matching", () => {
     expect(integrationMatches([], "booking.created")).toBe(false);
   });
 });
+
+describe("sec9 chatops hardening", () => {
+  it("refuses host-suffix and userinfo tricks", async () => {
+    const { chatUrlRefusal } = await import("../providers");
+    expect(chatUrlRefusal("slack", "https://hooks.slack.com.evil.com/services/T/B/x")).not.toBeNull();
+    expect(chatUrlRefusal("slack", "https://hooks.slack.com@evil.com/services/T/B/x")).not.toBeNull();
+    expect(chatUrlRefusal("slack", "https://evil.com/hooks.slack.com/services/x")).not.toBeNull();
+    expect(chatUrlRefusal("discord", "https://discord.com.evil.com/api/webhooks/1/x")).not.toBeNull();
+    expect(chatUrlRefusal("slack", "https://hooks.slack.com/services/T/B/x")).toBeNull();
+  });
+  it("does not honour plaintext stored urls in production", async () => {
+    const { openUrl } = await import("../subscriptions");
+    const prev = process.env.NODE_ENV;
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    try {
+      expect(openUrl("plain:https://hooks.slack.com/services/a")).toBeNull();
+    } finally {
+      (process.env as Record<string, string>).NODE_ENV = prev ?? "test";
+    }
+  });
+});

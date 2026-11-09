@@ -34,11 +34,15 @@ export default function PortalLookupPage() {
 
   return (
     <div className="mx-auto max-w-md px-4 py-12">
-      <h1 className="text-2xl font-semibold tracking-tight">Access your portal</h1>
+      <h1 className="text-balance text-2xl font-semibold tracking-tight">Access your portal</h1>
       <p className="mt-1 text-sm text-muted-foreground">Enter the email you use with us and we will send you a private link to your bookings, invoices and messages.</p>
-      <div className="mt-6" aria-live="polite">
+      <div className="mt-6" aria-live="polite" aria-atomic="true">
         {done ? (
-          <Banner tone="success">{done}</Banner>
+          <>
+            <Banner tone="success">{done}</Banner>
+            <p className="text-sm text-muted-foreground">Nothing in your inbox after a few minutes? Check your spam folder, or try a different address.</p>
+            <Button variant="outline" touch className="mt-3" onClick={() => { setDone(null); setEmail(""); }}>Use a different email</Button>
+          </>
         ) : (
           <form onSubmit={submit} className="space-y-4">
             {error && <Banner tone="error">{error}</Banner>}

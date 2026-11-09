@@ -22,6 +22,7 @@ import { getStorefront, updateStorefront, type StorefrontPatch } from "@/lib/sto
 import { upsertPolicy as upsertRetention } from "@/lib/privacy/retention";
 import { RETENTION_KINDS, type RetentionKind } from "@/lib/privacy/constants";
 import { listNotices, publishNotice } from "@/lib/privacy/notices";
+import type { Area } from "@/lib/auth/roles";
 import { SECRET_KEY_RE, type SectionKey } from "./types";
 import type { SnapshotSections } from "./schema";
 
@@ -321,6 +322,11 @@ async function agentRows(dataId: string): Promise<AgentRowLite[]> {
   );
 }
 
+/** An imported agent never lands unattended: "auto" is downgraded to "approve" (a person raises it deliberately). */
+export function safeAutonomy(v: unknown): "draft" | "approve" {
+  return v === "draft" ? "draft" : "approve";
+}
+
 const agents: SectionImpl = {
   key: "agents",
   async exportItems(dataId) {
@@ -341,10 +347,11 @@ const agents: SectionImpl = {
   async create(ctx, item) {
     const d = asObj(item);
     const tools = Array.isArray(d.tools) ? JSON.stringify(d.tools) : null;
+    const autonomy = safeAutonomy(d.autonomy_level);
     const row = await queryOne<{ id: string }>(
       `INSERT INTO agents (user_id, name, role, system_prompt, status, tasks_completed, tools, model, autonomy_level, max_steps)
        VALUES ($1, $2, $3, $4, 'idle', 0, $5, $6, $7, $8) RETURNING id::text AS id`,
-      [ctx.dataId, d.name, d.role, d.system_prompt ?? null, tools, d.model ?? null, d.autonomy_level ?? "approve", d.max_steps ?? null]
+      [ctx.dataId, d.name, d.role, d.system_prompt ?? null, tools, d.model ?? null, autonomy, d.max_steps ?? null]
     );
     if (!row) throw new Error("Could not create the agent");
     return row.id;
@@ -353,7 +360,7 @@ const agents: SectionImpl = {
     const d = asObj(item);
     await query(
       `UPDATE agents SET role = $3, system_prompt = $4, tools = $5, model = $6, autonomy_level = $7, max_steps = $8 WHERE id::text = $1 AND user_id = $2`,
-      [id, ctx.dataId, d.role, d.system_prompt ?? null, Array.isArray(d.tools) ? JSON.stringify(d.tools) : null, d.model ?? null, d.autonomy_level ?? "approve", d.max_steps ?? null]
+      [id, ctx.dataId, d.role, d.system_prompt ?? null, Array.isArray(d.tools) ? JSON.stringify(d.tools) : null, d.model ?? null, safeAutonomy(d.autonomy_level), d.max_steps ?? null]
     );
   },
 };
@@ -398,7 +405,7 @@ const kbArticles: SectionImpl = {
     return new Map((await listArticles(dataId, { limit: 500 })).map((a) => [a.slug, a.id]));
   },
   async create(ctx, item) {
-    return (await createArticle(ctx.dataId, { ...(item as ArticleInput), status: "published" })).id;
+    return (await createArticle(ctx.dataId, { ...(item as ArticleInput), status: "draft" })).id;
   },
   async update(ctx, id, item) {
     const { slug: _slug, ...rest } = item as ArticleInput;
@@ -517,7 +524,7 @@ async function resolveSequence(dataId: string, item: unknown): Promise<SequenceI
     }
     return rest;
   });
-  return { name: str(i.name), trigger: i.trigger, trigger_config, steps, status: i.status === "paused" ? "paused" : "active" } as unknown as SequenceInput;
+  return { name: str(i.name), trigger: i.trigger, trigger_config, steps, status: "paused" } as unknown as SequenceInput;
 }
 
 const savedReports: SectionImpl = {
@@ -595,7 +602,7 @@ const retentionPolicies: SectionImpl = {
   async create(ctx, item) {
     const i = asObj(item);
     if (!(RETENTION_KINDS as readonly string[]).includes(str(i.entity_kind))) throw new Error(`Unknown retention kind "${str(i.entity_kind)}"`);
-    const row = await upsertRetention(ctx.dataId, i.entity_kind as RetentionKind, { keep_days: Number(i.keep_days), action: i.action as "anonymize" | "delete" | "archive", enabled: i.enabled === true });
+    const row = await upsertRetention(ctx.dataId, i.entity_kind as RetentionKind, { keep_days: Number(i.keep_days), action: i.action as "anonymize" | "delete" | "archive", enabled: false });
     return row.id;
   },
   async update(ctx, _id, item) {
@@ -630,6 +637,13 @@ const privacyNotices: SectionImpl = {
     // Notices are immutable: "updating" publishes the next version.
     await privacyNotices.create(ctx, item);
   },
+};
+
+/** Permission area a caller needs to edit each section; applying a snapshot must not widen a member's rights. */
+export const SECTION_AREA: Record<SectionKey, Area> = {
+  settings: "settings", branding: "settings", record_types: "settings", tax_rates: "billing", sla_policies: "helpdesk", automations: "settings",
+  agents: "agents", playbook_settings: "agents", kb_articles: "knowledge", document_templates: "settings", email_templates: "crm", sequences: "crm",
+  audiences: "crm", saved_reports: "reports", dashboards: "reports", storefront: "settings", retention_policies: "settings", privacy_notices: "settings",
 };
 
 export const SECTION_IMPLS: Record<SectionKey, SectionImpl> = {

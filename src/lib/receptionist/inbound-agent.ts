@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { completeWithTools } from "@/lib/llm/router";
 import { assertBudget } from "@/lib/llm/budgets";
+import { clampMaxTokens } from "@/lib/llm/clamp";
 import { recordUsage } from "@/lib/llm/metering";
 import { emitEvent } from "@/lib/events/bus";
 import { getTool, listTools, needsApproval } from "@/lib/agents/registry";
@@ -80,6 +81,9 @@ export const HANDOFF_REPLY =
   "I don't want to give you wrong information on that, so I'll have a team member confirm the details and get back to you shortly.";
 
 const FACTUAL_QUESTION = /\b(price|prices|pricing|cost|costs|how much|fee|fees|rate|rates|hours|opening|open|close|closing|policy|policies|refund|warranty|guarantee|deliver|delivery|shipping|address|located|location|insurance|licen[cs]ed)\b/i;
+/** A booking request still needs the model + calendar tools even if it also contains a factual-sounding word ("are you open Friday?"). */
+const BOOKING_REQUEST = /\b(book|booking|appointment|appointments|schedule|reserve|reservation|reschedule)\b/i;
+const PRICE_QUESTION = /\b(price|prices|pricing|cost|costs|how much|fee|fees|rate|rates|quote)\b/i;
 const STOPWORDS = new Set(["what","when","where","which","your","does","have","with","that","this","about","much","will","you","the","and","are","for","how","can","any","there","their","our","opening"]);
 
 function keywords(text: string): string[] {
@@ -102,7 +106,7 @@ export function precheckGrounding(
   const factual = FACTUAL_QUESTION.test(text);
   const dnaOverlap = !!productDesc && keywords(text).some((w) => productDesc.toLowerCase().includes(w));
   if (dnaOverlap && sources.length === 0) sources.push({ title: "Business profile", slug: null, score: 0.5 });
-  const refuse = factual && grounded.length === 0 && !dnaOverlap;
+  const refuse = factual && grounded.length === 0 && !dnaOverlap && !BOOKING_REQUEST.test(text);
   return { grounding: { sources, confidence, ...(refuse ? { refused: true } : {}) }, refuse, grounded };
 }
 
@@ -293,7 +297,7 @@ export async function handleInboundMessage(userId: string, msg: InboundMessage, 
       const turn = await completeWithTools(messages, {
         tools: round < MAX_TOOL_ROUNDS ? tools : [],
         allowlist: budget.allowlist,
-        maxTokens: 400,
+        maxTokens: clampMaxTokens(budget, 400),
         temperature: 0.3,
       });
       void recordUsage(userId, {
@@ -326,6 +330,7 @@ export async function handleInboundMessage(userId: string, msg: InboundMessage, 
 
     if (refused) {
       reply = HANDOFF_REPLY;
+      intent = PRICE_QUESTION.test(msg.text) ? "quote" : "other";
     } else if (final) {
       intent = final.intent;
       reply = final.reply;

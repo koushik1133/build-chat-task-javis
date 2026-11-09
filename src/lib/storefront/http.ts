@@ -1,3 +1,4 @@
+import { clientIp as sharedClientIp } from "@/lib/request-limits";
 import { NextResponse, type NextRequest } from "next/server";
 import { rateLimitAsync } from "@/lib/request-limits";
 import { cartCookieName } from "./cart";
@@ -8,7 +9,7 @@ import { resolveStorefrontBySlug, type PublicStorefront } from "./settings";
 export const NO_STORE = { "Cache-Control": "no-store, max-age=0" } as const;
 
 export function clientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "anon";
+  return sharedClientIp(req);
 }
 
 /** Per-ip limiter for the public shop routes; returns a 429 response or null. */

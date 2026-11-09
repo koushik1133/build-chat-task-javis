@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { findSecretPaths, MAX_ITEMS_PER_SECTION, MAX_SNAPSHOT_BYTES, SECTION_KEYS, SNAPSHOT_SCHEMA_VERSION, type SectionKey } from "./types";
+import { findForbiddenKeys, findSecretPaths, MAX_ITEMS_PER_SECTION, MAX_SNAPSHOT_BYTES, SECTION_KEYS, SNAPSHOT_SCHEMA_VERSION, type SectionKey } from "./types";
 
 /**
  * Zod schema for the snapshot document (`schema: 1`). Client-safe.
@@ -264,6 +264,8 @@ export function parseSnapshot(input: unknown): ParseResult {
     }
     if (bytes > MAX_SNAPSHOT_BYTES) return { ok: false, errors: [`Snapshot is larger than ${MAX_SNAPSHOT_BYTES / 1024 / 1024} MB`] };
   }
+  const unsafe = findForbiddenKeys(raw);
+  if (unsafe.length > 0) return { ok: false, errors: [`Snapshot contains reserved object keys and was rejected: ${unsafe.slice(0, 5).join(", ")}`] };
   // Secret scan first so a foreign file with a credential-like key gets a clear message.
   const secrets = findSecretPaths(raw);
   if (secrets.length > 0) return { ok: false, errors: [`Snapshot contains credential-like keys or values and was rejected: ${secrets.slice(0, 5).join(", ")}`] };

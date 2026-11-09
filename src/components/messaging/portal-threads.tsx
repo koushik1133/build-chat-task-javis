@@ -121,7 +121,7 @@ function ThreadPanel({ contactId, onChanged }: { contactId: string; onChanged: (
       {!msgs ? (
         <SkeletonList count={2} itemClassName="h-10" label="Loading conversation…" />
       ) : (
-        <ul className="max-h-64 space-y-2 overflow-y-auto" aria-live="polite" aria-label="Conversation">
+        <ul role="log" tabIndex={0} className="max-h-64 space-y-2 overflow-y-auto rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-live="polite" aria-label="Conversation">
           {msgs.map((m) => (
             <li key={m.id} className={cn("max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm [overflow-wrap:anywhere]", m.direction === "out" ? "ml-auto bg-primary text-primary-foreground" : "border border-border bg-card")}>
               {m.body}

@@ -1,3 +1,4 @@
+import { clientIp as sharedClientIp } from "@/lib/request-limits";
 import { randomUUID } from "crypto";
 import { query } from "@/lib/dsql";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
@@ -94,9 +95,8 @@ export function diffRecords(
 }
 
 function clientIp(req: Request): string | null {
-  const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]?.trim() || null;
-  return req.headers.get("x-real-ip");
+  const ip = sharedClientIp(req);
+  return ip === "unknown" ? null : ip;
 }
 
 /** Write an audit row. Never throws; failures are logged. */

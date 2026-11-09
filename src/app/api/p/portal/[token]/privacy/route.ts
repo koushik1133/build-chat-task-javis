@@ -1,3 +1,4 @@
+import { clientIp as trustedClientIp } from "@/lib/request-limits";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { queryOne } from "@/lib/dsql";
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ token: string }> };
 
-const ip = (req: NextRequest) => req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
+const ip = (req: NextRequest) => trustedClientIp(req);
 
 const Body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("consent"), purpose: z.enum(SELF_SERVICE_PURPOSES as [string, ...string[]]), granted: z.boolean() }).strict(),

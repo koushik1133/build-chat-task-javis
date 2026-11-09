@@ -27,6 +27,7 @@ export function MessagesTab({ token, onRead }: { token: string; onRead: () => vo
   const [error, setError] = useState<string | null>(null);
   const cursor = useRef<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const [announce, setAnnounce] = useState("");
 
   const merge = useCallback((incoming: Msg[]) => {
     if (incoming.length === 0) return;
@@ -50,7 +51,11 @@ export function MessagesTab({ token, onRead }: { token: string; onRead: () => vo
           setMsgs(d.messages);
           cursor.current = d.messages[d.messages.length - 1]?.created_at ?? null;
           onRead();
-        } else merge(d.messages);
+        } else {
+          merge(d.messages);
+          const fromTeam = d.messages.filter((m) => m.direction === "out").length;
+          if (fromTeam > 0) setAnnounce(fromTeam === 1 ? "New message from the team." : `${fromTeam} new messages from the team.`);
+        }
         setError(null);
       } catch (e) {
         if (initial) setMsgs([]);
@@ -65,7 +70,15 @@ export function MessagesTab({ token, onRead }: { token: string; onRead: () => vo
     const id = setInterval(() => {
       if (document.visibilityState === "visible") void poll();
     }, POLL_MS);
-    return () => clearInterval(id);
+    // Catch up straight away when the tab becomes visible again.
+    const onVis = () => {
+      if (document.visibilityState === "visible") void poll();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, [poll]);
 
   useEffect(() => {
@@ -92,16 +105,17 @@ export function MessagesTab({ token, onRead }: { token: string; onRead: () => vo
 
   return (
     <Section icon={MessageSquare} title="Messages" id="msg-h">
+      <p className="sr-only" role="status" aria-live="polite">{announce}</p>
       {error && <Banner tone="error">{error}</Banner>}
       {!msgs ? (
         <SkeletonList count={3} itemClassName="h-12" label="Loading messages…" />
       ) : (
-        <div className="max-h-[50vh] min-h-24 space-y-2 overflow-y-auto pr-1" role="log" aria-live="polite" aria-label="Conversation with the team">
-          {msgs.length === 0 && <p className="text-sm text-muted-foreground">No messages yet. Send us a note below and we will reply here.</p>}
+        <div className="max-h-[50dvh] min-h-24 space-y-2 overflow-y-auto pr-1" role="log" aria-live="polite" aria-label="Conversation with the team" tabIndex={0}>
+          {msgs.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">No messages yet. Write to us below and we will reply here.</p>}
           {msgs.map((m) => (
             <div key={m.id} className={cn("max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm [overflow-wrap:anywhere]", m.direction === "in" ? "ml-auto bg-primary text-primary-foreground" : "border border-border bg-secondary/40")}>
               {m.body}
-              <div className="mt-1 text-[10px] opacity-70">{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(m.created_at))}</div>
+              <div className="mt-1 text-[11px] opacity-80"><span className="sr-only">{m.direction === "in" ? "You, " : "Team, "}</span>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(m.created_at))}</div>
             </div>
           ))}
           <div ref={endRef} />
@@ -113,7 +127,7 @@ export function MessagesTab({ token, onRead }: { token: string; onRead: () => vo
           <Textarea id="portal-msg" rows={2} value={text} maxLength={PORTAL_MESSAGE_MAX} onChange={(e) => setText(e.target.value)} placeholder="Write a message…" />
           <p className="mt-1 text-right text-[11px] text-muted-foreground">{text.length}/{PORTAL_MESSAGE_MAX}</p>
         </div>
-        <Button type="submit" touch disabled={busy || !text.trim()} aria-label="Send message" className="mb-5">
+        <Button type="submit" touch disabled={busy || !text.trim()} aria-label="Send message" className="mb-6">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
         </Button>
       </form>

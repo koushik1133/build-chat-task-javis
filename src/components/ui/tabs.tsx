@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 export interface TabDef<T extends string> {
@@ -29,6 +29,17 @@ export function Tabs<T extends string>({
   className?: string;
 }) {
   const refs = useRef(new Map<T, HTMLButtonElement>());
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Keep the active tab visible when the strip scrolls (phones): scroll the strip itself, never the page.
+  useEffect(() => {
+    const list = listRef.current;
+    const el = refs.current.get(value);
+    if (!list || !el || list.scrollWidth <= list.clientWidth) return;
+    const left = el.offsetLeft - (list.clientWidth - el.offsetWidth) / 2;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    list.scrollTo({ left: Math.max(0, left), behavior: reduce ? "auto" : "smooth" });
+  }, [value]);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, idx: number) {
     let next: number | null = null;
@@ -44,7 +55,7 @@ export function Tabs<T extends string>({
   }
 
   return (
-    <div role="tablist" aria-label={label} className={cn("flex max-w-full items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1", className)}>
+    <div ref={listRef} role="tablist" aria-label={label} className={cn("relative flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain rounded-lg border border-border bg-card p-1", className)}>
       {tabs.map((t, i) => {
         const active = value === t.id;
         return (

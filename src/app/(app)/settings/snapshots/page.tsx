@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DatabaseBackup, Download, Loader2, Play, Plus, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, ChevronRight, DatabaseBackup, Download, Loader2, Play, Plus, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
-import { Banner, Empty, ErrorState, Loading } from "@/components/ui/feedback";
+import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedback";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { TableScroller, TH, THEAD } from "@/components/ui/table-scroller";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { PageContainer } from "@/components/page-container";
 import { ExportEverythingCard } from "@/components/snapshots/export-everything-card";
 import { NEVER_INCLUDED, SECTION_KEYS, SECTION_LABELS } from "@/lib/snapshots/types";
@@ -101,46 +102,53 @@ function CreateDialog({ counts, onClose, onDone }: { counts: Record<string, numb
   );
 }
 
-function PlanTable({ plan }: { plan: SnapshotPlan }) {
+function PlanView({ plan }: { plan: SnapshotPlan }) {
   if (plan.sections.length === 0) return <Empty title="Nothing to apply" text="The selected sections are not in this snapshot." />;
+  const t = plan.totals;
   return (
-    <div className="space-y-3">
-      <p className="text-sm">
-        <strong>{plan.totals.create}</strong> to create, <strong>{plan.totals.update}</strong> to update, <strong>{plan.totals.skip}</strong> unchanged or skipped
-        {plan.totals.conflicts > 0 && <>, <strong>{plan.totals.conflicts}</strong> conflict{plan.totals.conflicts === 1 ? "" : "s"}</>}.
-      </p>
-      <TableScroller label="Snapshot plan by section">
-        <table className="w-full text-sm">
-          <thead className={THEAD}>
-            <tr><th className={TH}>Section</th><th className={TH}>Create</th><th className={TH}>Update</th><th className={TH}>Skip</th><th className={TH}>Conflicts</th></tr>
-          </thead>
-          <tbody>
-            {plan.sections.map((s) => (
-              <tr key={s.section} className="border-t border-border align-top">
-                <td className="px-3 py-2">{SECTION_LABELS[s.section]}</td>
-                <td className="px-3 py-2">{s.create}</td>
-                <td className="px-3 py-2">{s.update}</td>
-                <td className="px-3 py-2">{s.skip}</td>
-                <td className="px-3 py-2">
-                  {s.conflicts.length === 0 ? "—" : <span className="text-amber-700 dark:text-amber-300">{s.conflicts.slice(0, 5).join(", ")}{s.conflicts.length > 5 ? ` +${s.conflicts.length - 5}` : ""}</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableScroller>
-      <details className="text-sm">
-        <summary className="cursor-pointer text-muted-foreground">Item details</summary>
-        <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
-          {plan.sections.flatMap((s) => s.items.map((i) => (
-            <li key={`${s.section}:${i.key}`} className="flex flex-wrap items-center gap-2">
-              <Pill tone={ACTION_TONE[i.action]}>{i.action}</Pill>
-              <span className="min-w-0 break-words">{s.section} / {i.key}</span>
-              {i.reason && <span className="text-xs text-muted-foreground">{i.reason}</span>}
-            </li>
-          )))}
-        </ul>
-      </details>
+    <div className="space-y-3" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-2" aria-label="Plan totals" role="group">
+        <Pill tone="success">{t.create} to create</Pill>
+        <Pill tone="info">{t.update} to update</Pill>
+        <Pill>{t.skip} unchanged or skipped</Pill>
+        {t.conflicts > 0 && <Pill tone="warning"><AlertTriangle className="h-3 w-3" aria-hidden /> {t.conflicts} conflict{t.conflicts === 1 ? "" : "s"}</Pill>}
+      </div>
+      <ul className="divide-y divide-border rounded-lg border border-border">
+        {plan.sections.map((sec) => (
+          <li key={sec.section}>
+            <details className="group" open={sec.conflicts.length > 0}>
+              <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-2 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
+                <span className="font-medium">{SECTION_LABELS[sec.section]}</span>
+                <span className="ml-auto flex flex-wrap gap-1.5">
+                  {sec.create > 0 && <Pill tone="success">{sec.create} create</Pill>}
+                  {sec.update > 0 && <Pill tone="info">{sec.update} update</Pill>}
+                  {sec.skip > 0 && <Pill>{sec.skip} skip</Pill>}
+                  {sec.conflicts.length > 0 && <Pill tone="warning"><AlertTriangle className="h-3 w-3" aria-hidden /> {sec.conflicts.length} conflict{sec.conflicts.length === 1 ? "" : "s"}</Pill>}
+                </span>
+              </summary>
+              <div className="space-y-2 border-t border-border bg-secondary/20 px-3 py-2">
+                {sec.conflicts.length > 0 && (
+                  <p className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span><strong>Conflicts:</strong> {sec.conflicts.join(", ")}. These already exist here and will be left as they are.</span>
+                  </p>
+                )}
+                <ul className="max-h-48 space-y-1 overflow-y-auto text-sm">
+                  {sec.items.map((i) => (
+                    <li key={i.key} className="flex flex-wrap items-center gap-2">
+                      <Pill tone={ACTION_TONE[i.action]}>{i.action}</Pill>
+                      <span className="min-w-0 break-words">{i.key}</span>
+                      {i.reason && <span className="text-xs text-muted-foreground">{i.reason}</span>}
+                    </li>
+                  ))}
+                  {sec.items.length === 0 && <li className="text-xs text-muted-foreground">No individual items.</li>}
+                </ul>
+              </div>
+            </details>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -149,7 +157,7 @@ function ApplyDialog({ snap, onClose, onDone }: { snap: SnapshotMeta; onClose: (
   const [mode, setMode] = useState<ApplyMode>("skip_existing");
   const [sections, setSections] = useState<Set<SectionKey>>(new Set(snap.sections));
   const [plan, setPlan] = useState<SnapshotPlan | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const body = JSON.stringify({ target: "self", sections: [...sections], mode });
@@ -158,7 +166,6 @@ function ApplyDialog({ snap, onClose, onDone }: { snap: SnapshotMeta; onClose: (
   async function preview() {
     setBusy(true);
     setError(null);
-    setConfirming(false);
     try {
       setPlan((await api<{ plan: SnapshotPlan }>(`/api/snapshots/${snap.id}/plan`, { method: "POST", headers, body })).plan);
     } catch (err) {
@@ -168,6 +175,13 @@ function ApplyDialog({ snap, onClose, onDone }: { snap: SnapshotMeta; onClose: (
     }
   }
   async function apply() {
+    if (!plan) return;
+    const ok = await confirm({
+      title: `Apply "${snap.name}"?`,
+      body: `This will change this workspace: ${plan.totals.create} created, ${plan.totals.update} updated. Automations arrive paused and agents idle.`,
+      confirmLabel: "Apply to workspace",
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -185,24 +199,17 @@ function ApplyDialog({ snap, onClose, onDone }: { snap: SnapshotMeta; onClose: (
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
         <Field label="Mode" hint={mode === "skip_existing" ? "Existing items are never touched." : "Updates only items a previous snapshot created here; your own items are left alone."}>
-          <Select value={mode} onChange={(e) => { setMode(e.target.value as ApplyMode); setPlan(null); setConfirming(false); }}>
+          <Select value={mode} onChange={(e) => { setMode(e.target.value as ApplyMode); setPlan(null); }}>
             <option value="skip_existing">Skip existing (safe)</option>
             <option value="merge">Merge (update snapshot-owned items)</option>
           </Select>
         </Field>
-        <SectionPicker value={sections} onChange={(v) => { setSections(v); setPlan(null); setConfirming(false); }} available={snap.sections} />
-        {plan && <PlanTable plan={plan} />}
-        {confirming && plan && (
-          <Banner tone="warn">This will change this workspace: {plan.totals.create} created, {plan.totals.update} updated. Automations arrive paused and agents idle. Continue?</Banner>
-        )}
+        <SectionPicker value={sections} onChange={(v) => { setSections(v); setPlan(null); }} available={snap.sections} />
+        {plan && <PlanView plan={plan} />}
         <DialogFooter>
           <Button type="button" variant="outline" touch onClick={onClose}>Close</Button>
-          <Button type="button" variant="outline" touch disabled={busy || sections.size === 0} onClick={preview}>{busy && !confirming ? spinner : null} Preview changes</Button>
-          {!confirming ? (
-            <Button type="button" touch disabled={busy || !plan || plan.totals.create + plan.totals.update === 0} onClick={() => setConfirming(true)}><Play className="h-4 w-4" aria-hidden /> Apply…</Button>
-          ) : (
-            <Button type="button" touch disabled={busy} onClick={apply}>{busy ? spinner : <Play className="h-4 w-4" aria-hidden />} Confirm apply</Button>
-          )}
+          <Button type="button" variant="outline" touch disabled={busy || sections.size === 0} onClick={() => void preview()}>{busy && !plan ? spinner : null} Preview changes</Button>
+          <Button type="button" touch disabled={busy || !plan || plan.totals.create + plan.totals.update === 0} onClick={() => void apply()}>{busy && plan ? spinner : <Play className="h-4 w-4" aria-hidden />} Apply…</Button>
         </DialogFooter>
       </div>
     </Dialog>
@@ -287,7 +294,7 @@ export default function SnapshotsPage() {
       {error ? (
         <ErrorState message={error} onRetry={() => void load()} />
       ) : snaps === null ? (
-        <Loading label="Loading snapshots…" />
+        <SkeletonList count={4} itemClassName="h-14" label="Loading snapshots…" />
       ) : (
         <div className="space-y-8">
           <section aria-labelledby="snap-list">

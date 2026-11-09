@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Banner, Skeleton } from "@/components/ui/feedback";
+import { ErrorState, Skeleton } from "@/components/ui/feedback";
 import { Tabs, type TabDef } from "@/components/ui/tabs";
 import { SupportTab } from "@/components/portal/support-tab";
 import { PrivacyTab } from "@/components/portal/privacy-tab";
@@ -21,7 +21,7 @@ import type { PortalData } from "@/lib/portal";
 
 function PortalSkeleton() {
   return (
-    <main className="mx-auto max-w-3xl space-y-4 px-4 py-8" aria-busy="true">
+    <div className="mx-auto max-w-3xl space-y-4 px-4 py-8" aria-busy="true">
       <span className="sr-only" role="status">Loading your portal…</span>
       <Skeleton className="h-4 w-32" />
       <Skeleton className="h-8 w-64" />
@@ -29,7 +29,7 @@ function PortalSkeleton() {
       <div className="grid gap-4 sm:grid-cols-2">
         {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -75,10 +75,10 @@ export default function ClientPortalPage() {
 
   if (error) {
     return (
-      <main className="mx-auto max-w-lg px-4 py-16 text-center">
-        <Banner tone="error">{error}</Banner>
-        {data === null && <p className="mt-2 text-sm text-muted-foreground">Ask the business to send you a fresh link, or request one from their portal sign-in page.</p>}
-      </main>
+      <div className="mx-auto max-w-lg px-4 py-16 text-center">
+        <ErrorState message={error} onRetry={data === null && error !== "This link has expired or is not valid." ? () => { setError(null); void load(); } : undefined} />
+        <p className="mt-3 text-sm text-muted-foreground">Ask the business to send you a fresh link, or request one from their portal sign-in page.</p>
+      </div>
     );
   }
   if (!data) return <PortalSkeleton />;
@@ -86,8 +86,8 @@ export default function ClientPortalPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:py-12">
       <header>
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">{data.org.name}</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Hello, {data.contact.name}</h1>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{data.org.name}</p>
+        <h1 className="mt-1 text-balance text-2xl font-semibold tracking-tight">Hello, {data.contact.name}</h1>
         <p className="mt-1 text-sm text-muted-foreground">Your bookings, invoices, orders and messages in one place.</p>
         {data.bookPath && (
           <Button asChild className="mt-4" touch><a href={data.bookPath}><CalendarDays className="h-4 w-4" aria-hidden /> Book a time</a></Button>
@@ -96,7 +96,7 @@ export default function ClientPortalPage() {
 
       <Tabs id="portal" tabs={tabs} value={tab} onChange={setTab} label="Portal sections" />
 
-      <div role="tabpanel" id={`portal-panel-${tab}`} aria-labelledby={`portal-tab-${tab}`} tabIndex={0} className="focus-visible:outline-none">
+      <div role="tabpanel" id={`portal-panel-${tab}`} aria-labelledby={`portal-tab-${tab}`} tabIndex={0} className="rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         {tab === "overview" && <OverviewTab data={data} go={setTab} />}
         {tab === "bookings" && <BookingsTab data={data} token={token} onChanged={load} />}
         {tab === "invoices" && <InvoicesTab data={data} token={token} />}

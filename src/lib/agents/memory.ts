@@ -1,3 +1,4 @@
+import { sanitizeUntrusted, wrapUntrusted } from "@/lib/ai/untrusted";
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { likeContains } from "@/lib/like";
@@ -74,8 +75,9 @@ export function formatCorrectionsBlock(items: ReadonlyArray<Pick<CorrectionMemor
   let block = "\n\n## Past corrections from your operator\n";
   block += "Your operator corrected earlier work. Apply these preferences whenever they are relevant; do not repeat the original mistake.\n";
   items.forEach((c, i) => {
-    block += `\n${i + 1}. Instead of: ${clip(c.original)}\n   Do: ${clip(c.corrected)}`;
-    if (c.note?.trim()) block += `\n   Why: ${clip(c.note, 300)}`;
+    // The "original" is AI output that may echo customer text (second-order injection): keep it as data.
+    block += `\n${i + 1}. Instead of: ${wrapUntrusted("correction_original", clip(c.original), { maxChars: 700 })}\n   Do: ${sanitizeUntrusted(clip(c.corrected))}`;
+    if (c.note?.trim()) block += `\n   Why: ${sanitizeUntrusted(clip(c.note, 300))}`;
   });
   return block + "\n";
 }

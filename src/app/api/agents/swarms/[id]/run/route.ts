@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { queryOne } from "@/lib/dsql";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
+import { principalFromScope } from "@/lib/agents/principal";
 import { runAgentJob } from "@/lib/agent-runner";
 
 export async function POST(
@@ -75,7 +76,8 @@ export async function POST(
               agent.id,
               {
                 prompt: taskPrompt,
-                workflowName: 'swarm'
+                workflowName: 'swarm',
+                principal: principalFromScope(scope)
               }
             );
 

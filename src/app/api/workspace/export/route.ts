@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { recordAudit } from "@/lib/audit";
 import { rateLimitAsync } from "@/lib/request-limits";
-import { tenantExportStream } from "@/lib/snapshots/tenant-export";
+import { tenantExportStream, verifyResume } from "@/lib/snapshots/tenant-export";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,7 +22,9 @@ export async function POST(req: NextRequest) {
   }
   if (scope.role !== "owner") return NextResponse.json({ error: "forbidden", detail: "Only the workspace owner can export everything." }, { status: 403 });
   const sp = req.nextUrl.searchParams;
-  const resuming = Boolean(sp.get("table"));
+  // Only a server-signed cursor (from a previous manifest) earns the roomy resume bucket; a hand-made
+  // ?table=... is a fresh export and counts against the daily cap.
+  const resuming = Boolean(sp.get("table")) && verifyResume(scope.dataId, sp.get("table") as string, sp.get("after"), sp.get("sig"));
   // A resume continues an export that already consumed a slot; give it a separate, roomier bucket.
   const rl = resuming
     ? await rateLimitAsync(`workspace:export:resume:${scope.dataId}`, 60, 24 * 60 * 60 * 1000)

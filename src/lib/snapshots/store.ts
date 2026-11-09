@@ -4,7 +4,8 @@ import { recordAudit } from "@/lib/audit";
 import { emitEvent } from "@/lib/events/bus";
 import { findSecretPaths, isSingletonSection, SECTION_KEYS, MAX_ITEMS_PER_SECTION, SNAPSHOT_SCHEMA_VERSION, type ApplicationDTO, type ApplyError, type ApplyMode, type ApplyResult, type PlanItem, type SectionKey, type SectionPlan, type SnapshotMeta, type SnapshotPlan } from "./types";
 import { parseSnapshot, sectionsPresent, type SnapshotDoc } from "./schema";
-import { APPLY_ORDER, canonicalJson, SECTION_IMPLS, SINGLETON_KEY, sha256 } from "./sections";
+import type { Area } from "@/lib/auth/roles";
+import { APPLY_ORDER, canonicalJson, SECTION_AREA, SECTION_IMPLS, SINGLETON_KEY, sha256 } from "./sections";
 
 /**
  * Snapshot export / plan / apply. Configuration only, never data; every write
@@ -246,7 +247,7 @@ export async function planSnapshot(dataId: string, doc: SnapshotDoc, opts: { sec
 export async function applySnapshot(
   dataId: string,
   doc: SnapshotDoc,
-  opts: { sections?: readonly string[]; mode?: ApplyMode; actorId?: string | null; snapshotId?: string | null; snapshotSha?: string | null }
+  opts: { sections?: readonly string[]; mode?: ApplyMode; actorId?: string | null; snapshotId?: string | null; snapshotSha?: string | null; can?: (area: Area, edit?: boolean) => boolean }
 ): Promise<ApplyResult> {
   const mode: ApplyMode = opts.mode === "merge" ? "merge" : "skip_existing";
   const wanted = new Set(normaliseSections(opts.sections));
@@ -262,6 +263,11 @@ export async function applySnapshot(
   for (const section of APPLY_ORDER) {
     if (!wanted.has(section) || !present.has(section)) continue;
     const impl = SECTION_IMPLS[section];
+    if (opts.can && !opts.can(SECTION_AREA[section], true)) {
+      // The caller lacks edit rights for this section's area: report it instead of silently widening their access.
+      errors.push({ section, key: "*", message: `Not permitted to edit ${SECTION_AREA[section]}` });
+      continue;
+    }
     const [existing, owned] = await Promise.all([impl.existing(dataId), ownedMap(dataId, section)]);
     const sp: SectionPlan = { section, create: 0, update: 0, skip: 0, conflicts: [], items: [] };
     const seen = new Set<string>();

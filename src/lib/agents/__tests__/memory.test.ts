@@ -33,15 +33,15 @@ describe("formatCorrectionsBlock", () => {
       { original: "Use   lots\nof   whitespace", corrected: "Be concise", note: null },
     ]);
     expect(block).toContain("## Past corrections from your operator");
-    expect(block).toContain("1. Instead of: Email the client at 6am\n   Do: Email clients only during business hours\n   Why: They complained");
-    expect(block).toContain("2. Instead of: Use lots of whitespace\n   Do: Be concise");
+    expect(block).toMatch(/1\. Instead of: <<<UNTRUSTED:correction_original:[0-9a-f]+\nEmail the client at 6am\n[0-9a-f]+>>>\n   Do: Email clients only during business hours\n   Why: They complained/);
+    expect(block).toMatch(/2\. Instead of: <<<UNTRUSTED:correction_original:[0-9a-f]+\nUse lots of whitespace\n[0-9a-f]+>>>\n   Do: Be concise/);
     expect(block).not.toContain("Why: \n");
   });
 
   it("clips very long entries", () => {
     const block = formatCorrectionsBlock([{ original: "x".repeat(2000), corrected: "y", note: null }]);
-    expect(block.length).toBeLessThan(900);
-    expect(block).toContain("…");
+    expect(block.length).toBeLessThan(1100);
+    expect(block).toMatch(/\.\.\.|…/);
   });
 
   it("builds the embedded text from both halves", () => {

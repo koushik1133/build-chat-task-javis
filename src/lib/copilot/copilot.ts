@@ -5,6 +5,7 @@ import { hasUntrustedOutput, listTools, needsApproval } from "@/lib/agents/regis
 import type { RouterMessage, ToolContext, ToolSpec } from "@/lib/agents/types";
 import { completeWithTools } from "@/lib/llm/router";
 import { assertBudget } from "@/lib/llm/budgets";
+import { clampMaxTokens } from "@/lib/llm/clamp";
 import { recordUsage } from "@/lib/llm/metering";
 import { SYSTEM_BASE } from "@/lib/prompts";
 import { buildModuleContext, type CopilotModule } from "./context-builders";
@@ -198,7 +199,7 @@ export async function runCopilot(userId: string, req: CopilotRequest, opts: { ca
     const turn = await completeWithTools(messages, {
       tools: lastStep ? undefined : tools,
       allowlist: budget.allowlist,
-      maxTokens: 1200,
+      maxTokens: clampMaxTokens(budget, 1200),
       temperature: 0.2,
     });
     void recordUsage(userId, {

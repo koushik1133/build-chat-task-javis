@@ -18,7 +18,8 @@ const SKIP = new Set(["chat.delivery_failed"]);
  * (created_at, id) watermark in `chat_cursors`, so each event is considered
  * exactly once and a re-run with no new events sends nothing.
  */
-export async function processChatEvents(limit = 200): Promise<{ scanned: number; sent: number; failed: number }> {
+export async function processChatEvents(limit = 200, budgetMs = 25_000): Promise<{ scanned: number; sent: number; failed: number }> {
+  const deadline = Date.now() + budgetMs;
   const cur = await queryOne<{ name: string }>(`SELECT name FROM chat_cursors WHERE name = $1`, [CURSOR]);
   if (!cur) {
     await ensureCursor();
@@ -38,7 +39,10 @@ export async function processChatEvents(limit = 200): Promise<{ scanned: number;
   const byUser = new Map<string, ChatIntegrationRow[]>();
   let sent = 0;
   let failed = 0;
+  let done = 0; // events fully handled; the cursor only advances past these so a timeout never re-sends or skips
   for (const evt of events) {
+    if (done > 0 && Date.now() > deadline) break;
+    done++;
     if (SKIP.has(evt.type)) continue;
     let list = byUser.get(evt.user_id);
     if (!list) {
@@ -58,13 +62,13 @@ export async function processChatEvents(limit = 200): Promise<{ scanned: number;
       /* empty payload */
     }
     const message = describeEvent({ type: evt.type, entity: evt.entity, entity_id: evt.entity_id, data }, appOrigin());
-    for (const t of targets) {
-      const r = await sendChat(t.id, message);
+    const results = await Promise.all(targets.map((t) => sendChat(t.id, message).catch(() => ({ ok: false }))));
+    for (const r of results) {
       if (r.ok) sent++;
       else failed++;
     }
   }
-  const last = events[events.length - 1];
+  const last = events[done - 1];
   await query(`UPDATE chat_cursors SET last_event_at = (SELECT created_at FROM events WHERE id = $2), last_event_id = $2, updated_at = NOW() WHERE name = $1`, [CURSOR, last.id]);
-  return { scanned: events.length, sent, failed };
+  return { scanned: done, sent, failed };
 }
