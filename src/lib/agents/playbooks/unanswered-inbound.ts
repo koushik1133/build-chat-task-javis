@@ -1,7 +1,7 @@
 import { query, queryOne } from "@/lib/dsql";
 import type { PlaybookDef } from "./types";
 
-type Msg = { role: string; content: string; ts?: string };
+type Msg = { role: string; content: string; ts?: string; pending?: boolean };
 type Convo = { id: string; channel: string; from_number: string; messages: string | null; updated_at: string };
 
 function parse(raw: string | null): Msg[] {
@@ -23,7 +23,7 @@ const TWO_HOURS = 2 * 60 * 60 * 1000;
 export const unansweredInbound: PlaybookDef = {
   id: "unanswered-inbound",
   name: "Unanswered inbound message",
-  description: "Flags WhatsApp/SMS conversations where the customer wrote last and nobody replied for 2+ hours.",
+  description: "Flags WhatsApp, SMS and website chat conversations where the customer wrote last and nobody replied for 2+ hours.",
   eventTypes: ["message.received"],
   cooldownHours: 6,
   defaultTools: ["comms.draft_email", "comms.notify"],
@@ -37,7 +37,8 @@ export const unansweredInbound: PlaybookDef = {
     const cutoff = Date.now() - TWO_HOURS;
     return rows
       .filter((r) => {
-        const msgs = parse(r.messages);
+        // Web chat: a receptionist draft still awaiting approval is invisible to the visitor, so it does not count as a reply.
+        const msgs = r.channel === "webchat" ? parse(r.messages).filter((m) => !m.pending) : parse(r.messages);
         const last = msgs[msgs.length - 1];
         if (!last || last.role !== "user") return false;
         const at = last.ts ? Date.parse(last.ts) : Date.parse(r.updated_at);

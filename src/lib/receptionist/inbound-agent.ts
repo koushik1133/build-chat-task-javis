@@ -8,7 +8,7 @@ import { getTool, listTools, needsApproval } from "@/lib/agents/registry";
 import type { RouterMessage, ToolContext, ToolSpec } from "@/lib/agents/types";
 
 /**
- * AI receptionist for inbound SMS / WhatsApp / voice / email.
+ * AI receptionist for inbound SMS / WhatsApp / voice / email / website chat.
  *
  * Classifies the intent, drafts a short reply (optionally using a few CRM and
  * task tools), meters spend under the "receptionist" feature, and decides
@@ -17,7 +17,7 @@ import type { RouterMessage, ToolContext, ToolSpec } from "@/lib/agents/types";
  * is always held for a human.
  */
 
-export type InboundChannel = "sms" | "whatsapp" | "voice" | "email";
+export type InboundChannel = "sms" | "whatsapp" | "voice" | "email" | "webchat";
 export type InboundIntent = "booking" | "quote" | "support" | "sales" | "spam" | "other";
 
 export interface InboundTurn {
@@ -99,7 +99,13 @@ async function insertApproval(
 
 function systemPrompt(ctx: Awaited<ReturnType<typeof loadContext>>, channel: InboundChannel) {
   const medium =
-    channel === "voice" ? "a phone call (spoken aloud)" : channel === "email" ? "an email (reply in a short, plain-text email)" : `a ${channel.toUpperCase()} message`;
+    channel === "voice"
+      ? "a phone call (spoken aloud)"
+      : channel === "email"
+        ? "an email (reply in a short, plain-text email)"
+        : channel === "webchat"
+          ? "a live chat on the business website (the visitor is reading on screen right now)"
+          : `a ${channel.toUpperCase()} message`;
   return [
     `You are the AI receptionist for ${ctx.companyName}${ctx.industry ? ` (${ctx.industry})` : ""}.`,
     ctx.productDesc ? `About the business: ${ctx.productDesc.slice(0, 600)}` : "",

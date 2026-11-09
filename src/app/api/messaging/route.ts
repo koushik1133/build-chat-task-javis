@@ -6,6 +6,7 @@ import { decryptSecret } from "@/lib/secure-store";
 import { parseConversation, saveConversation, type ConversationTurn } from "@/lib/twilio-webhook";
 import type { InboundChannel } from "@/lib/receptionist/inbound-agent";
 import { sendMailReply } from "@/lib/mail/send";
+import { takeOverByConversation } from "@/lib/webchat/service";
 
 export async function GET() {
   let scope;
@@ -17,10 +18,12 @@ export async function GET() {
 
   try {
     const conversations = await query(
-      `SELECT id, channel, from_number, messages, updated_at
-       FROM messaging_conversations
-       WHERE user_id = $1
-       ORDER BY updated_at DESC`,
+      `SELECT c.id, c.channel, c.from_number, c.messages, c.updated_at,
+              s.id AS session_id, s.status AS session_status, s.page_url
+       FROM messaging_conversations c
+       LEFT JOIN chat_sessions s ON s.conversation_id = c.id AND s.user_id = c.user_id
+       WHERE c.user_id = $1
+       ORDER BY c.updated_at DESC`,
       [scope.dataId]
     );
     return NextResponse.json({ conversations }, { status: 200 });
@@ -93,13 +96,17 @@ export async function POST(req: NextRequest) {
       [scope.dataId]
     ).catch(() => null);
 
+    const isWebchat = conv.channel === "webchat";
     const canSend =
-      conv.channel !== "voice" && conv.channel !== "email" &&
+      conv.channel !== "voice" && conv.channel !== "email" && !isWebchat &&
       !!creds?.twilio_sid && !!creds?.twilio_auth_token && !!creds?.twilio_from_number;
 
-    let simulated = !canSend;
+    let simulated = !canSend && !isWebchat;
     let sendError: string | null = null;
-    if (conv.channel === "email") {
+    if (isWebchat) {
+      // Web chat replies are delivered on the visitor's next poll; a human reply ends the AI's turn.
+      await takeOverByConversation(scope.dataId, conv.id).catch(() => null);
+    } else if (conv.channel === "email") {
       // Email threads go back out through the mailbox that received them.
       try {
         const sent = await sendMailReply(scope.dataId, conv.id, parsed.data.text);

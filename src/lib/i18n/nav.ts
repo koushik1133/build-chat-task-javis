@@ -46,6 +46,7 @@ const NAV_KEYS: Record<string, MessageKey> = {
   "/settings/sso": "nav.settings.sso",
   "/insights": "nav.insights",
   "/settings/webhooks": "nav.settings.webhooks",
+  "/settings/widgets": "nav.settings.widgets",
   "/settings/system": "nav.settings.system",
   "/settings/developers": "nav.settings.developers",
   "/settings/mail": "nav.settings.mail",

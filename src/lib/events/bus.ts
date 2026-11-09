@@ -69,6 +69,7 @@ export const EVENT_TYPES = [
   "invoice.paid",
   "booking.created",
   "booking.cancelled",
+  "booking.rescheduled",
   "record.created",
   "record.moved",
   "ticket.created",
@@ -86,6 +87,8 @@ export const EVENT_TYPES = [
   "expense.created",
   "accounting.synced",
   "accounting.sync_failed",
+  "webchat.session_started",
+  "webchat.handoff_requested",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

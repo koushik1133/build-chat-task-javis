@@ -20,10 +20,12 @@ import {
   FlaskConical,
   Clock,
   ArrowLeft,
+  Globe,
+  Hand,
 } from "lucide-react";
 import { cn, timeAgo } from "@/lib/utils";
 
-type Channel = "whatsapp" | "sms" | "voice" | "email";
+type Channel = "whatsapp" | "sms" | "voice" | "email" | "webchat";
 
 type Message = {
   role: "user" | "assistant";
@@ -40,6 +42,10 @@ type Conversation = {
   from_number: string;
   messages: string; // JSON string
   updated_at: string;
+  /** Web chat only: the visitor session behind this thread. */
+  session_id?: string | null;
+  session_status?: "open" | "handed_off" | "closed" | null;
+  page_url?: string | null;
 };
 
 function parseMessages(raw: unknown): Message[] {
@@ -63,7 +69,10 @@ const CHANNEL_STYLES: Record<Channel, string> = {
   sms: "bg-blue-500/10 text-blue-500",
   voice: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   email: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  webchat: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
 };
+
+const CHANNEL_LABELS: Partial<Record<Channel, string>> = { webchat: "Web chat" };
 
 function ChannelChip({ channel, className }: { channel: Channel; className?: string }) {
   const style = CHANNEL_STYLES[channel] ?? CHANNEL_STYLES.sms;
@@ -77,7 +86,8 @@ function ChannelChip({ channel, className }: { channel: Channel; className?: str
     >
       {channel === "voice" && <Phone className="h-2.5 w-2.5" aria-hidden />}
       {channel === "email" && <Mail className="h-2.5 w-2.5" aria-hidden />}
-      {channel}
+      {channel === "webchat" && <Globe className="h-2.5 w-2.5" aria-hidden />}
+      {CHANNEL_LABELS[channel] ?? channel}
     </span>
   );
 }
@@ -90,6 +100,7 @@ export default function MessagingPage() {
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [takingOver, setTakingOver] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
 
   const fetchConversations = useCallback(async () => {
@@ -129,6 +140,27 @@ export default function MessagingPage() {
     });
     setSelectedConvId(conv.id);
   }, []);
+
+  async function takeOver() {
+    if (!selectedConv || selectedConv.channel !== "webchat") return;
+    setTakingOver(true);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/webchat/sessions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: selectedConv.id, action: "take_over" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Could not take over this chat.");
+      setConversations((prev) => prev.map((c) => (c.id === selectedConv.id ? { ...c, session_status: "handed_off" } : c)));
+      setNotice("You have taken over — the AI receptionist will no longer reply in this chat.");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not take over this chat.");
+    } finally {
+      setTakingOver(false);
+    }
+  }
 
   async function sendReply(e: React.FormEvent) {
     e.preventDefault();
@@ -270,13 +302,31 @@ export default function MessagingPage() {
                       <span className="truncate">{selectedConv.from_number}</span>
                       <ChannelChip channel={selectedConv.channel} />
                     </h3>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
                       Last active: {new Date(selectedConv.updated_at).toLocaleString()}
+                      {selectedConv.channel === "webchat" && selectedConv.page_url ? (
+                        <>
+                          {" · "}
+                          <a href={selectedConv.page_url} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline" title={selectedConv.page_url}>
+                            {selectedConv.page_url.replace(/^https?:\/\//, "").slice(0, 60)}
+                          </a>
+                        </>
+                      ) : null}
                     </p>
                   </div>
                 </div>
 
-                {pendingCount > 0 ? (
+                {selectedConv.channel === "webchat" && selectedConv.session_status === "open" ? (
+                  <Button type="button" size="sm" variant="outline" touch onClick={takeOver} disabled={takingOver} className="shrink-0">
+                    {takingOver ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : <Hand className="h-3.5 w-3.5" aria-hidden />}
+                    <span className="ml-1.5">Take over</span>
+                  </Button>
+                ) : selectedConv.channel === "webchat" ? (
+                  <span className="flex items-center gap-1.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 text-xs px-2.5 py-1 rounded-full font-medium shrink-0">
+                    <User className="h-3.5 w-3.5" aria-hidden />
+                    {selectedConv.session_status === "closed" ? "Chat closed" : "Human handling"}
+                  </span>
+                ) : pendingCount > 0 ? (
                   <Link
                     href="/approvals"
                     className="flex items-center gap-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs px-2.5 py-1 rounded-full font-medium hover:bg-amber-500/20 shrink-0"
@@ -384,7 +434,9 @@ export default function MessagingPage() {
                         ? "Add a note to this call thread…"
                         : selectedConv.channel === "email"
                           ? "Reply by email…"
-                          : `Reply via ${selectedConv.channel.toUpperCase()}…`
+                          : selectedConv.channel === "webchat"
+                            ? "Reply to the website visitor…"
+                            : `Reply via ${selectedConv.channel.toUpperCase()}…`
                     }
                     className="flex-1 resize-none"
                   />
@@ -396,7 +448,9 @@ export default function MessagingPage() {
                   Enter to send, Shift+Enter for a new line.{" "}
                   {selectedConv.channel === "email"
                     ? "Email replies go out through the mailbox that received the thread."
-                    : "Replies go out through your Twilio number when it is connected."}
+                    : selectedConv.channel === "webchat"
+                      ? "Replies appear in the visitor's chat window within a few seconds."
+                      : "Replies go out through your Twilio number when it is connected."}
                 </p>
               </form>
             </>

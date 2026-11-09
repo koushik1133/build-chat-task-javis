@@ -28,6 +28,11 @@ import "./credits";
 import "./optimize";
 import "./accounting";
 import "./privacy";
+import "./voice";
+import "./inventory";
+import "./agency";
+import "./home";
+import "./webchat";
 // END tool-module imports
 // ─────────────────────────────────────────────────────────────────────────────
 
