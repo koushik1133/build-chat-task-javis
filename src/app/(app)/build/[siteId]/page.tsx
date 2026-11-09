@@ -826,6 +826,7 @@ function PublishModal({
 
   return (
     <div
+      role="presentation"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
@@ -837,7 +838,7 @@ function PublishModal({
           <h2 className="flex items-center gap-2 text-base font-semibold">
             <Github className="h-4 w-4" /> Publish to GitHub
           </h2>
-          <button onClick={onClose} className="rounded-md p-1 hover:bg-secondary/60">
+          <button aria-label="Close" onClick={onClose} className="rounded-md p-1 hover:bg-secondary/60">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -916,7 +917,7 @@ function PublishModal({
               </p>
             </div>
             <label className="flex items-center gap-2 text-xs">
-              <input
+              <input aria-label="Enable GitHub Pages"
                 type="checkbox"
                 checked={enablePages}
                 onChange={(e) => setEnablePages(e.target.checked)}
@@ -1008,7 +1009,7 @@ function LeadsPanel({ siteId }: { siteId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <KernelHubMascot size="sm" message="Form submissions from your generated site will appear here." />
-        <Button size="sm" variant="outline" className="h-8 px-2" onClick={loadLeads}>
+        <Button aria-label="Refresh" size="sm" variant="outline" className="h-8 px-2" onClick={loadLeads}>
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -1100,7 +1101,7 @@ function AnalyticsPanel({ siteId }: { siteId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <KernelHubMascot size="sm" message="Here are your real-time page views." />
-        <Button size="sm" variant="outline" className="h-8 px-2" onClick={load}>
+        <Button aria-label="Refresh" size="sm" variant="outline" className="h-8 px-2" onClick={load}>
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
       </div>

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { tableExists } from "@/lib/table-exists";
+import { clampBatchSize, deleteInBatches, updateInBatches } from "@/lib/db/batch";
 import { REDACTED } from "./anonymize";
 import { enforceRetentionFloor, RETENTION_KINDS, RETENTION_META, type RetentionAction, type RetentionKind } from "./constants";
 
@@ -76,8 +77,20 @@ async function affectedCount(table: string, sql: string, params: unknown[]): Pro
   return rows.length;
 }
 
+/** Child ticket_messages writes in <= 1000-row batches (a ticket can carry many messages). */
+async function batchedMessages(u: string, ids: string[], del: boolean): Promise<void> {
+  if (!(await tableExists("ticket_messages"))) return;
+  try {
+    if (del) await deleteInBatches("ticket_messages", "user_id = $1 AND ticket_id = ANY($2)", [u, ids]);
+    else await updateInBatches("ticket_messages", "body = $3", "user_id = $1 AND ticket_id = ANY($2) AND body <> $3", [u, ids], [REDACTED]);
+  } catch (err) {
+    console.error("[retention] ticket_messages failed:", err instanceof Error ? err.message : err);
+  }
+}
+
 /** Apply one policy; returns rows touched. `limit` bounds each statement. */
-export async function applyPolicy(p: RetentionPolicyRow, limit: number): Promise<number> {
+export async function applyPolicy(p: RetentionPolicyRow, rawLimit: number): Promise<number> {
+  const limit = clampBatchSize(rawLimit); // DSQL: <= 1000 rows per statement/transaction
   const keep = enforceRetentionFloor(p.entity_kind, p.keep_days); // floor re-applied at run time
   const cutoff = new Date(Date.now() - keep * 86_400_000).toISOString();
   const u = p.user_id;
@@ -85,14 +98,14 @@ export async function applyPolicy(p: RetentionPolicyRow, limit: number): Promise
   switch (p.entity_kind) {
     case "tickets_closed": {
       const ids = (
-        await query<{ id: string }>(`SELECT id FROM tickets WHERE user_id = $1 AND status IN ('resolved','closed') AND COALESCE(resolved_at, updated_at) < $2 ORDER BY updated_at ASC LIMIT $3`, [u, cutoff, limit]).catch(() => [])
+        await query<{ id: string }>(`SELECT id FROM tickets WHERE user_id = $1 AND status IN ('resolved','closed') AND COALESCE(resolved_at, updated_at) < $2 ORDER BY updated_at ASC LIMIT $3`, [u, cutoff, Math.min(limit, 100)]).catch(() => [])
       ).map((r) => r.id);
       if (ids.length === 0) return 0;
       if (del) {
-        await affectedCount("ticket_messages", `DELETE FROM ticket_messages WHERE user_id = $1 AND ticket_id = ANY($2)`, [u, ids]);
+        await batchedMessages(u, ids, true);
         return affectedCount("tickets", `DELETE FROM tickets WHERE user_id = $1 AND id = ANY($2)`, [u, ids]);
       }
-      await affectedCount("ticket_messages", `UPDATE ticket_messages SET body = $3 WHERE user_id = $1 AND ticket_id = ANY($2) AND body <> $3`, [u, ids, REDACTED]);
+      await batchedMessages(u, ids, false);
       return affectedCount("tickets", `UPDATE tickets SET requester_email = NULL, requester_name = NULL, contact_id = NULL, updated_at = NOW() WHERE user_id = $1 AND id = ANY($2) AND (requester_email IS NOT NULL OR requester_name IS NOT NULL OR contact_id IS NOT NULL)`, [u, ids]);
     }
     case "mail_bodies":
@@ -122,7 +135,7 @@ export async function applyRetention(limit = 500): Promise<RetentionRunResult> {
   const policies = await query<RetentionPolicyRow>(`SELECT ${COLS} FROM retention_policies WHERE enabled = TRUE ORDER BY updated_at ASC LIMIT 2000`, []).catch(() => []);
   for (const p of policies) {
     result.policies++;
-    const n = await applyPolicy(p, Math.max(1, Math.min(5000, limit))).catch(() => 0);
+    const n = await applyPolicy(p, clampBatchSize(limit)).catch(() => 0);
     result.affected[p.entity_kind] = (result.affected[p.entity_kind] ?? 0) + n;
     await query(`UPDATE retention_policies SET last_run_at = NOW(), last_affected = $2 WHERE id = $1`, [p.id, n]).catch(() => undefined);
   }

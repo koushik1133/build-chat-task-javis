@@ -4,6 +4,7 @@ import { resolveSession, touchSession } from "@/lib/webchat/session";
 import { pollMessages, postVisitorMessage } from "@/lib/webchat/service";
 import { MAX_VISITOR_MESSAGE } from "@/lib/webchat/config";
 import { clientIp, enforceLimits, isUuid, jsonWith, parseBody, sessionTokenFrom, widgetCors, widgetPreflight } from "@/lib/webchat/http";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export async function OPTIONS(req: NextRequest, { params }: Ctx) {
 }
 
 /** GET ?since=<iso>&wait=<ms> — poll (long-poll when `wait` > 0, capped at 20s). */
-export async function GET(req: NextRequest, { params }: Ctx) {
+async function getHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   try {
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
 }
 
 /** POST { text } — visitor message → receptionist reply (inline) or "a human will reply". */
-export async function POST(req: NextRequest, { params }: Ctx) {
+async function postHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   try {
@@ -73,3 +74,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return jsonWith(cors, { error: "internal" }, 500);
   }
 }
+
+export const GET = withRequestContext(getHandler);
+export const POST = withRequestContext(postHandler);

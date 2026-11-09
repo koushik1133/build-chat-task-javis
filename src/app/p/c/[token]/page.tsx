@@ -76,6 +76,7 @@ export default function ClientPortalPage() {
   if (error) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
+        <h1 className="sr-only">Customer portal link unavailable</h1>
         <ErrorState message={error} onRetry={data === null && error !== "This link has expired or is not valid." ? () => { setError(null); void load(); } : undefined} />
         <p className="mt-3 text-sm text-muted-foreground">Ask the business to send you a fresh link, or request one from their portal sign-in page.</p>
       </div>

@@ -3,6 +3,7 @@ import { resolveSession } from "@/lib/webchat/session";
 import { pollMessages } from "@/lib/webchat/service";
 import { sseComment, sseFrame } from "@/lib/webchat/config";
 import { clientIp, enforceLimits, isUuid, jsonWith, sessionTokenFrom, widgetCors, widgetPreflight, withHeaders } from "@/lib/webchat/http";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export async function OPTIONS(req: NextRequest, { params }: Ctx) {
  * GET /api/widget/chat/[siteId]/stream?token=&since= — SSE. Polls the DB every
  * 2s and closes after 55s; the client reconnects with the last `ts` as `since`.
  */
-export async function GET(req: NextRequest, { params }: Ctx) {
+async function getHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   if (!isUuid(siteId)) return jsonWith(cors, { error: "not_found" }, 404);
@@ -78,3 +79,5 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     cors
   );
 }
+
+export const GET = withRequestContext(getHandler);

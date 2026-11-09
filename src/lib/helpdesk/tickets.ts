@@ -13,6 +13,7 @@ import {
   type TicketSource,
   type TicketStatus,
 } from "./sla";
+import { updateInBatches } from "@/lib/db/batch";
 
 /**
  * Helpdesk data layer. Every function takes `dataId` (the org's owner user id
@@ -210,7 +211,7 @@ export async function updatePolicy(dataId: string, id: string, patch: Partial<Po
 }
 
 export async function deletePolicy(dataId: string, id: string): Promise<void> {
-  await query(`UPDATE tickets SET sla_policy_id = NULL WHERE user_id = $1 AND sla_policy_id = $2`, [dataId, id]);
+  await updateInBatches("tickets", "sla_policy_id = NULL", "user_id = $1 AND sla_policy_id = $2", [dataId, id]);
   await query(`DELETE FROM sla_policies WHERE user_id = $1 AND id = $2`, [dataId, id]);
 }
 

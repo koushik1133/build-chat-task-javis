@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { getLiveProvider, upsertConnection } from "@/lib/accounting/connections";
 import { ACCOUNTING_STATE_COOKIE, accountingRedirectUri, createAccountingState } from "@/lib/accounting/oauth";
 import { isLiveAccountingProviderId } from "@/lib/accounting/types";
@@ -18,6 +19,8 @@ function settingsRedirect(req: NextRequest, params: Record<string, string>): Nex
 export async function GET(req: NextRequest, ctx: { params: Promise<{ provider: string }> }) {
   const scope = await settingsScope();
   if (isResponse(scope)) return scope;
+  const gate = await planGate(scope, { feature: "accounting_sync" });
+  if (gate) return settingsRedirect(req, { error: "Accounting sync is not included in your plan. Upgrade under Settings, Plan & usage." });
   const { provider: providerParam } = await ctx.params;
   if (!isLiveAccountingProviderId(providerParam)) return NextResponse.json({ error: "Unknown provider" }, { status: 404 });
   const provider = getLiveProvider(providerParam)!;

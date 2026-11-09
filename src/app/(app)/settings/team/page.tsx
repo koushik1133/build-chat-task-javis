@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { UpgradePrompt } from "@/components/plans/upgrade-prompt";
 import { Users, Loader2, RefreshCw, Copy, Check, Trash2, X, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page-container";
@@ -135,6 +136,7 @@ export default function TeamSettingsPage() {
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <UserPlus className="h-4 w-4" aria-hidden /> Invite a teammate
           </h2>
+          <UpgradePrompt metric="seats" className="mt-3" />
           <form onSubmit={(e) => void sendInvite(e)} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="flex-1 text-xs font-medium text-muted-foreground">
               Email

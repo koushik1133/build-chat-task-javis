@@ -5,6 +5,7 @@ import { ROLES, type Role } from "@/lib/auth/roles";
 import { getOrgSettings } from "@/lib/org-settings";
 import { ChartConfigSchema, ReportSpecSchema, type ChartConfig, type ReportSpec } from "./spec";
 import { CADENCES, nextRunAt, type Cadence } from "./schedule";
+import { deleteInBatches } from "@/lib/db/batch";
 
 /** Saved reports, schedules and dashboards (CRUD keyed by org data id). */
 
@@ -125,7 +126,7 @@ export async function updateSavedReport(dataId: string, actorId: string, id: str
 export async function deleteSavedReport(dataId: string, actorId: string, id: string): Promise<boolean> {
   const current = await getSavedReport(dataId, actorId, id);
   if (!current) return false;
-  await query(`DELETE FROM report_schedules WHERE user_id = $1 AND report_id = $2`, [dataId, id]);
+  await deleteInBatches("report_schedules", "user_id = $1 AND report_id = $2", [dataId, id]);
   await query(`DELETE FROM saved_reports WHERE user_id = $1 AND id = $2`, [dataId, id]);
   return true;
 }

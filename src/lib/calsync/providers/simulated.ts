@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { query } from "@/lib/dsql";
 import type { BusyBlock, CalendarProvider, ExchangeResult } from "../types";
 import { hashSummary } from "./util";
+import { deleteInBatches } from "@/lib/db/batch";
 
 /**
  * Simulated external calendar for development and tests: events live in
@@ -74,6 +75,6 @@ export const simulatedCalendarProvider: CalendarProvider = {
     return { externalId: id, etag: String(Date.now()) };
   },
   async deleteEvent(auth, _calendarId, externalId) {
-    await query(`DELETE FROM calsync_sim_events WHERE id = $1 AND connection_id = $2`, [externalId, conn(auth)]);
+    await deleteInBatches("calsync_sim_events", "id = $1 AND connection_id = $2", [externalId, conn(auth)]);
   },
 };

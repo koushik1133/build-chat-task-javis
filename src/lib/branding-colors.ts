@@ -37,5 +37,5 @@ export function readableTextOn(hex: string): "#ffffff" | "#111111" {
     return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   };
   const lum = 0.2126 * ch((n >> 16) & 255) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255);
-  return lum > 0.45 ? "#111111" : "#ffffff";
+  return lum > 0.19 ? "#111111" : "#ffffff";
 }

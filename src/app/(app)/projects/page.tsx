@@ -43,7 +43,7 @@ function ProjectsInner() {
   const filter: Filter = isFilter(search.get("status")) ? (search.get("status") as Filter) : "open";
   const [q, setQ] = useState(search.get("q") ?? "");
   const dq = useDebouncedValue(q, 300);
-  const [showNew, setShowNew] = useState(search.get("new") === "1");
+  const [showNew, setShowNew] = useState(search.get("new") === "1" || search.get("new") === "project");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [members, setMembers] = useState<MemberOption[]>([]);
 

@@ -16,6 +16,7 @@ import {
   type ReviewDTO,
   type Visibility,
 } from "./types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 /**
  * Catalog reads/writes. Listings are keyed by the publisher's org data id;
@@ -263,7 +264,7 @@ export async function deleteListing(dataId: string, id: string): Promise<boolean
   if (isBuiltinId(id)) throw new Error("Built-in listings cannot be deleted");
   const rows = await query<{ id: string }>(`DELETE FROM marketplace_listings WHERE id = $1 AND user_id = $2 RETURNING id`, [id, dataId]);
   if (rows.length === 0) return false;
-  await query(`DELETE FROM marketplace_reviews WHERE listing_id = $1`, [id]).catch(() => undefined);
+  await deleteInBatches("marketplace_reviews", "listing_id = $1", [id]).catch(() => undefined);
   return true;
 }
 

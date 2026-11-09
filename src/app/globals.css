@@ -11,7 +11,7 @@
     --card: 0 0% 100%;
     --card-foreground: 240 8% 10%;
     --primary: 25 95% 53%;        /* vibrant orange */
-    --primary-foreground: 0 0% 100%;
+    --primary-foreground: 20 14% 6%;
     --secondary: 36 18% 94%;
     --secondary-foreground: 240 8% 10%;
     --muted: 36 18% 95%;
@@ -32,7 +32,7 @@
     --card: 240 8% 12%;
     --card-foreground: 36 20% 95%;
     --primary: 25 95% 53%;
-    --primary-foreground: 0 0% 100%;
+    --primary-foreground: 20 14% 6%;
     --secondary: 240 8% 16%;
     --secondary-foreground: 36 20% 95%;
     --muted: 240 8% 14%;

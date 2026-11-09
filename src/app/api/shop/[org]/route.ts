@@ -3,6 +3,7 @@ import { publicCatalog } from "@/lib/storefront/catalog";
 import { NO_STORE, notFound, resolveShop, shopError, shopRateLimit } from "@/lib/storefront/http";
 import { getBillingSettings } from "@/lib/money/settings";
 import { getBranding } from "@/lib/branding";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ org: string }> };
 
 /** GET /api/shop/[org] — storefront settings (public subset) + visible catalog. */
-export async function GET(req: NextRequest, ctx: Ctx) {
+async function getHandler(req: NextRequest, ctx: Ctx) {
   const block = await shopRateLimit(req, "catalog");
   if (block) return block;
   try {
@@ -42,3 +43,5 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return shopError(err, "shop.GET");
   }
 }
+
+export const GET = withRequestContext(getHandler);

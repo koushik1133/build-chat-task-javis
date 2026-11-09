@@ -4,6 +4,7 @@ import { BookingConflictError, BookingValidationError, availableSlots, createBoo
 import { groupSlotsByDay } from "@/lib/calendar/slots";
 import { loadSiteForWidget } from "@/lib/webchat/public-config";
 import { clientIp, enforceLimits, isUuid, jsonWith, parseBody, widgetCors, widgetPreflight } from "@/lib/webchat/http";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export async function OPTIONS(req: NextRequest, { params }: Ctx) {
 }
 
 /** GET ?type=<slug>&from=&to= — booking types (no type) or open slots for one type. CORS-enabled proxy over the public booking API. */
-export async function GET(req: NextRequest, { params }: Ctx) {
+async function getHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   try {
@@ -58,7 +59,7 @@ const BookSchema = z
   .strict();
 
 /** POST — book a slot inline from the widget. */
-export async function POST(req: NextRequest, { params }: Ctx) {
+async function postHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   try {
@@ -94,3 +95,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return jsonWith(cors, { error: "internal" }, 500);
   }
 }
+
+export const GET = withRequestContext(getHandler);
+export const POST = withRequestContext(postHandler);

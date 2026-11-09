@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { query } from "@/lib/dsql";
+import { columnsOfVia } from "@/lib/db/catalog";
 import { EXPORT_TABLES, isDeniedColumn } from "./tables";
 
 /**
@@ -69,19 +70,11 @@ export function manifestLine(args: { counts: Record<string, number>; sha256: str
 
 /** Tables present in the database AND allow-listed, sorted. Columns exclude the denylist. */
 export async function discoverTables(): Promise<TableInfo[]> {
-  const rows = await query<{ table_name: string; column_name: string }>(
-    `SELECT table_name, column_name FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = ANY($1::text[])
-        AND table_name IN (SELECT table_name FROM information_schema.columns WHERE table_schema = 'public' AND column_name = 'user_id')
-      ORDER BY table_name, ordinal_position`,
-    [[...EXPORT_TABLES]]
-  );
+  const cols = await columnsOfVia((sql, params) => query(sql, params ?? []), [...EXPORT_TABLES]);
   const by = new Map<string, string[]>();
-  for (const r of rows) {
-    if (isDeniedColumn(r.column_name)) continue;
-    const list = by.get(r.table_name) ?? [];
-    list.push(r.column_name);
-    by.set(r.table_name, list);
+  for (const [table, names] of cols) {
+    if (!names.includes("user_id")) continue; // only tenant-keyed tables are exported
+    by.set(table, names.filter((c) => !isDeniedColumn(c)));
   }
   return [...by.entries()]
     .map(([table, columns]) => ({ table, columns, hasId: columns.includes("id") }))

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { startSession, resolveSession, closeSession } from "@/lib/webchat/session";
 import { clientIp, enforceLimits, isUuid, jsonWith, parseBody, sessionTokenFrom, widgetCors, widgetPreflight } from "@/lib/webchat/http";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export async function OPTIONS(req: NextRequest, { params }: Ctx) {
 }
 
 /** POST /api/widget/chat/[siteId]/session — start a session → { token, expiresAt, sessionId } */
-export async function POST(req: NextRequest, { params }: Ctx) {
+async function postHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   try {
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 }
 
 /** DELETE /api/widget/chat/[siteId]/session — close the visitor's session. */
-export async function DELETE(req: NextRequest, { params }: Ctx) {
+async function deleteHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   try {
@@ -56,3 +57,6 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
     return jsonWith(cors, { error: "internal" }, 500);
   }
 }
+
+export const POST = withRequestContext(postHandler);
+export const DELETE = withRequestContext(deleteHandler);

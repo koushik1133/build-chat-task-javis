@@ -187,6 +187,9 @@ export const ROUTES = {
   getListing: def({ id: "getMarketplaceListing", method: "GET", path: "/marketplace/{id}", summary: "Get a listing with its definition", tag: "Marketplace", scope: "read:agents", params: S.ListingParams, response: S.ListingDetail }),
   installListing: def({ id: "installMarketplaceListing", method: "POST", path: "/marketplace/{id}/install", summary: "Install a listing", description: "Idempotent per listing version.", tag: "Marketplace", scope: "write:agents", params: S.ListingParams, response: S.InstallResult, status: 201, tools: ["marketplace.install"] }),
 
+  /* plan & usage */
+  getUsage: def({ id: "getUsage", method: "GET", path: "/usage", summary: "Plan, limits and current usage", tag: "Plan", scope: "read:billing", response: S.PlanUsage, tools: ["plan.usage"] }),
+
   /* credits */
   creditBalance: def({ id: "getCreditBalance", method: "GET", path: "/credits/balance", summary: "Credit balance", tag: "Credits", scope: "read:billing", response: S.CreditBalance, tools: ["credits.balance"] }),
   creditLedger: def({ id: "listCreditLedger", method: "GET", path: "/credits/ledger", summary: "Credit ledger", tag: "Credits", scope: "read:billing", query: S.ListQuery, response: S.LedgerEntry, list: true }),
@@ -318,6 +321,7 @@ export const TAGS: ReadonlyArray<{ name: string; description: string }> = [
   { name: "Marketplace", description: "Installable agents, playbooks, automations and record packs." },
   { name: "Snapshots", description: "Portable workspace configuration snapshots (never data)." },
   { name: "Credits", description: "AI credit balance and ledger." },
+  { name: "Plan", description: "KernelHub plan, entitlements and usage." },
   { name: "Privacy", description: "Consent ledger and data-subject requests." },
   { name: "Marketing", description: "Consent-first email / SMS campaigns, audiences and templates." },
   { name: "Voice", description: "Outbound voice campaigns." },

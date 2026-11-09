@@ -5,6 +5,7 @@ import { getPortalData } from "@/lib/portal";
 import { bookingChangeWindowHours, cancelBooking, getBooking } from "@/lib/calendar/booking";
 import { withinChangeWindow } from "@/lib/portal-rules";
 import { clientIp } from "@/lib/portal-auth";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ type Ctx = { params: Promise<{ token: string }> };
 const ip = (req: NextRequest): string => clientIp(req);
 
 /** GET /api/p/portal/[token] — the client's portal data. */
-export async function GET(req: NextRequest, ctx: Ctx) {
+async function getHandler(req: NextRequest, ctx: Ctx) {
   if (!(await rateLimitAsync(`portal:${ip(req)}`, 60, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   try {
     const { token } = await ctx.params;
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 }
 
 /** POST /api/p/portal/[token] — { action: "cancel_booking", bookingId } */
-export async function POST(req: NextRequest, ctx: Ctx) {
+async function postHandler(req: NextRequest, ctx: Ctx) {
   if (!(await rateLimitAsync(`portal:${ip(req)}`, 60, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   try {
     const { token } = await ctx.params;
@@ -54,3 +55,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+export const GET = withRequestContext(getHandler);
+export const POST = withRequestContext(postHandler);

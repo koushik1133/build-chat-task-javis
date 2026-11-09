@@ -15,7 +15,7 @@ function isPublicPath(path: string) {
   // Public token-scoped surfaces: shared quotes/invoices/pay links, client
   // portal, booking pages and invite acceptance (which handles sign-in itself).
   if (path.startsWith("/p/") || path.startsWith("/book/") || path.startsWith("/invite/")) return true;
-  if (path.startsWith("/help/") || path.startsWith("/shop/") || path.startsWith("/u/") || path.startsWith("/api/calendar/feed/") || path.startsWith("/m/") || path === "/offline" || path === "/widget-demo" || path === "/sw.js" || path === "/manifest.webmanifest") return true;
+  if (path.startsWith("/help/") || path.startsWith("/shop/") || path.startsWith("/u/") || path === "/pricing" || path.startsWith("/api/calendar/feed/") || path.startsWith("/m/") || path === "/offline" || path === "/widget-demo" || path === "/sw.js" || path === "/manifest.webmanifest") return true;
   // API routes enforce auth individually (requireUser, cron secret, public webhooks).
   if (path.startsWith("/api/")) return true;
   return false;
@@ -45,7 +45,19 @@ function clearSupabaseCookies<T extends NextResponse>(res: T, request: NextReque
   return res;
 }
 
+const REQUEST_ID_RE = /^[A-Za-z0-9._-]{8,64}$/;
+
+/** Propagate/generate `x-request-id` on the forwarded request and echo it on the response. */
 export async function updateSession(request: NextRequest) {
+  const incoming = request.headers.get("x-request-id") ?? "";
+  const reqId = REQUEST_ID_RE.test(incoming) ? incoming : crypto.randomUUID();
+  try { request.headers.set("x-request-id", reqId); } catch { /* immutable headers: the response still carries the id */ }
+  const res = await updateSessionInner(request);
+  res.headers.set("x-request-id", reqId);
+  return res;
+}
+
+async function updateSessionInner(request: NextRequest) {
   const path = request.nextUrl.pathname;
   let response = forwardRequest(request, path);
 

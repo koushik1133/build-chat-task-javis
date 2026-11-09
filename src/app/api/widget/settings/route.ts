@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
@@ -8,6 +9,7 @@ import { parseOriginList } from "@/lib/cors";
 import { appOrigin } from "@/lib/share-tokens";
 import { CONSENT_MODES, MAX_CONSENT_TEXT, MAX_GREETING, WIDGET_MODES, WIDGET_POSITIONS, parseWidgetConfig, type WidgetSiteDTO } from "@/lib/webchat/config";
 import { orgSlugFor } from "@/lib/webchat/public-config";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,7 +37,7 @@ function toDto(r: SiteRow): WidgetSiteDTO {
 }
 
 /** GET /api/widget/settings — sites + their widget config, branding colour, org slug, app URL. */
-export async function GET() {
+async function getHandler() {
   let scope;
   try {
     scope = await requireScope({ area: "sites", edit: false });
@@ -75,13 +77,15 @@ const PutSchema = z
   .strict();
 
 /** PUT — save widget config, consent text and allowed origins for one site. */
-export async function PUT(req: NextRequest) {
+async function putHandler(req: NextRequest) {
   let scope;
   try {
     scope = await requireScope({ area: "sites", edit: true });
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const gate = await planGate(scope, { feature: "webchat_widget" });
+  if (gate) return gate;
   const parsed = PutSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body", detail: parsed.error.flatten() }, { status: 400 });
   const { siteId, config, consentText, allowedOrigins } = parsed.data;
@@ -110,7 +114,7 @@ export async function PUT(req: NextRequest) {
 const InstallSchema = z.object({ siteId: z.string().uuid(), action: z.enum(["install", "uninstall"]).default("install") }).strict();
 
 /** POST — install/uninstall the script tag in the site builder's HTML (before </body>). */
-export async function POST(req: NextRequest) {
+async function postHandler(req: NextRequest) {
   let scope;
   try {
     scope = await requireScope({ area: "sites", edit: true });
@@ -137,3 +141,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+
+export const GET = withRequestContext(getHandler);
+export const PUT = withRequestContext(putHandler);
+export const POST = withRequestContext(postHandler);

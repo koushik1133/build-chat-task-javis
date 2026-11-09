@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { dbUnavailableResponse } from "@/lib/api-db";
@@ -42,6 +43,8 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const gate = await planGate(scope, { metric: "child_workspaces" });
+  if (gate) return gate;
   const parsed = await parseBody(req, CreateBody, 4_096);
   if (!parsed.ok) return parsed.res;
   try {

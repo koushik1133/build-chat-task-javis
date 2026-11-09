@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { LoadMore } from "@/components/ui/load-more";
 import { PageContainer } from "@/components/page-container";
 import { cn, timeAgo } from "@/lib/utils";
+import { AUDIT_CATEGORIES, AUDIT_CATEGORY_LABELS } from "@/lib/audit-categories";
 
 interface AuditEntry {
   id: string;
@@ -45,6 +46,9 @@ export default function AuditSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [entity, setEntity] = useState("");
   const [entityId, setEntityId] = useState("");
+  const [category, setCategory] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   const load = useCallback(async (after?: string | null) => {
     if (after) setLoadingMore(true);
@@ -54,6 +58,9 @@ export default function AuditSettingsPage() {
       const params = new URLSearchParams({ limit: "50" });
       if (entity.trim()) params.set("entity", entity.trim());
       if (entityId.trim()) params.set("entityId", entityId.trim());
+      if (category) params.set("category", category);
+      if (from) params.set("from", new Date(from).toISOString());
+      if (to) params.set("to", new Date(`${to}T23:59:59`).toISOString());
       if (after) params.set("cursor", after);
       const res = await fetch(`/api/audit?${params.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => null);
@@ -71,7 +78,7 @@ export default function AuditSettingsPage() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [entity, entityId]);
+  }, [entity, entityId, category, from, to]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -100,11 +107,32 @@ export default function AuditSettingsPage() {
             <input value={entityId} onChange={(e) => setEntityId(e.target.value)} placeholder="Any"
               className="w-56 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono" />
           </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">Category</span>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-48 rounded-md border border-border bg-background px-3 py-2 text-sm">
+              <option value="">All categories</option>
+              {AUDIT_CATEGORIES.map((c) => <option key={c} value={c}>{AUDIT_CATEGORY_LABELS[c]}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">From</span>
+            <input aria-label="From date" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">To</span>
+            <input aria-label="To date" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2 text-sm" />
+          </label>
         </div>
+        <div className="flex gap-2">
+        <a href={`/api/audit?${new URLSearchParams({ format: "csv", ...(category ? { category } : {}), ...(entity.trim() ? { entity: entity.trim() } : {}), ...(from ? { from: new Date(from).toISOString() } : {}), ...(to ? { to: new Date(`${to}T23:59:59`).toISOString() } : {}) }).toString()}`}
+          className="inline-flex items-center rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted" download>
+          Export CSV
+        </a>
         <Button variant="outline" onClick={() => void load()} disabled={loading} aria-label="Refresh audit log">
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="mr-2 h-4 w-4" aria-hidden />}
           Refresh
         </Button>
+        </div>
       </div>
 
       {error && (

@@ -56,11 +56,11 @@ class Params {
   }
 }
 
-/** SQL expression for a field (JSON fields bind their key as a parameter). */
+/** SQL expression for a field (JSON fields bind their key as a parameter). `::json` (not jsonb): DSQL supports json/jsonb only as runtime types; ->> behaves identically for flat key lookups. */
 function fieldExpr(f: DatasetField, p: Params): string {
   if (f.column) return f.column;
   if (!f.jsonKey || !IDENT_RE.test(f.jsonKey)) throw new ReportSpecError(`Field ${f.key} has no column`);
-  const base = `(data::jsonb ->> ${p.add(f.jsonKey)})`;
+  const base = `(data::json ->> ${p.add(f.jsonKey)})`;
   if (f.kind === "measure") return `NULLIF(${base}, '')::numeric`;
   if (f.kind === "date") return `NULLIF(${base}, '')::timestamptz`;
   return base;

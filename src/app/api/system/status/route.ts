@@ -10,6 +10,8 @@ import { channelStatus, twilioIsLive } from "@/lib/notifications/status";
 import { listRecentErrors } from "@/lib/errors/capture";
 import { CRON_TICK_KEY, getSystemState } from "@/lib/system/state";
 import { summariseVitals } from "@/lib/vitals";
+import { listEvents } from "@/lib/alerts/store";
+import { cronAgeMinutes } from "@/lib/metrics/collect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,10 +20,13 @@ const DB_TIMEOUT_MS = 3_000;
 
 interface CountRow { status: string; n: number | string }
 
-async function countsBy(table: string, statuses: string[]): Promise<Record<string, number>> {
+/** `dataId` null = deployment-wide (operator org only); otherwise the caller's workspace. */
+async function countsBy(table: string, statuses: string[], dataId: string | null): Promise<Record<string, number>> {
   const out: Record<string, number> = Object.fromEntries(statuses.map((s) => [s, 0]));
   if (!(await tableExists(table))) return out;
-  const rows = await query<CountRow>(`SELECT status, COUNT(*) AS n FROM ${table} WHERE status = ANY($1::text[]) GROUP BY status`, [statuses]).catch(() => []);
+  const rows = dataId === null
+    ? await query<CountRow>(`SELECT status, COUNT(*) AS n FROM ${table} WHERE status = ANY($1::text[]) GROUP BY status`, [statuses]).catch(() => [])
+    : await query<CountRow>(`SELECT status, COUNT(*) AS n FROM ${table} WHERE user_id = $2 AND status = ANY($1::text[]) GROUP BY status`, [statuses, dataId]).catch(() => []);
   for (const r of rows) out[r.status] = Number(r.n);
   return out;
 }
@@ -64,14 +69,20 @@ export async function GET() {
     return NextResponse.json({ database, providers, cron: null, queue: null, outbox: null, webhooks: null, errors: [], errorsAvailable: false, vitals: null }, { status: 200 });
   }
 
-  const [cron, queue, outbox, webhooks, errorsAvailable, vitals] = await Promise.all([
+  // Deployment-wide queue numbers are operator-only (OPERATOR_ORG_ID); everyone else sees their own workspace.
+  const operatorId = process.env.OPERATOR_ORG_ID?.trim();
+  const platform = Boolean(operatorId) && (operatorId === scope.dataId || operatorId === scope.orgId);
+  const countScope = platform ? null : scope.dataId;
+  const [cron, queue, outbox, webhooks, errorsAvailable, vitals, recentAlerts, cronAgeMin] = await Promise.all([
     getSystemState<{ at: string; counts: Record<string, number> }>(CRON_TICK_KEY).catch(() => null),
-    countsBy("agent_jobs", ["queued", "running", "failed", "dead"]),
-    countsBy("notification_outbox", ["queued", "failed"]),
-    countsBy("webhook_deliveries", ["queued", "failed", "dead"]),
+    countsBy("agent_jobs", ["queued", "running", "failed", "dead"], countScope),
+    countsBy("notification_outbox", ["queued", "failed"], countScope),
+    countsBy("webhook_deliveries", ["queued", "failed", "dead"], countScope),
     tableExists("app_errors"),
     // Web Vitals are deployment-wide aggregates (anonymous, no tenant key) — not scoped to this org.
     summariseVitals(24).catch(() => null),
+    tableExists("alert_events").then((ok) => (ok ? listEvents(scope.dataId, 10) : [])).catch(() => []),
+    cronAgeMinutes().catch(() => null),
   ]);
   const errors = errorsAvailable ? await listRecentErrors(50, scope.dataId).catch(() => []) : [];
 
@@ -85,5 +96,6 @@ export async function GET() {
     errors,
     errorsAvailable,
     vitals,
+    diagnostics: { scope: platform ? "platform" : "workspace", cronAgeMinutes: cronAgeMin === null ? null : Math.round(cronAgeMin * 10) / 10, recentAlerts },
   });
 }

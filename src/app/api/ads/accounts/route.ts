@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/secure-store";
+import { deleteInBatches } from "@/lib/db/batch";
 
 export const runtime = "nodejs";
 
@@ -112,7 +113,7 @@ export async function DELETE(req: Request) {
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
   // Both statements are user-scoped, so one tenant can never delete another's rows.
-  await query(`DELETE FROM ad_stats WHERE user_id = $1 AND ad_account_id = $2`, [scope.dataId, id]);
+  await deleteInBatches("ad_stats", "user_id = $1 AND ad_account_id = $2", [scope.dataId, id]);
   await query(`DELETE FROM ad_accounts WHERE user_id = $1 AND id = $2`, [scope.dataId, id]);
 
   return NextResponse.json({ success: true });

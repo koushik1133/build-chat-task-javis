@@ -729,7 +729,7 @@ export default function AgentsPage() {
                     <Button variant="ghost" size="sm" onClick={() => openEdit(agent)} title="Edit prompt">
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => remove(agent.id)}>
+                    <Button aria-label="Delete" variant="ghost" size="sm" onClick={() => remove(agent.id)}>
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   </div>
@@ -924,7 +924,7 @@ export default function AgentsPage() {
 
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">What it should do instead (Correction)</label>
-                  <textarea
+                  <textarea aria-label="Correction"
                     value={correctionText}
                     onChange={e => setCorrectionText(e.target.value)}
                     rows={12}

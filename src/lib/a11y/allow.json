@@ -1,0 +1,4 @@
+{
+  "_doc": "Allow-list of accepted scanner findings. Keys are `file|rule|snippet` fingerprints; each needs a reason. Keep this small.",
+  "entries": {}
+}

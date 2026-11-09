@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { CONSENT_TEXT } from "./consent-text";
 import { PdfDocument, type PdfPage, type Rgb } from "./writer";
 
 /**
@@ -131,10 +132,7 @@ export interface RenderOptions {
   business?: string | null;
 }
 
-export const CONSENT_TEXT =
-  "The signer confirmed their email address with a one-time code and typed their name as an electronic signature, " +
-  "agreeing to be bound by this document and the terms shown. This electronic record and signature are intended to " +
-  "have the same legal effect as a handwritten signature.";
+export { CONSENT_TEXT };
 
 /* ─── helpers ────────────────────────────────────────────────────────────── */
 

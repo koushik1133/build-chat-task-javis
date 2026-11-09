@@ -9,6 +9,7 @@ import {
   type AccountingAuth, type AccountingConnectionRow, type AccountingConnectionView, type AccountingEntityKind, type AccountingLinkRow,
   type AccountingSettings, type AccountingSyncLogRow, type ConnectionContext, type LiveAccountingProvider, type LiveAccountingProviderId,
 } from "./types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 /** Live providers + connection/link/log persistence. Credentials are encrypted with secure-store. */
 
@@ -178,9 +179,9 @@ export async function markConnectionError(id: string, message: string, fatal = f
 export async function deleteConnection(dataId: string, id: string): Promise<boolean> {
   const row = await queryOne<{ id: string }>(`SELECT id FROM accounting_connections WHERE id = $1 AND user_id = $2`, [id, dataId]);
   if (!row) return false;
-  await query(`DELETE FROM accounting_links WHERE connection_id = $1 AND user_id = $2`, [id, dataId]);
-  await query(`DELETE FROM accounting_sync_log WHERE connection_id = $1 AND user_id = $2`, [id, dataId]);
-  await query(`DELETE FROM accounting_sim_objects WHERE connection_id = $1 AND user_id = $2`, [id, dataId]);
+  await deleteInBatches("accounting_links", "connection_id = $1 AND user_id = $2", [id, dataId]);
+  await deleteInBatches("accounting_sync_log", "connection_id = $1 AND user_id = $2", [id, dataId]);
+  await deleteInBatches("accounting_sim_objects", "connection_id = $1 AND user_id = $2", [id, dataId]);
   await query(`DELETE FROM accounting_connections WHERE id = $1 AND user_id = $2`, [id, dataId]);
   return true;
 }

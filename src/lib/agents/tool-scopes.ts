@@ -36,6 +36,7 @@ export const TOOL_MODULE_AREA: Record<string, Area> = {
   orders: "billing",
   storefront: "billing",
   credits: "billing",
+  plan: "billing",
   helpdesk: "helpdesk",
   strategy: "reports",
   optimize: "reports",

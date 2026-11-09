@@ -17,6 +17,7 @@ import { createTimeEntry } from "@/lib/finance/time";
 import { enqueueNotification } from "@/lib/notifications/outbox";
 import { recordAudit } from "@/lib/audit";
 import { buildDemoPlan, DEMO_TAG, planCounts, type DemoPlan } from "./plan";
+import { deleteInBatches, inBatches } from "@/lib/db/batch";
 
 /**
  * Demo workspace seeder. Every row goes through the real lib function (so
@@ -318,9 +319,9 @@ export async function clearDemoData(dataId: string, actorId: string | null = nul
     if (ids.length === 0) return;
     for (const [table, col] of sql) {
       const scoped = col === "id";
-      await query(
-        `DELETE FROM ${table} WHERE ${col}::text = ANY($1::text[])${scoped ? " AND user_id = $2" : ""}`,
-        scoped ? [ids, dataId] : [ids]
+      // <= 500 ids per statement keeps each transaction well under DSQL's 3,000-row cap.
+      await inBatches(ids, 500, (slice) =>
+        deleteInBatches(table, `${col}::text = ANY($1::text[])${scoped ? " AND user_id = $2" : ""}`, scoped ? [slice, dataId] : [slice])
       ).catch(() => undefined);
     }
     removed[entity] = ids.length;
@@ -339,7 +340,7 @@ export async function clearDemoData(dataId: string, actorId: string | null = nul
   await del("time_entry", [["time_entries", "id"]]);
   await del("outbox", [["notification_outbox", "id"]]);
   await del("contact", [["crm_activities", "contact_id"], ["crm_contacts", "id"]]);
-  await query(`DELETE FROM demo_seed_rows WHERE user_id = $1`, [dataId]);
+  await deleteInBatches("demo_seed_rows", "user_id = $1", [dataId]);
   void recordAudit({ dataId, userId: actorId }, { action: "demo.cleared", entity: "workspace", entityId: dataId, after: removed });
   return { removed };
 }

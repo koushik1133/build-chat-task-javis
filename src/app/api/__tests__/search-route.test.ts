@@ -10,6 +10,7 @@ vi.mock("@/lib/auth/scope", () => ({
   requireScope: mocks.requireScope,
   scopeErrorResponse: () => null,
 }));
+vi.mock("@/lib/table-exists", () => ({ tableExists: async () => true }));
 vi.mock("@/lib/i18n/server", () => ({ getRequestLocale: async () => "en" }));
 vi.mock("@/lib/org-settings", () => ({ getOrgSettings: async () => ({ locale: "en", currency: "USD", timezone: "UTC" }) }));
 
@@ -45,7 +46,7 @@ describe("GET /api/search", () => {
     mocks.query.mockImplementation(async (sql: string, params: unknown[]) => {
       if (sql.includes("FROM tickets")) throw new Error("relation tickets does not exist");
       if (sql.includes("FROM crm_contacts")) {
-        expect(params[1]).toBe("%50\\%\\_off%");
+        expect((params[1] as string[])[0]).toBe("%50\\%\\_off%");
         return [{ id: "c1", full_name: "Ada", email: null, company: null }];
       }
       return [];

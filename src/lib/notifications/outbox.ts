@@ -175,7 +175,7 @@ export async function listOutbox(dataId: string, opts: ListOutboxOptions = {}): 
   const where: string[] = ["user_id = $1"];
   const values: unknown[] = [dataId];
   if (opts.unreadInApp) {
-    where.push(`channel = 'in_app'`, `status = 'sent'`, `read_at IS NULL`);
+    where.push(`channel = 'in_app'`, `status = 'sent'`, `read_at IS NULL`, `(snoozed_until IS NULL OR snoozed_until <= NOW())`);
   } else {
     if (opts.channel) {
       values.push(opts.channel);
@@ -198,7 +198,8 @@ export async function listOutbox(dataId: string, opts: ListOutboxOptions = {}): 
 export async function countUnreadInApp(dataId: string): Promise<number> {
   const row = await queryOne<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM notification_outbox
-      WHERE user_id = $1 AND channel = 'in_app' AND status = 'sent' AND read_at IS NULL`,
+      WHERE user_id = $1 AND channel = 'in_app' AND status = 'sent' AND read_at IS NULL
+        AND (snoozed_until IS NULL OR snoozed_until <= NOW())`,
     [dataId]
   );
   return parseInt(row?.count ?? "0", 10);

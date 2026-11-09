@@ -10,6 +10,7 @@ import { resolveDocumentTotals } from "./tax-rates";
 import { getBillingSettings } from "./settings";
 import { parseBreakdown, type TaxBreakdownRow } from "./tax";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
+import { deleteInBatches } from "@/lib/db/batch";
 
 export { computeTotals } from "./items";
 export type { LineItem } from "./items";
@@ -242,7 +243,7 @@ export async function deleteDraftQuote(dataId: string, id: string): Promise<bool
   const q = await getQuote(dataId, id);
   if (!q) return false;
   if (q.status !== "draft") throw new Error("Only draft quotes can be deleted");
-  await query(`DELETE FROM quote_versions WHERE quote_id = $1`, [id]);
+  await deleteInBatches("quote_versions", "quote_id = $1", [id]);
   await query(`DELETE FROM quotes WHERE id = $1 AND user_id = $2`, [id, dataId]);
   return true;
 }

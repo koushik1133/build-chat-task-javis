@@ -36,7 +36,7 @@ describe("compileReport", () => {
     const ds = recordsDataset({ id: "t1", name: "Deals", fields: [{ key: "region", label: "Region", type: "select", options: ["N"] }, { key: "value", label: "Value", type: "money" }, { key: "bad key; DROP", label: "x", type: "text" }] });
     expect(ds.fields.some((f) => f.jsonKey === "bad key; DROP")).toBe(false);
     const c = compileReport(ds, spec({ dataset: "records:t1", group_by: [{ field: "f_region" }], measures: [{ field: "f_value", agg: "sum" }], filters: [{ field: "f_region", op: "eq", value: "North" }] }), { ...ctx, recordTypeId: "t1" });
-    expect(c.sql).toMatchInlineSnapshot(`"SELECT (data::jsonb ->> $5) AS "f_region", COALESCE(SUM(NULLIF((data::jsonb ->> $6), '')::numeric), 0) AS "sum_f_value" FROM records WHERE user_id = $1 AND deleted_at IS NULL AND type_id = $2 AND (data::jsonb ->> $3) = $4 GROUP BY 1 ORDER BY 1 ASC LIMIT $7"`);
+    expect(c.sql).toMatchInlineSnapshot(`"SELECT (data::json ->> $5) AS "f_region", COALESCE(SUM(NULLIF((data::json ->> $6), '')::numeric), 0) AS "sum_f_value" FROM records WHERE user_id = $1 AND deleted_at IS NULL AND type_id = $2 AND (data::json ->> $3) = $4 GROUP BY 1 ORDER BY 1 ASC LIMIT $7"`);
     expect(c.values).toEqual(["org-1", "t1", "region", "North", "region", "value", 500]);
   });
 

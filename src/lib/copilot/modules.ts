@@ -36,6 +36,7 @@ export const COPILOT_MODULES = [
   "marketing",
   "documents",
   "settings",
+  "plan",
   "home",
   "general",
 ] as const;
@@ -58,9 +59,9 @@ const SHARED_TOOLS = ["knowledge"] as const;
 export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
   home: {
     label: "Home",
-    paths: ["/home"],
+    paths: ["/home", "/inbox"],
     tools: ["home", "tasks", "helpdesk", "billing", "calendar", "agents"],
-    prompt: "You are on the Home dashboard. Start with home.summary for the KPIs and the 'needs you' list; then act on specific items with the module tools. Keep summaries to the three most important things.",
+    prompt: "You are on the Home dashboard. Start with home.summary for the KPIs and the 'needs you' list; then act on specific items with the module tools. Keep summaries to the three most important things. /inbox is the unified activity center (notifications, snooze, approvals link); the command palette (Cmd/Ctrl+K) searches every module and `?` lists keyboard shortcuts.",
   },
   crm: {
     label: "CRM",
@@ -233,6 +234,12 @@ export const COPILOT_PACKS: Record<CopilotModule, CopilotPack> = {
     tools: ["documents", "crm"],
     prompt: "Documents rules: create drafts from the org's templates (documents.create_from_template) and fill custom merge fields from the conversation; never invent legal terms. Sending for signature emails real people and needs approval; check documents.status before re-sending. The signed PDF is attached automatically when everyone has signed.",
     entityParams: { document: "documents.status", id: "documents.status" },
+  },
+  plan: {
+    label: "Plan & usage",
+    paths: ["/settings/plan", "/pricing"],
+    tools: ["plan", "credits"],
+    prompt: "Plan rules: use plan.usage to report the plan, trial days left and usage against each limit; explain upgrades but never start a checkout yourself (owners and admins do that in Settings, Plan & usage). Say clearly when limits are not enforced.",
   },
   settings: {
     label: "Settings",

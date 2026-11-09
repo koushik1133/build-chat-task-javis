@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { recordAudit } from "@/lib/audit";
 import { ScheduleInputSchema, createSchedule, getSavedReport, listSchedules } from "@/lib/reports/store";
@@ -29,6 +30,8 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const gate = await planGate(scope, { feature: "advanced_reports" });
+  if (gate) return gate;
   const body = await parseJson(req, ScheduleInputSchema);
   if (!body.ok) return body.res;
   try {

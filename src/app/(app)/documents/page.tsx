@@ -16,7 +16,7 @@ import { isAbortError, useAbortable, useDebouncedValue } from "@/components/ui/h
 import { PageContainer } from "@/components/page-container";
 import { MarkdownView } from "@/components/documents/markdown-view";
 import { AttachmentPanel } from "@/components/attachments/attachment-panel";
-import { extractMergeKeys } from "@/lib/documents/render";
+import { extractMergeKeys } from "@/lib/documents/markdown";
 import {
   DOCUMENT_KINDS,
   DOCUMENT_STATUSES,
@@ -82,6 +82,11 @@ export default function DocumentsPage() {
   const [status, setStatus] = useState<DocumentStatus | "">("");
   const [q, setQ] = useState("");
   const dq = useDebouncedValue(q, 250);
+  // Deep link from search: /documents?q=<title> pre-filters the list to the document.
+  useEffect(() => {
+    const want = new URLSearchParams(window.location.search).get("q");
+    if (want) setQ(want);
+  }, []);
   const [creating, setCreating] = useState(false);
   const [sendFor, setSendFor] = useState<DocumentDTO | null>(null);
   const [preview, setPreview] = useState<DocumentDTO | null>(null);

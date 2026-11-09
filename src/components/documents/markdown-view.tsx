@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
-import { parseMarkdown, type InlineRun } from "@/lib/documents/render";
+import { parseMarkdown, type InlineRun } from "@/lib/documents/markdown";
 import { cn } from "@/lib/utils";
 
 /** Renders the same markdown subset the PDF renderer understands — no HTML passthrough, so bodies can never inject markup. */

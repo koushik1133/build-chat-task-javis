@@ -95,21 +95,33 @@ export function isUndefinedColumn(err: unknown): boolean {
   return code === "42703" || String(cause?.code ?? "") === "42703" || /column .* does not exist/i.test(message);
 }
 
-/** True for DSQL optimistic-concurrency conflicts (retryable). */
-function isConcurrencyConflict(e: unknown): boolean {
+/**
+ * True for DSQL optimistic-concurrency conflicts (retryable): SQLSTATE 40001
+ * (serialization_failure), DSQL's OC000 (data conflict) and OC001 (schema
+ * changed under the transaction), or a "serialization" message.
+ */
+export function isConcurrencyConflict(e: unknown): boolean {
   const err = isDbError(e) ? e.cause : e;
   if (!err || typeof err !== "object") return false;
   const code = "code" in err ? String((err as { code: unknown }).code) : "";
   const msg = "message" in err ? String((err as { message: unknown }).message) : "";
   return (
     code === "40001" ||
-    msg.includes("OC000") ||
+    code === "OC000" ||
+    code === "OC001" ||
+    /\bOC00[01]\b/.test(msg) ||
     msg.toLowerCase().includes("serialization")
   );
 }
 
-/** Retry `fn` on DSQL optimistic-concurrency conflicts with small backoff. */
-export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+/** Backoff for retry `attempt` (0-based): exponential from 50 ms, capped at 1 s, with up to 50% jitter. */
+export function retryDelayMs(attempt: number, random: () => number = Math.random): number {
+  const base = Math.min(1000, 50 * 2 ** attempt);
+  return Math.floor(base / 2 + random() * (base / 2));
+}
+
+/** Retry `fn` on DSQL optimistic-concurrency conflicts with capped, jittered backoff. */
+export async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -117,8 +129,7 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<
     } catch (e) {
       lastErr = e;
       if (!isConcurrencyConflict(e) || i === attempts - 1) throw e;
-      const delay = 50 * 2 ** i + Math.floor(Math.random() * 50);
-      await new Promise((r) => setTimeout(r, delay));
+      await new Promise((r) => setTimeout(r, retryDelayMs(i)));
     }
   }
   throw lastErr;

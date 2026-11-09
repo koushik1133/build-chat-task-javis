@@ -7,6 +7,7 @@ import { getAudience, resolveAudience, type AudienceContact } from "./audiences"
 import { loadContact, sendMarketingMessage } from "./send";
 import { getTemplate } from "./templates";
 import { CONSENT_PURPOSE_FOR_CHANNEL, computeCampaignStats, parseAudienceDefinition, type CampaignStats, type CampaignStatus, type MarketingSendChannel, type RecipientStatus } from "./types";
+import { deleteInBatches, updateInBatches } from "@/lib/db/batch";
 
 /**
  * Campaign lifecycle:
@@ -165,8 +166,8 @@ export async function deleteCampaign(dataId: string, id: string): Promise<boolea
   const cur = await getCampaign(dataId, id);
   if (!cur) return false;
   if (cur.status === "sending") throw new CampaignError("Pause or cancel the campaign before deleting it", "invalid_state");
-  await query(`DELETE FROM campaign_recipients WHERE user_id = $1 AND campaign_id = $2`, [dataId, id]);
-  await query(`DELETE FROM link_clicks WHERE user_id = $1 AND campaign_id = $2`, [dataId, id]);
+  await deleteInBatches("campaign_recipients", "user_id = $1 AND campaign_id = $2", [dataId, id]);
+  await deleteInBatches("link_clicks", "user_id = $1 AND campaign_id = $2", [dataId, id]);
   await query(`DELETE FROM campaigns WHERE user_id = $1 AND id = $2`, [dataId, id]);
   return true;
 }
@@ -221,7 +222,7 @@ export async function launchCampaign(dataId: string, id: string, opts: { force?:
       ).catch(() => undefined); // UNIQUE (campaign_id, contact_id)
     }
     if (queued === 0 && !opts.force) {
-      await query(`DELETE FROM campaign_recipients WHERE user_id = $1 AND campaign_id = $2`, [dataId, id]);
+      await deleteInBatches("campaign_recipients", "user_id = $1 AND campaign_id = $2", [dataId, id]);
       throw new CampaignError(
         skippedConsent > 0
           ? `None of the ${contacts.length} contacts in this audience has consented to marketing by ${campaign.channel}. Record consent first or choose another audience.`
@@ -256,7 +257,7 @@ export async function cancelCampaign(dataId: string, id: string): Promise<Campai
   const cur = await getCampaign(dataId, id);
   if (!cur) throw new CampaignError("Campaign not found", "not_found");
   if (cur.status === "sent" || cur.status === "cancelled") throw new CampaignError(`A ${cur.status} campaign cannot be cancelled`, "invalid_state");
-  await query(`UPDATE campaign_recipients SET status = 'failed', error = 'campaign cancelled' WHERE user_id = $1 AND campaign_id = $2 AND status = 'queued'`, [dataId, id]);
+  await updateInBatches("campaign_recipients", "status = 'failed', error = 'campaign cancelled'", "user_id = $1 AND campaign_id = $2 AND status = 'queued'", [dataId, id]);
   const row = await queryOne<CampaignRow>(`UPDATE campaigns SET status = 'cancelled', finished_at = NOW(), updated_at = NOW() WHERE user_id = $1 AND id = $2 RETURNING ${CAMPAIGN_COLS}`, [dataId, id]);
   return row ?? cur;
 }

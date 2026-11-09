@@ -986,7 +986,7 @@ export default function AgencyPage() {
 
                 {/* Command Bar */}
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <select
+                  <select aria-label="Slack command"
                     value={slackCmd}
                     onChange={e => setSlackCmd(e.target.value)}
                     className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none shrink-0"
@@ -995,7 +995,7 @@ export default function AgencyPage() {
                     <option value="/standup">/standup (Process Standup Inquiry)</option>
                     <option value="/ask">/ask (Query AI Agency Assistant)</option>
                   </select>
-                  <input
+                  <input aria-label="Slack command text"
                     value={slackText}
                     onChange={e => setSlackText(e.target.value)}
                     placeholder={slackCmd === "/status" ? "Optional note (e.g. Focus on MedTech project)" : "Type message or query..."}
@@ -1041,11 +1041,11 @@ export default function AgencyPage() {
 
       {/* ── Modal: Add Client Project ── */}
       {showAddProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAddProject(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAddProject(false)}>
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border/40 pb-3">
               <h2 className="font-semibold text-base">Create New Client Project</h2>
-              <button onClick={() => setShowAddProject(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setShowAddProject(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             <div>
@@ -1121,11 +1121,11 @@ export default function AgencyPage() {
 
       {/* ── Modal: Add Employee ── */}
       {showAddEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAddEmployee(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAddEmployee(false)}>
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border/40 pb-3">
               <h2 className="font-semibold text-base">Add Agency Developer / Employee</h2>
-              <button onClick={() => setShowAddEmployee(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setShowAddEmployee(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             <div>
@@ -1181,11 +1181,11 @@ export default function AgencyPage() {
 
       {/* ── Modal: Add Client ── */}
       {showAddClient && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAddClient(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAddClient(false)}>
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border/40 pb-3">
               <h2 className="font-semibold text-base">Add Client Company</h2>
-              <button onClick={() => setShowAddClient(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setShowAddClient(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             <div>
@@ -1231,11 +1231,11 @@ export default function AgencyPage() {
 
       {/* ── Modal: Submit Standup ── */}
       {showStandupForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowStandupForm(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowStandupForm(false)}>
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border/40 pb-3">
               <h2 className="font-semibold text-base">Submit Daily Developer Standup</h2>
-              <button onClick={() => setShowStandupForm(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setShowStandupForm(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

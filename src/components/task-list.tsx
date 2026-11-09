@@ -85,6 +85,11 @@ export function TaskList({ initialOverdueOnly = false }: { initialOverdueOnly?: 
     void refresh();
   }, [refresh]);
 
+  // Deep link: /tasks?new=task focuses the quick-add field.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "task") document.getElementById("kh-new-task")?.focus();
+  }, []);
+
   useEffect(() => {
     fetch("/api/team")
       .then((r) => (r.ok ? r.json() : null))
@@ -138,7 +143,7 @@ export function TaskList({ initialOverdueOnly = false }: { initialOverdueOnly?: 
           void add();
         }}
       >
-        <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" aria-label="Task title" />
+        <Input id="kh-new-task" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" aria-label="Task title" />
         <Input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Due date" className="min-w-0" />
         <Select value={assignee} onChange={(e) => setAssignee(e.target.value)} aria-label="Assignee">
           <option value="">Unassigned</option>

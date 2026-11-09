@@ -1,0 +1,52 @@
+[
+  {
+    "rule": "DSQL008",
+    "file": "aws/migrations.sql",
+    "contains": "CREATE INDEX IF NOT EXISTS agency_",
+    "reason": "Legacy statements already applied (hash-tracked, cannot be edited in place); aws/phase10/a.sql re-creates each one with CREATE INDEX ASYNC IF NOT EXISTS."
+  },
+  {
+    "rule": "DSQL011",
+    "file": "aws/migrations.sql",
+    "contains": "DEFAULT",
+    "reason": "Legacy ADD COLUMN ... DEFAULT statements applied before Phase 3 (hash-tracked, cannot be edited in place). No new migration may add a DEFAULT; the app supplies these values explicitly. Needs a live DSQL check on a fresh cluster (docs/DSQL.md)."
+  },
+  {
+    "rule": "DSQL011",
+    "file": "aws/phase4/b.sql",
+    "contains": "DEFAULT",
+    "reason": "Phase 4 source file; the statement is folded verbatim into aws/migrations.sql (same legacy allow-list entry)."
+  },
+  {
+    "rule": "DSQL011",
+    "file": "aws/phase4/e.sql",
+    "contains": "DEFAULT",
+    "reason": "Phase 4 source file; the statement is folded verbatim into aws/migrations.sql (same legacy allow-list entry)."
+  },
+  {
+    "rule": "DSQL009",
+    "file": "aws/migrations.sql",
+    "contains": "uq_invoice_payments_provider_ref",
+    "reason": "Partial unique index already applied; aws/phase10/a.sql drops it and replaces it with a total unique index on ref_key (recordPayment writes ref_key)."
+  },
+  {
+    "rule": "DSQL016",
+    "file": "aws/migrations.sql",
+    "reason": "One-off NULL backfills applied at launch on tiny tables; never re-run once hash-tracked. New migrations must stay schema-only."
+  },
+  {
+    "rule": "DSQL016",
+    "file": "aws/phase",
+    "reason": "Phase source files are folded into aws/migrations.sql; the backfills touch small configuration tables and are hash-tracked so they run once."
+  },
+  {
+    "rule": "DSQLS09",
+    "file": "src/lib/db/catalog.ts",
+    "reason": "The catalog helper itself: information_schema is probed first and falls back to to_regclass / pg_catalog when restricted (unit-tested with a fake query)."
+  },
+  {
+    "rule": "DSQLS08",
+    "file": "src/lib/vitals.ts",
+    "reason": "percentile_cont is wrapped in try/catch; on failure p75 is computed in JS from bounded raw rows (aggregateVitalsInJs). Needs a live DSQL check."
+  }
+]

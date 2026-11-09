@@ -136,10 +136,10 @@ export default function PublicBookingPage() {
           <div className="mb-3 flex items-center justify-between">
             <span className="text-sm font-medium">Pick a day</span>
             <div className="flex gap-1">
-              <Button variant="ghost" size="icon" onClick={() => setWeekStart((w) => new Date(Math.max(Date.now(), w.getTime() - 14 * 86_400_000)))} aria-label="Earlier">
+              <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => setWeekStart((w) => new Date(Math.max(Date.now(), w.getTime() - 14 * 86_400_000)))} aria-label="Earlier">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => setWeekStart((w) => new Date(w.getTime() + 14 * 86_400_000))} aria-label="Later">
+              <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => setWeekStart((w) => new Date(w.getTime() + 14 * 86_400_000))} aria-label="Later">
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
@@ -151,7 +151,7 @@ export default function PublicBookingPage() {
           ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {days.map((k) => (
-                <button
+                <button type="button"
                   key={k}
                   onClick={() => { setDay(k); setSlot(null); }}
                   className={cn(
@@ -171,7 +171,7 @@ export default function PublicBookingPage() {
           <span className="text-sm font-medium">{day ? fmtDay(day) : "Pick a time"}</span>
           <div className="mt-3 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto pr-1">
             {(day ? data?.byDay[day] ?? [] : []).map((iso) => (
-              <button
+              <button type="button"
                 key={iso}
                 onClick={() => setSlot(iso)}
                 className={cn(

@@ -427,14 +427,14 @@ export default function StrategyPage() {
       {/* Detail panel */}
       {detail && (
         <div className="fixed inset-0 z-50 flex">
-          <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={() => setDetail(null)} />
+          <div role="presentation" className="flex-1 bg-black/40 backdrop-blur-sm" onClick={() => setDetail(null)} />
           <div className="w-full max-w-2xl bg-card border-l border-border flex flex-col shadow-2xl">
             {/* Panel header */}
             <div className="px-5 py-4 border-b border-border shrink-0">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   {editing ? (
-                    <input
+                    <input aria-label="Title"
                       value={editTitle}
                       onChange={e => setEditTitle(e.target.value)}
                       className="w-full font-semibold text-sm bg-transparent border-b border-border pb-1 outline-none"
@@ -451,7 +451,7 @@ export default function StrategyPage() {
                     </span>
                   </div>
                 </div>
-                <button type="button" onClick={() => setDetail(null)} className="text-muted-foreground hover:text-foreground">
+                <button aria-label="Close" type="button" onClick={() => setDetail(null)} className="text-muted-foreground hover:text-foreground">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -525,7 +525,7 @@ export default function StrategyPage() {
                   )}
                 </div>
               ) : editing ? (
-                <textarea
+                <textarea aria-label="Content"
                   value={editContent}
                   onChange={e => setEditContent(e.target.value)}
                   className="w-full h-full min-h-[400px] rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono leading-relaxed outline-none focus:ring-2 focus:ring-primary/30 resize-none"

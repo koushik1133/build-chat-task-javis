@@ -15,6 +15,7 @@ import {
   type CalendarSyncSettings,
   type ConnectionStatus,
 } from "./types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 const PROVIDERS: Record<CalendarProviderId, CalendarProvider> = { google: googleProvider, outlook: outlookProvider, simulated: simulatedCalendarProvider };
 
@@ -145,7 +146,7 @@ export async function updateConnection(
   );
   // Switching calendars, turning pull off or disabling drops stale busy time immediately.
   if (!settings.pull_busy || status === "disabled" || (patch.settings?.calendar_id && patch.settings.calendar_id !== row.external_calendar_id)) {
-    await query(`DELETE FROM external_busy WHERE connection_id = $1 AND user_id = $2`, [id, dataId]);
+    await deleteInBatches("external_busy", "connection_id = $1 AND user_id = $2", [id, dataId]);
   }
   return getConnection(dataId, id);
 }
@@ -153,9 +154,9 @@ export async function updateConnection(
 export async function deleteConnection(dataId: string, id: string): Promise<boolean> {
   const row = await getConnection(dataId, id);
   if (!row) return false;
-  await query(`DELETE FROM external_busy WHERE connection_id = $1`, [id]);
-  await query(`DELETE FROM calendar_event_links WHERE connection_id = $1`, [id]);
-  if (row.provider === "simulated") await query(`DELETE FROM calsync_sim_events WHERE connection_id = $1`, [id]);
+  await deleteInBatches("external_busy", "connection_id = $1", [id]);
+  await deleteInBatches("calendar_event_links", "connection_id = $1", [id]);
+  if (row.provider === "simulated") await deleteInBatches("calsync_sim_events", "connection_id = $1", [id]);
   await query(`DELETE FROM calendar_connections WHERE id = $1 AND user_id = $2`, [id, dataId]);
   return true;
 }

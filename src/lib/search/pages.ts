@@ -22,6 +22,7 @@ const AREA_BY_PREFIX: Array<[string, Area]> = [
   ["/settings/api-keys", "settings"],
   ["/settings/branding", "settings"],
   ["/settings/ai", "settings"],
+  ["/settings/plan", "settings"],
   ["/settings/integrations", "settings"],
   ["/settings/sso", "settings"],
   ["/agency/clients", "settings"],
@@ -77,6 +78,7 @@ export function areaForHref(href: string): Area | null {
 
 const EXTRA: Array<{ href: string; label: string }> = [
   { href: "/home", label: "Home" },
+  { href: "/inbox", label: "Inbox" },
   { href: "/onboarding", label: "Setup wizard" },
   { href: "/settings/branding", label: "Branding" },
   { href: "/settings/integrations", label: "Connections" },

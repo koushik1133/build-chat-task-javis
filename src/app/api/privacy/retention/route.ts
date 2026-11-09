@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RETENTION_ACTIONS, RETENTION_KINDS, RETENTION_META, RETENTION_NEVER } from "@/lib/privacy/constants";
 import { listPolicies, upsertPolicy } from "@/lib/privacy/retention";
 import { privacyError, privacyScope } from "../_lib";
+import { recordAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -33,7 +34,9 @@ export async function PUT(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid body" }, { status: 400 });
   try {
     const { entity_kind, ...rest } = parsed.data;
-    return NextResponse.json({ policy: await upsertPolicy(s.scope.dataId, entity_kind, rest) });
+    const policy = await upsertPolicy(s.scope.dataId, entity_kind, rest);
+    await recordAudit(s.scope, { action: "update", entity: "retention_policy", entityId: entity_kind, after: rest as Record<string, unknown>, req });
+    return NextResponse.json({ policy });
   } catch (err) {
     return privacyError(err, "upsert retention");
   }

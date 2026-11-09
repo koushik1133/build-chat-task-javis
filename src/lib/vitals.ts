@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { query } from "@/lib/dsql";
 import { tableExists } from "@/lib/table-exists";
+import { deleteInBatches } from "@/lib/db/batch";
 
 /**
  * Core Web Vitals storage (table `web_vitals`, aws/phase6/d.sql).
@@ -69,22 +70,60 @@ export interface VitalsSummary {
 
 interface AggRow { path: string; name: string; p75: number | string | null; samples: number | string; good: number | string }
 
+/** percentile_cont-compatible (linear interpolation) percentile over unsorted values; `q` in [0,1]. */
+export function percentileCont(values: number[], q: number): number {
+  if (values.length === 0) return 0;
+  const v = [...values].sort((a, b) => a - b);
+  const pos = (v.length - 1) * Math.min(1, Math.max(0, q));
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return v[lo] + (v[hi] - v[lo]) * (pos - lo);
+}
+
+/** JS fallback for the SQL p75 aggregate: group by (path, name), busiest first. */
+export function aggregateVitalsInJs(raw: Array<{ path: string; name: string; value: number | string; rating: string | null }>): AggRow[] {
+  const groups = new Map<string, { path: string; name: string; values: number[]; good: number }>();
+  for (const r of raw) {
+    const v = Number(r.value);
+    if (!Number.isFinite(v)) continue;
+    const k = `${r.path}\u0000${r.name}`;
+    const g = groups.get(k) ?? { path: r.path, name: r.name, values: [], good: 0 };
+    g.values.push(v);
+    if (r.rating === "good") g.good++;
+    groups.set(k, g);
+  }
+  return [...groups.values()]
+    .map((g) => ({ path: g.path, name: g.name, p75: percentileCont(g.values, 0.75), samples: g.values.length, good: g.good }))
+    .sort((a, b) => b.samples - a.samples || a.path.localeCompare(b.path) || a.name.localeCompare(b.name));
+}
+
 /** p75 by (path, metric) over the last `windowHours`, busiest routes first. */
 export async function summariseVitals(windowHours = 24, maxRoutes = 30): Promise<VitalsSummary | null> {
   if (!(await tableExists("web_vitals"))) return null;
   const hours = Math.min(Math.max(Math.floor(windowHours), 1), 24 * 30);
-  const rows = await query<AggRow>(
-    `SELECT path, name,
-            percentile_cont(0.75) WITHIN GROUP (ORDER BY value) AS p75,
-            COUNT(*) AS samples,
-            SUM(CASE WHEN rating = 'good' THEN 1 ELSE 0 END) AS good
-       FROM web_vitals
-      WHERE created_at > NOW() - ($1::int * INTERVAL '1 hour')
-      GROUP BY path, name
-      ORDER BY COUNT(*) DESC, path ASC, name ASC
-      LIMIT $2`,
-    [hours, maxRoutes * VITAL_NAMES.length]
-  );
+  let rows: AggRow[];
+  try {
+    rows = await query<AggRow>(
+      `SELECT path, name,
+              percentile_cont(0.75) WITHIN GROUP (ORDER BY value) AS p75,
+              COUNT(*) AS samples,
+              SUM(CASE WHEN rating = 'good' THEN 1 ELSE 0 END) AS good
+         FROM web_vitals
+        WHERE created_at > NOW() - ($1::int * INTERVAL '1 hour')
+        GROUP BY path, name
+        ORDER BY COUNT(*) DESC, path ASC, name ASC
+        LIMIT $2`,
+      [hours, maxRoutes * VITAL_NAMES.length]
+    );
+  } catch (err) {
+    // Ordered-set aggregates may be unavailable on Aurora DSQL: aggregate in JS from bounded raw rows.
+    console.warn("[vitals] percentile_cont unavailable, aggregating in JS:", err instanceof Error ? err.message : err);
+    const raw = await query<{ path: string; name: string; value: number | string; rating: string | null }>(
+      `SELECT path, name, value, rating FROM web_vitals WHERE created_at > NOW() - ($1::int * INTERVAL '1 hour') ORDER BY created_at DESC LIMIT 20000`,
+      [hours]
+    );
+    rows = aggregateVitalsInJs(raw).slice(0, maxRoutes * VITAL_NAMES.length);
+  }
   return {
     global: true,
     windowHours: hours,
@@ -106,6 +145,5 @@ export async function summariseVitals(windowHours = 24, maxRoutes = 30): Promise
 /** Delete samples older than `days` (cron-friendly; returns rows removed). */
 export async function pruneVitals(days = 30): Promise<number> {
   if (!(await tableExists("web_vitals"))) return 0;
-  const rows = await query<{ id: string }>(`DELETE FROM web_vitals WHERE created_at < NOW() - ($1::int * INTERVAL '1 day') RETURNING id`, [Math.max(1, Math.floor(days))]);
-  return rows.length;
+  return deleteInBatches("web_vitals", "created_at < NOW() - ($1::int * INTERVAL '1 day')", [Math.max(1, Math.floor(days))]);
 }

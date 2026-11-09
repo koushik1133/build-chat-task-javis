@@ -88,7 +88,7 @@ export function PostCard({ post, onApprove, onDelete, onEdit, onSchedule }: Post
               {statusCfg.icon}{statusCfg.label}
             </span>
             <div className="relative">
-              <button
+              <button aria-label="More options"
                 onClick={() => setMenu(m => !m)}
                 className="p-1 rounded hover:bg-secondary transition-colors"
               >

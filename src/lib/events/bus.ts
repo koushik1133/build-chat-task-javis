@@ -124,6 +124,11 @@ export const EVENT_TYPES = [
   "portal.message_received",
   "calsync.error",
   "chat.delivery_failed",
+  "subscription.created",
+  "subscription.renewed",
+  "subscription.past_due",
+  "subscription.cancelled",
+  "subscription.plan_changed",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

@@ -10,6 +10,7 @@ import { KERNELHUB_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import { CopilotDrawer } from "@/components/copilot-drawer";
 import { SearchButton } from "@/components/search-button";
+import { GlobalShortcuts } from "@/components/global-shortcuts";
 
 // Product tour only renders for first-time visitors; keep it out of the shell chunk.
 const ProductTour = dynamic(() => import("@/components/product-tour").then((m) => m.ProductTour), { ssr: false });
@@ -84,6 +85,7 @@ export function AppShell({
           {children}
         </main>
         <GlobalNotificationBell />
+        <GlobalShortcuts />
         <ProductTour />
         <CopilotDrawer />
       </div>

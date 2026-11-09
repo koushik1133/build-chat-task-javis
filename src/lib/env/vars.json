@@ -8,6 +8,10 @@
     { "name": "CRON_SECRET", "group": "core", "required": true, "secret": true, "minLength": 16, "description": "Bearer token for /api/cron/agents. openssl rand -hex 32." },
     { "name": "MARKETING_TRACKING_SECRET", "group": "core", "secret": true, "minLength": 16, "description": "HMAC secret signing marketing open/click/unsubscribe links. Required in production. openssl rand -hex 32." },
     { "name": "MARKETING_TRACKING_SECRET_PREVIOUS", "group": "core", "secret": true, "minLength": 16, "description": "Previous tracking secret kept during rotation so already-sent links still verify." },
+    { "name": "LOG_LEVEL", "group": "flag", "description": "Structured log threshold: debug | info | warn | error | silent.", "default": "info" },
+    { "name": "LOG_FORMAT", "group": "flag", "description": "Set to json to force JSON log lines outside production (production always logs JSON).", "default": "json" },
+    { "name": "METRICS_TOKEN", "group": "core", "secret": true, "minLength": 16, "description": "Bearer token for GET /api/metrics (Prometheus). Endpoint returns 404 when unset. openssl rand -hex 32." },
+    { "name": "OPERATOR_ORG_ID", "group": "flag", "description": "Org id/data id of the platform operator workspace: enables platform alert rules and deployment-wide queue numbers on System health." },
     { "name": "MARKETING_TRACKING_ACCEPT_LEGACY", "group": "flag", "description": "Set to false (with MARKETING_TRACKING_SECRET set) to stop accepting tracking links signed with the legacy CRON_SECRET-derived key, once old links have aged out.", "default": "true" },
     { "name": "TRUSTED_PROXY_HOPS", "group": "core", "description": "Number of trusted reverse-proxy hops in X-Forwarded-For (client IP is taken that many entries from the right). Default 1 on Vercel/production, 0 otherwise.", "default": "1" },
     { "name": "NEXT_PUBLIC_APP_URL", "group": "core", "required": true, "format": "url", "description": "Canonical public origin (links in emails, OAuth redirects, portal URLs)." },
@@ -57,6 +61,7 @@
     { "name": "CREDENTIAL_ENCRYPTION_KEY", "group": "core", "recommended": true, "secret": true, "description": "Encrypts per-tenant integration credentials at rest (openssl rand -base64 32). Required for OAuth integrations and payments." },
 
     { "name": "PAYMENTS_PROVIDER", "group": "flag", "enum": ["simulated", "stripe", "razorpay"], "default": "simulated", "description": "Active payments provider." },
+    { "name": "PLANS_ENFORCED", "group": "flag", "enum": ["true", "false"], "default": "false", "description": "true = enforce KernelHub plan limits and feature gates (HTTP 402 plan_limit). false = everything allowed; usage is still measured and shown." },
     { "name": "PAYMENTS_SIMULATED_SECRET", "group": "provider", "secret": true, "description": "Signs simulated-provider webhook calls." },
     { "name": "STRIPE_SECRET_KEY", "group": "provider", "provider": "stripe", "secret": true, "description": "Stripe secret key." },
     { "name": "STRIPE_WEBHOOK_SECRET", "group": "provider", "provider": "stripe", "secret": true, "description": "Stripe webhook signing secret." },

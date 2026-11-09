@@ -4,6 +4,7 @@ import { isLegacyRow, legacyToV2, type LegacyRow } from "./legacy";
 import { getTemplate } from "./templates";
 import { REDACTED_SECRET } from "./secrets";
 import type { AutomationDTO, AutomationDefinition, AutomationRunDTO, ConditionNode, RunContext, Step, StepResult, TriggerConfig, TriggerType } from "./types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 /** Persistence for automations v2 + run history. All queries are scoped by user_id (= org data id). */
 
@@ -187,7 +188,7 @@ export async function setEnabled(dataId: string, id: string, enabled: boolean): 
 
 export async function deleteAutomation(dataId: string, id: string): Promise<boolean> {
   const row = await queryOne<{ id: string }>(`DELETE FROM automations WHERE id::text = $1 AND user_id = $2 RETURNING id::text AS id`, [id, dataId]);
-  if (row) await query(`DELETE FROM automation_runs WHERE automation_id = $1 AND user_id = $2`, [id, dataId]).catch(() => undefined);
+  if (row) await deleteInBatches("automation_runs", "automation_id = $1 AND user_id = $2", [id, dataId]).catch(() => undefined);
   return Boolean(row);
 }
 

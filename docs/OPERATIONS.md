@@ -71,3 +71,75 @@ See `docs/DEPLOY.md` → *Backups and restore*. Daily `npm run backup:db` via ho
 | Weekly | `npm audit --audit-level=high`, outbox `failed` rows, webhook dead letters |
 | Monthly | rotate `CRON_SECRET`/API keys that leaked into logs, review Settings → Audit |
 | Quarterly | restore drill, review retention policies, re-run `check-env --strict` against production values |
+
+## Observability
+
+### Readiness and metrics
+
+- `GET /api/health` — public liveness (DB round trip). `GET /api/ready` — readiness for orchestrators: DB ping plus presence of critical tables (`organizations`, `memberships`, `notification_outbox`, `agent_jobs`, `audit_log`, `system_state`, `alert_rules`); 503 with the missing table names when migrations were not applied.
+- `GET /api/metrics` — Prometheus text format. Set `METRICS_TOKEN` (min 16 chars) and scrape with `Authorization: Bearer <token>`. Unset => 404 (the endpoint does not exist); wrong token => 401. DB-derived gauges are cached for 15 s.
+- Every response from a wrapped route and from middleware carries `x-request-id` (a caller-supplied id is kept when 8–64 chars of `[A-Za-z0-9._-]`, otherwise one is minted). Quote it when reporting a problem; it is the `req_id` field in logs.
+
+### Log fields
+
+Production logs are one JSON object per line (`LOG_LEVEL`: debug|info|warn|error|silent; `LOG_FORMAT=json` forces JSON outside production).
+
+| Field | Meaning |
+|---|---|
+| `ts` | ISO timestamp |
+| `level` | debug / info / warn / error |
+| `msg` | Message (redacted: emails, phones, cards, keys, bearer tokens) |
+| `req_id` | Request id from `x-request-id` |
+| `org` | Short SHA-256 of the workspace id (never the raw id) |
+| `route` | Route path or `/api/v1/<registry path>` |
+| `ms` | Duration in milliseconds |
+| `err` | `Name: message` of the error (no stack; stacks live in `app_errors`) |
+
+Keys such as `password`, `token`, `secret`, `authorization`, `cookie`, `api_key` are always replaced with `[redacted]`.
+
+### Metrics
+
+| Metric | Type | Notes |
+|---|---|---|
+| `kh_http_requests_total{group,status}` | counter | groups: api_v1, cron, webhook, shop, widget, portal, api; status class 2xx..5xx |
+| `kh_http_request_duration_ms{group}` | histogram | buckets 5 ms – 10 s |
+| `kh_cron_ticks_total`, `kh_cron_tick_duration_ms`, `kh_cron_items_total{kind}` | counter/histogram | recorded by `recordCronMetrics` |
+| `kh_errors_captured_total` | counter | every `captureError` call |
+| `kh_rate_limit_blocks_total{limiter}` | counter | rejected requests |
+| `kh_cron_last_tick_age_minutes` | gauge | minutes since `system_state` `cron:agents:last_tick` |
+| `kh_outbox_rows{status}`, `kh_agent_jobs{status}`, `kh_webhook_deliveries{status}` | gauge | queue depth; `dead`/`failed` are the ones to alert on |
+| `kh_llm_spend_today_micros` | gauge | all workspaces |
+
+Counters are per instance (reset on restart): use `rate()`/`increase()` in Prometheus, never the raw value.
+
+### Alerts
+
+Tenant alert rules live in Settings → System health → Alerts (`alert_rules` / `alert_events`). They are evaluated by the cron tick (`processAlerts(50)`), notify chat integrations and/or an email address with a per-rule cooldown, and auto-resolve when the condition clears. Org rules only ever read that workspace's data. Defaults per workspace (seeded on first visit, or by the tick once the workspace has failed notifications): **on** — notification failures > 20 in 60 min, dead webhook deliveries > 5 in 24 h, AI budget >= 90%; **off** — open SLA breaches, accounting sync errors, agent failure rate, mail/calendar sync errors, past-due invoices.
+
+Platform rules (`user_id` NULL: `cron_stale` > 10 min, `jobs_queued` > 500) only run when `OPERATOR_ORG_ID` is set, and notify via the operator workspace's chat integrations.
+
+## Incident playbook
+
+| Symptom | Detect | Fix |
+|---|---|---|
+| **Cron not ticking** | `kh_cron_last_tick_age_minutes` > 10, `cron_stale` alert, System health "Cron last tick" red | Check the scheduler hits `/api/cron/agents` with `Authorization: Bearer $CRON_SECRET` (401 = secret drift, 503 = secret unset). Run the call by hand and read the JSON counts. A tick longer than 60 s means a sweep is stuck: look for the slow `route` in logs by `req_id`. |
+| **Agent queue stuck** | `kh_agent_jobs{status="queued"}` rising while `running` is flat | Jobs claimed by a dead worker stay `running` until `locked_at` expires; confirm cron is ticking, then check `last_error` of `failed`/`dead` rows. Re-queue by setting `status='queued', run_after=NOW()` for the affected ids. |
+| **Outbox failing** | `kh_outbox_rows{status="failed"}`, "Notification failures" alert | `notification_outbox.error` names the provider error. Typical: expired `RESEND_API_KEY`/Twilio creds, bounced recipients. Fix the provider, then `UPDATE notification_outbox SET status='queued', attempts=0 WHERE status='failed' AND created_at > NOW() - INTERVAL '1 day'`. |
+| **Webhook dead letters** | `kh_webhook_deliveries{status="dead"}`, "Dead webhook deliveries" alert | Settings → Webhooks → delivery log shows the response status. Receiver down: wait or fix then replay from the UI. Receiver gone: disable the subscription. |
+| **5xx spike** | `kh_http_requests_total{status="5xx"}`, System health error list | Top fingerprints on the Diagnostics tab; find the log line via `req_id`/`route`. Roll back code if it started with a deploy (schema is additive). |
+| **DB unreachable** | `/api/ready` 503, health 503 | Check Aurora DSQL/Postgres status and connection limits; app instances recover on their own when the DB returns. |
+| **AI spend** | "AI budget nearly used" alert, `kh_llm_spend_today_micros` | Raise the cap in Settings → AI budgets or let the hard stop apply. |
+
+### On-call checklist
+
+1. Open System health (Overview, Diagnostics) and `/api/ready`.
+2. Is cron fresh (< 5 min)? If not, start with the cron row above.
+3. Are queues draining (agent jobs, outbox, webhooks)?
+4. Any firing alerts? Read the event message; it names the rule and current value.
+5. Grab a failing `x-request-id` and search logs for it.
+6. Mitigate (flip provider to simulated, roll back), then note the incident (Settings → Privacy → incidents if personal data was involved).
+7. Backups: restore references are in `docs/DEPLOY.md` (*Backups and restore*); audit retention floor is 365 days (`audit_log` cannot be configured lower).
+
+### Audit trail
+
+Settings → Audit log can be filtered by category (access & security, data & privacy, integrations, billing, content, operations) and date range, and exported as CSV (`GET /api/audit?format=csv&category=&from=&to=`, spreadsheet-formula safe, up to 5,000 rows). Sensitive actions that write audit rows include API key create/revoke, webhook create, SSO domain changes, role changes and member removal, retention policy changes, refunds, marketplace install/publish, snapshots, DSR requests, SCIM tokens, chat/accounting/calendar connections and alert rule changes.

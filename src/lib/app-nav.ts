@@ -61,6 +61,8 @@ import {
   Send,
   MessageCircle,
   DatabaseBackup,
+  MailOpen,
+  Layers,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -72,6 +74,7 @@ export type AppNavItem = {
 
 export const APP_NAV_TOP: AppNavItem[] = [
   { href: "/home", label: "Home", icon: LayoutDashboard },
+  { href: "/inbox", label: "Inbox", icon: MailOpen },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/files", label: "Files", icon: FileText },
   { href: "/github", label: "GitHub", icon: Github },
@@ -156,6 +159,7 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/settings/calendar-sync", label: "Calendar sync", icon: CalendarClock },
       { href: "/settings/chat-apps", label: "Chat apps", icon: MessageCircle },
       { href: "/settings/snapshots", label: "Snapshots & backup", icon: DatabaseBackup },
+      { href: "/settings/plan", label: "Plan & usage", icon: Layers },
       { href: "/settings/widgets", label: "Website widgets", icon: MessageSquareCode },
       { href: "/settings/developers", label: "Developers", icon: Code2 },
       { href: "/settings/mail", label: "Email Inbox", icon: Mail },

@@ -3,6 +3,7 @@ import { decryptSecret, encryptSecret, isEncryptionConfigured } from "@/lib/secu
 import { EVENT_TYPES } from "@/lib/events/bus";
 import { generateWebhookSecret } from "./sign";
 import { isAllowedWebhookUrl } from "./url";
+import { deleteInBatches } from "@/lib/db/batch";
 
 /** Minimal env shape so callers (and tests) can pass a plain object instead of process.env. */
 type EnvLike = Record<string, string | undefined>;
@@ -198,6 +199,6 @@ export async function rotateSecret(dataId: string, id: string): Promise<string> 
 export async function deleteSubscription(dataId: string, id: string): Promise<boolean> {
   const rows = await query<{ id: string }>(`DELETE FROM webhook_subscriptions WHERE id = $1 AND user_id = $2 RETURNING id`, [id, dataId]);
   if (rows.length === 0) return false;
-  await query(`DELETE FROM webhook_deliveries WHERE subscription_id = $1 AND user_id = $2`, [id, dataId]).catch(() => undefined);
+  await deleteInBatches("webhook_deliveries", "subscription_id = $1 AND user_id = $2", [id, dataId]).catch(() => undefined);
   return true;
 }

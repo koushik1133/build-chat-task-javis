@@ -1,6 +1,7 @@
 import { clientIp as sharedClientIp } from "@/lib/request-limits";
 import { randomUUID } from "crypto";
 import { query } from "@/lib/dsql";
+import { allKnownEntities, entitiesOf, type AuditCategory } from "@/lib/audit-categories";
 import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 
 /**
@@ -139,10 +140,14 @@ export interface ListAuditOptions {
   before?: string | null;
   /** Keyset cursor (created_at, id) — stable under same-millisecond writes. */
   cursor?: Cursor | null;
+  category?: AuditCategory | null;
+  /** Inclusive lower / exclusive upper bound on created_at (ISO). */
+  from?: string | null;
+  to?: string | null;
 }
 
 export async function listAudit(dataId: string, opts: ListAuditOptions = {}): Promise<AuditRow[]> {
-  const limit = Math.min(201, Math.max(1, opts.limit ?? 50));
+  const limit = Math.min(5001, Math.max(1, opts.limit ?? 50));
   const where: string[] = ["user_id = $1"];
   const values: unknown[] = [dataId];
   if (opts.entity) {
@@ -155,6 +160,19 @@ export async function listAudit(dataId: string, opts: ListAuditOptions = {}): Pr
   }
   if (opts.before) {
     values.push(opts.before);
+    where.push(`created_at < $${values.length}`);
+  }
+  if (opts.category) {
+    const ents = entitiesOf(opts.category);
+    values.push(ents ?? allKnownEntities());
+    where.push(ents ? `entity = ANY($${values.length}::text[])` : `NOT (entity = ANY($${values.length}::text[]))`);
+  }
+  if (opts.from) {
+    values.push(opts.from);
+    where.push(`created_at >= $${values.length}`);
+  }
+  if (opts.to) {
+    values.push(opts.to);
     where.push(`created_at < $${values.length}`);
   }
   const keyset = keysetClause(opts.cursor, values);

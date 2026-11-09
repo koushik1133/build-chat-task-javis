@@ -104,7 +104,7 @@ export function FileUploader() {
                     {f.chunk_count} chunks · {(f.size_bytes / 1024).toFixed(1)} KB · {timeAgo(f.created_at)}
                   </div>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => remove(f.id)}>
+                <Button aria-label="Delete" variant="ghost" size="icon" onClick={() => remove(f.id)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </li>

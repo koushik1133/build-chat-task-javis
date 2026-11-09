@@ -5,6 +5,8 @@
  * unthrottled caller turns directly into third-party spend.
  */
 
+import { recordRateLimitBlock } from "@/lib/metrics/registry";
+
 /** Read a request body with a hard byte ceiling. Returns null if too large. */
 export async function readCappedText(
   req: Request,
@@ -110,7 +112,10 @@ export function rateLimit(
     return { allowed: true, remaining: limit - 1, resetAt };
   }
 
-  if (bucket.count >= limit) return { allowed: false, remaining: 0, resetAt: bucket.resetAt };
+  if (bucket.count >= limit) {
+    recordRateLimitBlock(key.split(":")[0] ?? "unknown");
+    return { allowed: false, remaining: 0, resetAt: bucket.resetAt };
+  }
   bucket.count++;
   return { allowed: true, remaining: limit - bucket.count, resetAt: bucket.resetAt };
 }
@@ -187,7 +192,9 @@ export async function rateLimitAsync(
   const opts = normalise(limitOrOpts, windowMsArg);
   if (rateLimitStore() !== "db") return rateLimit(key, opts);
   try {
-    return await rateLimitDb(key, opts);
+    const r = await rateLimitDb(key, opts);
+    if (!r.allowed) recordRateLimitBlock(key.split(":")[0] ?? "unknown");
+    return r;
   } catch (err) {
     console.warn("[rate-limit] db store failed; allowing request", err instanceof Error ? err.message : err);
     return { allowed: true, remaining: opts.limit, resetAt: Date.now() + opts.windowMs };
@@ -200,12 +207,8 @@ export async function rateLimitAsync(
  */
 export async function pruneRateLimits(olderThanMs = 24 * 60 * 60 * 1000): Promise<number> {
   try {
-    const { query } = await import("@/lib/dsql");
-    const rows = await query<{ key: string }>(
-      `DELETE FROM rate_limits WHERE updated_at < $1 RETURNING key`,
-      [new Date(Date.now() - olderThanMs).toISOString()]
-    );
-    return rows.length;
+    const { deleteInBatches } = await import("@/lib/db/batch");
+    return await deleteInBatches("rate_limits", "updated_at < $1", [new Date(Date.now() - olderThanMs).toISOString()], 1000, { idColumn: "key" });
   } catch (err) {
     console.warn("[rate-limit] prune failed", err instanceof Error ? err.message : err);
     return 0;

@@ -5,6 +5,7 @@ import { outlookProvider } from "./providers/outlook";
 import { imapProvider } from "./providers/imap";
 import { simulatedProvider } from "./providers/simulated";
 import { isMailProviderId, type MailAccountRow, type MailAccountView, type MailAuth, type MailProvider, type MailProviderId, type MailProviderInfo } from "./types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 export type { MailAccountRow, MailAccountView, MailAuth, MailProvider, MailProviderId, MailProviderInfo, NormalizedMessage, OutboundMail } from "./types";
 export { isMailProviderId, MAIL_PROVIDERS } from "./types";
@@ -111,7 +112,7 @@ export async function upsertMailAccount(
 export async function deleteMailAccount(dataId: string, id: string): Promise<boolean> {
   const row = await queryOne<{ id: string }>(`SELECT id FROM mail_accounts WHERE id = $1 AND user_id = $2`, [id, dataId]);
   if (!row) return false;
-  await query(`DELETE FROM mail_messages WHERE account_id = $1 AND user_id = $2`, [id, dataId]);
+  await deleteInBatches("mail_messages", "account_id = $1 AND user_id = $2", [id, dataId]);
   await query(`DELETE FROM mail_accounts WHERE id = $1 AND user_id = $2`, [id, dataId]);
   return true;
 }

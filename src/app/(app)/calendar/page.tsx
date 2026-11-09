@@ -198,7 +198,7 @@ export default function CalendarPage() {
 
   return (
     <PageContainer wide title="Calendar" actions={<SubscribeIcs />} description="Bookings, weekly availability and public booking links." tooltip="Customers book through your public links; the AI receptionist can book here too.">
-      {error && <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"><span>{error}</span><button onClick={() => setError(null)}><X className="h-4 w-4" /></button></div>}
+      {error && <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"><span>{error}</span><button aria-label="Close" onClick={() => setError(null)}><X className="h-4 w-4" /></button></div>}
       {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">{notice}</div>}
 
       {loading ? (
@@ -325,9 +325,9 @@ export default function CalendarPage() {
 
       {/* ── New booking type dialog ── */}
       {showType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowType(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowType(false)}>
           <div className="w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-center justify-between"><h3 className="text-sm font-semibold">New booking type</h3><button onClick={() => setShowType(false)}><X className="h-4 w-4" /></button></div>
+            <div className="mb-4 flex items-center justify-between"><h3 className="text-sm font-semibold">New booking type</h3><button aria-label="Close" onClick={() => setShowType(false)}><X className="h-4 w-4" /></button></div>
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2 text-xs text-muted-foreground">Name<input value={typeForm.name} onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} className={cn(inputCls, "mt-1")} placeholder="Intro call" /></label>
               <label className="col-span-2 text-xs text-muted-foreground">Link slug (optional)<input value={typeForm.slug} onChange={(e) => setTypeForm({ ...typeForm, slug: e.target.value })} className={cn(inputCls, "mt-1")} placeholder="intro-call" /></label>
@@ -349,9 +349,9 @@ export default function CalendarPage() {
 
       {/* ── New booking dialog ── */}
       {showBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowBooking(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowBooking(false)}>
           <div className="w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-semibold"><CalendarDays className="h-4 w-4 text-primary" /> New booking</h3><button onClick={() => setShowBooking(false)}><X className="h-4 w-4" /></button></div>
+            <div className="mb-4 flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-semibold"><CalendarDays className="h-4 w-4 text-primary" /> New booking</h3><button aria-label="Close" onClick={() => setShowBooking(false)}><X className="h-4 w-4" /></button></div>
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2 text-xs text-muted-foreground">Customer name<input value={bookingForm.name} onChange={(e) => setBookingForm({ ...bookingForm, name: e.target.value })} className={cn(inputCls, "mt-1")} /></label>
               <label className="text-xs text-muted-foreground">Email<input type="email" value={bookingForm.email} onChange={(e) => setBookingForm({ ...bookingForm, email: e.target.value })} className={cn(inputCls, "mt-1")} /></label>

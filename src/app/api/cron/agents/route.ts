@@ -29,6 +29,10 @@ import { purgeDeletedAttachments } from "@/lib/attachments/store";
 import { remindUpcomingShifts } from "@/lib/workforce/shifts";
 import { processCalendarEvents, syncDue as calendarSyncDue } from "@/lib/calsync/sync";
 import { processChatEvents } from "@/lib/chatops/process";
+import { processAlerts } from "@/lib/alerts/process";
+import { grantMonthlyCredits, renewDue } from "@/lib/plans/cron";
+import { withRequestContext } from "@/lib/log/context";
+import { logger } from "@/lib/log/logger";
 import type { JobRow } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -123,7 +127,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, report_schedules: 0, digests: 0, documents_expired: 0, tasks_overdue: 0, carts_abandoned: 0, marketing_sent: 0, marketing_delivery: 0, sequence_steps: 0, sequence_joins: 0, attachments_purged: 0, shift_reminders: 0, calsync_events: 0, calsync_synced: 0, chat_events: 0, hourly_ran: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, invoices_overdue: 0, invoice_reminders: 0, recurring_invoices: 0, report_schedules: 0, digests: 0, documents_expired: 0, tasks_overdue: 0, carts_abandoned: 0, marketing_sent: 0, marketing_delivery: 0, sequence_steps: 0, sequence_joins: 0, attachments_purged: 0, shift_reminders: 0, calsync_events: 0, calsync_synced: 0, chat_events: 0, alerts: 0, plans_renewed: 0, plan_credits: 0, hourly_ran: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -204,6 +208,9 @@ async function handleTick(req: Request) {
   try { counts.calsync_events = (await processCalendarEvents(200)).pushed; } catch (err) { console.error("[cron/agents] calendar events failed:", err); }
   try { counts.calsync_synced = (await calendarSyncDue(20)).synced; } catch (err) { console.error("[cron/agents] calendar sync failed:", err); }
   try { counts.chat_events = (await processChatEvents(200)).sent; } catch (err) { console.error("[cron/agents] chat events failed:", err); }
+  try { counts.plans_renewed = (await renewDue(100)).renewed; } catch (err) { console.error("[cron/agents] plan renewals failed:", err); }
+  try { counts.plan_credits = (await grantMonthlyCredits(100)).granted; } catch (err) { console.error("[cron/agents] plan credit grants failed:", err); }
+  try { counts.alerts = (await processAlerts(50)).evaluated; } catch (err) { console.error("[cron/agents] alerts failed:", err); }
   try { counts.documents_expired = (await expireDocuments(200)).expired; } catch (err) { console.error("[cron/agents] document expiry failed:", err); }
   try { counts.invoices_overdue = (await markOverdue(200)).marked; } catch (err) { console.error("[cron/agents] overdue sweep failed:", err); }
   try { counts.invoice_reminders = (await sendReminders(100)).sent; } catch (err) { console.error("[cron/agents] reminder sweep failed:", err); }
@@ -215,20 +222,23 @@ async function handleTick(req: Request) {
   return NextResponse.json({ ok: true, worker: workerId, ...counts, server_time: new Date().toISOString() });
 }
 
-export async function GET(req: Request) {
+async function getTick(req: Request) {
   try {
     return await handleTick(req);
   } catch (err) {
-    console.error("[cron/agents] unhandled:", err);
+    logger.error("cron tick unhandled", { err, route: "/api/cron/agents" });
     return NextResponse.json({ error: "cron failed" }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+async function postTick(req: Request) {
   try {
     return await handleTick(req);
   } catch (err) {
-    console.error("[cron/agents] unhandled:", err);
+    logger.error("cron tick unhandled", { err, route: "/api/cron/agents" });
     return NextResponse.json({ error: "cron failed" }, { status: 500 });
   }
 }
+
+export const GET = withRequestContext(getTick, { route: "/api/cron/agents" });
+export const POST = withRequestContext(postTick, { route: "/api/cron/agents" });

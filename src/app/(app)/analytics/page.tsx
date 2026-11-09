@@ -388,7 +388,7 @@ function ConsultantPanel() {
       <div className="p-6 flex flex-col gap-6">
         <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
           {suggestions.map((s, i) => (
-            <button 
+            <button type="button" 
               key={i}
               onClick={() => askQuestion(s)}
               className="shrink-0 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground whitespace-nowrap"
@@ -402,13 +402,13 @@ function ConsultantPanel() {
           onSubmit={(e) => { e.preventDefault(); askQuestion(question); }} 
           className="relative flex items-center"
         >
-          <input
+          <input aria-label="Question"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="Ask your AI business consultant..."
             className="w-full rounded-lg border border-input bg-background py-3 pl-4 pr-12 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-sm"
           />
-          <button 
+          <button aria-label="Send" 
             type="submit" 
             disabled={!question.trim() || loading}
             className="absolute right-2 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-secondary/80 disabled:opacity-50 transition-colors"

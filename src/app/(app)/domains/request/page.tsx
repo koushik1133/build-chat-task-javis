@@ -180,7 +180,7 @@ export default function RequestDomainPage() {
                 const status = STATUS_LABELS[r.status] ?? STATUS_LABELS.open;
                 return (
                   <li key={r.id} className="flex items-start gap-4 px-5 py-4">
-                    <button
+                    <button type="button"
                       onClick={() => upvote(r.id)}
                       disabled={votingId === r.id || r.has_voted}
                       aria-label={r.has_voted ? `Already upvoted ${r.title}` : `Upvote ${r.title}`}

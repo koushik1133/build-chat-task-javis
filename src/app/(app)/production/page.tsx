@@ -542,7 +542,7 @@ export default function ProductionPage() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             {editingName ? (
-              <input
+              <input aria-label="Board name"
                 value={boardName}
                 onChange={e => handleBoardNameChange(e.target.value)}
                 onBlur={() => setEditingName(false)}
@@ -601,7 +601,7 @@ export default function ProductionPage() {
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <div className="relative flex-1 min-w-[160px] max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input
+          <input aria-label="Search"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search cards…"
@@ -633,7 +633,7 @@ export default function ProductionPage() {
 
       {/* ── Quick-add bar ──────────────────────────────────────────────── */}
       <div className="border-b border-border bg-card/50 px-4 py-2 sm:px-6 shrink-0 flex items-center gap-2">
-        <input
+        <input aria-label="New card title"
           ref={inputRef}
           value={input}
           onChange={e => setInput(e.target.value)}
@@ -641,7 +641,7 @@ export default function ProductionPage() {
           placeholder={`Quick add to "${cols[0]?.label ?? "first column"}"…`}
           className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
         />
-        <Button size="sm" onClick={() => addTask()} disabled={!input.trim()}>
+        <Button aria-label="Add task" size="sm" onClick={() => addTask()} disabled={!input.trim()}>
           <Plus className="h-4 w-4" />
         </Button>
       </div>
@@ -687,14 +687,16 @@ export default function ProductionPage() {
               >
                 {/* Column header */}
                 <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border shrink-0">
-                  <div
+                  <button
+                    type="button"
                     className="w-2 h-2 rounded-full shrink-0 cursor-pointer"
                     style={{ background: col.color }}
                     onClick={() => updateColumn(col.id, { color: COLORS[(COLORS.indexOf(col.color) + 1) % COLORS.length] })}
                     title="Click to change color"
+                    aria-label="Change column color"
                   />
                   {editingCol === col.id ? (
-                    <input
+                    <input aria-label="Column name"
                       value={editColLabel}
                       onChange={e => setEditColLabel(e.target.value)}
                       onKeyDown={e => {
@@ -720,7 +722,7 @@ export default function ProductionPage() {
                     </span>
                   )}
                   <span className="text-xs font-bold text-muted-foreground shrink-0 tabular-nums">{colTasks.length}</span>
-                  <button
+                  <button aria-label="Add card"
                     className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                     onClick={() => setShowCardForm(isAddingHere ? null : col.id)}
                   >
@@ -784,7 +786,7 @@ export default function ProductionPage() {
                       <Button size="sm" className="flex-1 h-7 text-xs" onClick={() => addTask(col.id)} disabled={!cardForm.title.trim()}>
                         Add card
                       </Button>
-                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setShowCardForm(null)}>
+                      <Button aria-label="Close" variant="ghost" size="sm" className="h-7 px-2" onClick={() => setShowCardForm(null)}>
                         <X className="h-3 w-3" />
                       </Button>
                     </div>
@@ -821,7 +823,7 @@ export default function ProductionPage() {
                             </button>
                             {/* Move to column dropdown */}
                             <div className="relative group/move">
-                              <button className="text-muted-foreground hover:text-foreground p-0.5 rounded">
+                              <button aria-label="Move card" className="text-muted-foreground hover:text-foreground p-0.5 rounded">
                                 <MoreHorizontal className="h-3.5 w-3.5" />
                               </button>
                               <div className="absolute right-0 top-full mt-1 w-40 rounded-xl border border-border bg-card shadow-xl hidden group-hover/move:block z-30">
@@ -954,12 +956,12 @@ export default function ProductionPage() {
 
       {/* ── Card Edit Modal ─────────────────────────────────────────────── */}
       {editTask && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setEditTask(null)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setEditTask(null)}>
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-semibold text-base">Edit Card</h2>
-              <button onClick={() => setEditTask(null)} className="text-muted-foreground hover:text-foreground">
+              <button aria-label="Close" onClick={() => setEditTask(null)} className="text-muted-foreground hover:text-foreground">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -1108,7 +1110,7 @@ export default function ProductionPage() {
                 {editSaving ? <div className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                 Save changes
               </Button>
-              <Button variant="destructive" size="sm" onClick={() => deleteTask(editTask.id)}>
+              <Button aria-label="Delete" variant="destructive" size="sm" onClick={() => deleteTask(editTask.id)}>
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -1118,14 +1120,14 @@ export default function ProductionPage() {
 
       {/* ── Reject reason modal ─────────────────────────────────────────── */}
       {rejectTarget && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setRejectTarget(null)}>
+        <div role="presentation" className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setRejectTarget(null)}>
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
           <div className="relative bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
             <h2 className="font-semibold mb-1">Reject card</h2>
             <p className="text-xs text-muted-foreground mb-4">
               &ldquo;{rejectTarget.title}&rdquo; will be removed. Optionally add a reason (logged in activity).
             </p>
-            <textarea
+            <textarea aria-label="Rejection reason"
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
               placeholder="Reason for rejection (optional)…"
@@ -1145,7 +1147,7 @@ export default function ProductionPage() {
 
       {/* ── Settings Drawer ─────────────────────────────────────────────── */}
       {showSettings && (
-        <div className="fixed inset-0 z-50 flex" onClick={() => setShowSettings(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex" onClick={() => setShowSettings(false)}>
           <div className="flex-1 bg-black/30 backdrop-blur-sm" />
           <div className="h-full w-full max-w-[400px] overflow-y-auto border-l border-border bg-card shadow-2xl sm:w-[min(400px,92vw)]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-border sticky top-0 bg-card z-10">
@@ -1153,14 +1155,14 @@ export default function ProductionPage() {
                 <h2 className="font-semibold">Board Settings</h2>
                 <p className="text-xs text-muted-foreground">Customize columns, fields, and layout</p>
               </div>
-              <button onClick={() => setShowSettings(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setShowSettings(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             <div className="p-5 space-y-7">
               {/* Board name */}
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-2">Board Name</label>
-                <input
+                <input aria-label="Board name"
                   value={boardName}
                   onChange={e => handleBoardNameChange(e.target.value)}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
@@ -1208,15 +1210,17 @@ export default function ProductionPage() {
                     >
                       {/* Grip — only shows when not editing */}
                       <GripVertical className={cn("h-3.5 w-3.5 text-muted-foreground shrink-0", editingCol === col.id && "invisible")} />
-                      <div
+                      <button
+                        type="button"
                         className="w-3.5 h-3.5 rounded-full shrink-0 cursor-pointer ring-1 ring-border hover:ring-primary transition-all"
                         style={{ background: col.color }}
                         onMouseDown={e => e.stopPropagation()}
                         onClick={() => updateColumn(col.id, { color: COLORS[(COLORS.indexOf(col.color) + 1) % COLORS.length] })}
                         title="Click to change color"
+                        aria-label="Change column color"
                       />
                       {editingCol === col.id ? (
-                        <input
+                        <input aria-label="Column name"
                           value={editColLabel}
                           onChange={e => setEditColLabel(e.target.value)}
                           onMouseDown={e => e.stopPropagation()}

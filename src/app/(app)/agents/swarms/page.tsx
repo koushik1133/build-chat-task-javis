@@ -305,10 +305,10 @@ export default function SwarmsPage() {
             <div className="flex-1 overflow-y-auto p-4 space-y-2 scrollbar-thin bg-muted/5">
               {swarms.map(swarm => (
                 <div key={swarm.id} className="flex items-center justify-between p-2 rounded border border-border bg-background text-xs hover:border-primary/40 transition-colors">
-                  <span className="truncate font-medium flex-1 cursor-pointer hover:text-primary transition-colors" onClick={() => loadSwarm(swarm)}>
+                  <span role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); loadSwarm(swarm); } }} className="truncate font-medium flex-1 cursor-pointer hover:text-primary transition-colors" onClick={() => loadSwarm(swarm)}>
                     {swarm.name}
                   </span>
-                  <button onClick={() => deleteSwarm(swarm.id)} className="p-1 text-muted-foreground hover:text-red-500 rounded ml-2">
+                  <button aria-label="Delete" onClick={() => deleteSwarm(swarm.id)} className="p-1 text-muted-foreground hover:text-red-500 rounded ml-2">
                     <Trash2 className="h-3 w-3" />
                   </button>
                 </div>
@@ -326,7 +326,7 @@ export default function SwarmsPage() {
           onDrop={handleDrop}
           onDragOver={handleDragOver}
         >
-          <input
+          <input aria-label="Swarm name"
             value={swarmName}
             onChange={(e) => setSwarmName(e.target.value)}
             className="text-2xl font-bold bg-transparent border-none text-center focus:outline-none focus:ring-0 mb-8 w-full max-w-md placeholder:text-muted-foreground/50"
@@ -350,7 +350,7 @@ export default function SwarmsPage() {
                   <div className="absolute -left-3 -top-3 h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shadow-sm">
                     {i + 1}
                   </div>
-                  <button 
+                  <button aria-label="Delete" 
                     onClick={() => removeNode(i)}
                     className="absolute right-3 top-3 p-1.5 rounded-md text-muted-foreground hover:bg-red-500/10 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
@@ -369,7 +369,7 @@ export default function SwarmsPage() {
 
                   <div className="space-y-1">
                     <label className="text-[10px] font-semibold uppercase text-muted-foreground">Custom Instructions (Optional)</label>
-                    <textarea 
+                    <textarea aria-label="E.g. Format output as JSON, focus on X..." 
                       value={node.customPrompt}
                       onChange={(e) => updateNodePrompt(i, e.target.value)}
                       placeholder="E.g. Format output as JSON, focus on X..."
@@ -392,7 +392,7 @@ export default function SwarmsPage() {
             {nodes.length > 0 && (
               <div className="mt-8 w-full">
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">Initial Input / Context</label>
-                <textarea 
+                <textarea aria-label="The initial prompt or context to feed into the first agent..." 
                   value={swarmInput}
                   onChange={e => setSwarmInput(e.target.value)}
                   placeholder="The initial prompt or context to feed into the first agent..."

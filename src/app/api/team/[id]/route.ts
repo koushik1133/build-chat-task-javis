@@ -3,6 +3,7 @@ import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { ROLES, canManageRole, isRole } from "@/lib/auth/roles";
+import { recordAudit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -43,6 +44,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
 
   await query(`UPDATE memberships SET role = $1, updated_at = NOW() WHERE id = $2`, [nextRole, id]);
+  await recordAudit(scope, { action: "update", entity: "member_role", entityId: id, before: { role: currentRole }, after: { role: nextRole }, req });
   return NextResponse.json({ ok: true, id, role: nextRole });
 }
 
@@ -71,5 +73,6 @@ export async function DELETE(_req: Request, { params }: Ctx) {
     `UPDATE memberships SET status = 'removed', invite_token_hash = NULL, updated_at = NOW() WHERE id = $1`,
     [id]
   );
+  await recordAudit(scope, { action: "delete", entity: "member", entityId: id, before: { role: target.role }, req: _req });
   return NextResponse.json({ ok: true, id });
 }

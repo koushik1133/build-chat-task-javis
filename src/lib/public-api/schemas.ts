@@ -775,6 +775,17 @@ export const InstallResult = z.object({
   note: z.string().nullable(),
 });
 
+/* ─── Plan & usage ─────────────────────────────────────────────────────── */
+export const PlanUsage = z.object({
+  plan: z.enum(["free", "starter", "growth", "scale", "enterprise"]),
+  status: z.enum(["trialing", "active", "past_due", "cancelled", "paused"]),
+  enforced: z.boolean().describe("True when plan limits are enforced for this deployment"),
+  trial_ends_at: z.string().nullable(),
+  limits: z.record(z.string(), z.number().nullable()).describe("Entitlement limits; null = unlimited"),
+  features: z.record(z.string(), z.boolean()),
+  usage: z.record(z.string(), z.number()),
+});
+
 /* ─── Credits ──────────────────────────────────────────────────────────── */
 export const CreditBalance = z.object({ balance: z.number().int().describe("Credits available") });
 export const LedgerEntry = z.object({

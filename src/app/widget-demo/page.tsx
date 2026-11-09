@@ -41,7 +41,7 @@ export default async function WidgetDemoPage({ searchParams }: { searchParams: P
         </div>
       </header>
       <section className="mx-auto max-w-4xl px-5 py-14 sm:py-20">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-600">Sample business page</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-700">Sample business page</p>
         <h1 className="mt-3 text-3xl font-bold leading-tight sm:text-5xl">Gentle, modern dentistry for the whole family.</h1>
         <p className="mt-4 max-w-xl text-base text-zinc-600 sm:text-lg">
           This page exists so you can see the KernelHub widget exactly as your visitors will. Open the launcher in the corner to try chat, the contact form, booking and help.

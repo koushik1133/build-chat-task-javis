@@ -19,6 +19,8 @@ const checks = [
   { path: "/login", status: 200, text: (t) => /<html/i.test(t), label: "login page renders" },
   { path: "/manifest.webmanifest", status: 200, json: (b) => typeof b?.name === "string", label: "PWA manifest" },
   { path: "/api/v1/openapi.json", status: 200, json: (b) => typeof b?.openapi === "string", label: "OpenAPI document" },
+  { path: "/api/ready", status: 200, json: (b) => b && b.ready === true, label: "readiness (database + critical tables)" },
+  { path: "/api/metrics", status: [404, 401], label: "metrics endpoint is closed without a token" },
   { path: "/api/v1/me", status: 401, label: "API v1 rejects anonymous callers" },
   { path: "/api/cron/agents", status: 401, label: "cron route rejects missing bearer" },
 ];
@@ -30,7 +32,7 @@ for (const c of checks) {
   try {
     const res = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(timeoutMs), headers: { accept: "application/json, text/html" } });
     const text = await res.text();
-    let ok = res.status === c.status;
+    let ok = Array.isArray(c.status) ? c.status.includes(res.status) : res.status === c.status;
     let detail = `${res.status}`;
     if (ok && c.json) {
       let body = null;

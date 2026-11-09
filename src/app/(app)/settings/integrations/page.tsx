@@ -301,11 +301,11 @@ export default function ConnectionsPage() {
               ) : (
                 <>
                   <Field label="Your email address">
-                    <input type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)}
+                    <input aria-label="you@company.com" type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)}
                       placeholder="you@company.com" className={inputCls} disabled={codeSent} />
                   </Field>
                   <Field label="Company name (optional — shown in email sender)">
-                    <input value={emailFromName} onChange={e => setEmailFromName(e.target.value)}
+                    <input aria-label="Acme Corp" value={emailFromName} onChange={e => setEmailFromName(e.target.value)}
                       placeholder="Acme Corp" className={inputCls} disabled={codeSent} />
                   </Field>
                   {!codeSent ? (
@@ -318,7 +318,7 @@ export default function ConnectionsPage() {
                         We sent a 6-digit code to <strong className="text-foreground">{data?.email_pending ?? emailTo}</strong>. Check your inbox (and spam).
                       </p>
                       <Field label="Verification code">
-                        <input
+                        <input aria-label="Verification code"
                           value={emailCode}
                           onChange={e => setEmailCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                           placeholder="123456"
@@ -367,11 +367,11 @@ export default function ConnectionsPage() {
             </ol>
           </div>
           <Field label="Slack channel name (optional, for your reference)">
-            <input value={slackChannel} onChange={e => setSlackChannel(e.target.value)}
+            <input aria-label="#general" value={slackChannel} onChange={e => setSlackChannel(e.target.value)}
               placeholder="#general" className={inputCls} />
           </Field>
           <Field label="Webhook URL">
-            <input value={slackUrl} onChange={e => setSlackUrl(e.target.value)}
+            <input aria-label="https://hooks.slack.com/services/T.../B.../..." value={slackUrl} onChange={e => setSlackUrl(e.target.value)}
               placeholder="https://hooks.slack.com/services/T.../B.../..."
               className={inputCls} />
             {data?.slack_connected && slackUrl.includes("***") && (
@@ -406,7 +406,7 @@ export default function ConnectionsPage() {
             </ol>
           </div>
           <Field label="Twilio From Number (or Sandbox Number)">
-            <input value={twilioNumber} onChange={e => setTwilioNumber(e.target.value)}
+            <input aria-label="+14155238886" value={twilioNumber} onChange={e => setTwilioNumber(e.target.value)}
               placeholder="+14155238886" className={inputCls} />
           </Field>
           <div className="mb-4 mt-2 flex items-center gap-2">
@@ -453,7 +453,7 @@ export default function ConnectionsPage() {
             </div>
           )}
           <Field label="Publishing Profile Name">
-            <input value={publishProfile} onChange={e => setPublishProfile(e.target.value)}
+            <input aria-label="my-brand" value={publishProfile} onChange={e => setPublishProfile(e.target.value)}
               placeholder="my-brand" className={inputCls} />
           </Field>
           <div className="flex gap-2">

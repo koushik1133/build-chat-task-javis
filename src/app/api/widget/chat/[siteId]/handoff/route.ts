@@ -3,6 +3,7 @@ import { z } from "zod";
 import { resolveSession } from "@/lib/webchat/session";
 import { requestHandoff } from "@/lib/webchat/service";
 import { clientIp, enforceLimits, isUuid, jsonWith, parseBody, sessionTokenFrom, widgetCors, widgetPreflight } from "@/lib/webchat/http";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ export async function OPTIONS(req: NextRequest, { params }: Ctx) {
 }
 
 /** POST { name, email?, phone?, message?, consent? } — leave details → contact + lead, session handed off. */
-export async function POST(req: NextRequest, { params }: Ctx) {
+async function postHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   try {
@@ -55,3 +56,5 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return jsonWith(cors, { error: "internal" }, 500);
   }
 }
+
+export const POST = withRequestContext(postHandler);

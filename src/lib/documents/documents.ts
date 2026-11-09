@@ -23,6 +23,7 @@ import {
   type SignerStatus,
   type SigningOrder,
 } from "./types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 export { DocumentError };
 
@@ -313,7 +314,7 @@ export async function replaceSigners(dataId: string, documentId: string, signers
     .filter((s) => s.name && s.email && !seen.has(s.email) && seen.add(s.email));
   if (clean.length === 0) throw new DocumentError("At least one signer with a name and email is required");
   if (clean.length > 10) throw new DocumentError("At most 10 signers");
-  await query(`DELETE FROM document_signers WHERE user_id = $1 AND document_id = $2`, [dataId, documentId]);
+  await deleteInBatches("document_signers", "user_id = $1 AND document_id = $2", [dataId, documentId]);
   for (let i = 0; i < clean.length; i++) {
     await query(`INSERT INTO document_signers (id, user_id, document_id, name, email, role, order_index, status) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')`, [randomUUID(), dataId, documentId, clean[i].name, clean[i].email, clean[i].role, i]);
   }
@@ -336,7 +337,7 @@ export async function deleteDocument(dataId: string, id: string, actorId?: strin
   const doc = await getDocument(dataId, id);
   if (!doc) return false;
   if (doc.status !== "draft" && doc.status !== "void") throw new DocumentError("Only drafts and voided documents can be deleted; void it first");
-  await query(`DELETE FROM document_signers WHERE user_id = $1 AND document_id = $2`, [dataId, id]);
+  await deleteInBatches("document_signers", "user_id = $1 AND document_id = $2", [dataId, id]);
   await query(`DELETE FROM documents WHERE user_id = $1 AND id = $2`, [dataId, id]);
   void recordAudit({ dataId, userId: actorId ?? null }, { action: "document.deleted", entity: "document", entityId: id });
   return true;

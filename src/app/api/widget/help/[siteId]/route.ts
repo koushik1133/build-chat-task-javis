@@ -3,6 +3,7 @@ import { searchArticles } from "@/lib/kb/search";
 import { listPublicArticles } from "@/lib/kb/articles";
 import { loadSiteForWidget, orgSlugFor } from "@/lib/webchat/public-config";
 import { clientIp, enforceLimits, isUuid, jsonWith, widgetCors, widgetPreflight } from "@/lib/webchat/http";
+import { withRequestContext } from "@/lib/log/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export async function OPTIONS(req: NextRequest, { params }: Ctx) {
 }
 
 /** GET ?q= — public help articles for the site's org (CORS-enabled). */
-export async function GET(req: NextRequest, { params }: Ctx) {
+async function getHandler(req: NextRequest, { params }: Ctx) {
   const { siteId } = await params;
   const cors = await widgetCors(req, siteId);
   try {
@@ -37,3 +38,5 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     return jsonWith(cors, { error: "internal" }, 500);
   }
 }
+
+export const GET = withRequestContext(getHandler);

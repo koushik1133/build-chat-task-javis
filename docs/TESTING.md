@@ -87,3 +87,25 @@ npm run eval:golden   # vitest run src/lib/evals/__tests__/golden.test.ts
 ```
 
 Cases live in `src/lib/evals/golden/{receptionist,injection}.json`. Script line for package.json: `"eval:golden": "vitest run src/lib/evals/__tests__/golden.test.ts"`. See `docs/AI-SAFETY.md`.
+
+## Static accessibility scan
+
+`src/lib/a11y/scan.ts` is a pure, heuristic scanner over TSX source. `src/lib/a11y/__tests__/scan-repo.test.ts` runs it over every `src/app/**/*.tsx` and `src/components/**/*.tsx` and fails on any un-allowed `error` finding.
+
+| Rule | Severity | Flags |
+| --- | --- | --- |
+| `img-alt` | error | `<img>` without `alt` |
+| `icon-only-button` | error | `<button>`/`<Button>` whose children are only icons, with no `aria-label`/`aria-labelledby`/`title`/`sr-only` text |
+| `form-control-label` | error | native `<input>/<select>/<textarea>` with no `aria-label(ledby)`, `title`, `id`+`htmlFor`, or wrapping `<label>` (hidden/submit/file-hidden inputs skipped) |
+| `click-non-interactive` | error | `<div>/<span onClick>` without `role`+`tabIndex`+`onKeyDown` (backdrops with `role="presentation"`/`dialog` and `stopPropagation` wrappers are fine) |
+| `blank-rel` | error | `target="_blank"` without `rel` containing `noopener`/`noreferrer` |
+| `positive-tabindex` | error | `tabIndex` > 0 |
+| `aria-hidden-focusable` | error | `aria-hidden="true"` on a natively focusable element or `tabIndex>=0` |
+| `autofocus` | warn | any `autoFocus` (acceptable inside dialogs) |
+| `button-type` | warn | `<button>` without `type` in a file containing a `<form>` |
+
+Accepted exceptions live in `src/lib/a11y/allow.json` as `file|rule|snippet` fingerprints (they survive line shifts) with a reason; the test caps the list at 25 entries. Prefer fixing the markup. Run `npx vitest run src/lib/a11y`.
+
+## Bundle report
+
+`node scripts/bundle-report.mjs <next-build-log>` (npm script: `"bundle:report": "node scripts/bundle-report.mjs build.txt"`) prints the 25 heaviest page routes by First Load JS and flags public routes (`/shop /p /book /help /u /m /invite /login`) over 250 kB and app routes over 350 kB.

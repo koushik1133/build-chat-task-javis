@@ -5,6 +5,7 @@ import { BOOKING_COLS, type BookingRow } from "@/lib/calendar/booking";
 import { bookingSummary } from "./ics";
 import { ensureCalsyncCursor, ensureFreshAuth, getCalendarProvider, getConnectionById, type ConnectionRow } from "./connections";
 import { parseSyncSettings } from "./types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 const PULL_DAYS = 60;
 const DAY = 86_400_000;
@@ -42,7 +43,7 @@ export async function pushBooking(connId: string, bookingId: string): Promise<Pu
     if (!booking || booking.status === "cancelled") {
       if (!link) return "skipped";
       await provider.deleteEvent(auth, calendarId, link.external_event_id);
-      await query(`DELETE FROM calendar_event_links WHERE id = $1`, [link.id]);
+      await deleteInBatches("calendar_event_links", "id = $1", [link.id]);
       return "deleted";
     }
     const pushEvent = {
@@ -101,7 +102,7 @@ export async function pullBusy(connId: string, now = new Date()): Promise<{ stor
     }
     const existing = await query<{ external_event_id: string }>(`SELECT external_event_id FROM external_busy WHERE connection_id = $1`, [connId]);
     const stale = existing.map((r) => r.external_event_id).filter((id) => !keep.has(id));
-    for (const id of stale) await query(`DELETE FROM external_busy WHERE connection_id = $1 AND external_event_id = $2`, [connId, id]);
+    for (const id of stale) await deleteInBatches("external_busy", "connection_id = $1 AND external_event_id = $2", [connId, id]);
     await query(`UPDATE calendar_connections SET last_sync_at = NOW(), sync_cursor = $1, status = 'connected', last_error = NULL WHERE id = $2`, [cursor, connId]);
     return { stored: blocks.length, removed: stale.length };
   } catch (err) {

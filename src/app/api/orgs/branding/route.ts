@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { dbUnavailableResponse } from "@/lib/api-db";
@@ -131,6 +132,10 @@ export async function PATCH(req: Request) {
   const parsed = Patch.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request", issues: parsed.error.issues }, { status: 400 });
+  }
+  if (parsed.data.custom_domain) {
+    const gate = await planGate(scope, { feature: "custom_domain" });
+    if (gate) return gate;
   }
   const patch: BrandingPatch = { ...parsed.data };
 

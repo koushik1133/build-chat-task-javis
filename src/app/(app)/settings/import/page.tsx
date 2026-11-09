@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { UpgradePrompt } from "@/components/plans/upgrade-prompt";
 import { CheckCircle2, Download, FileSpreadsheet, FlaskConical, Loader2, RefreshCw, Sparkles, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -378,6 +379,7 @@ export default function ImportExportSettingsPage() {
                   );
                 })}
               </ul>
+              <UpgradePrompt metric="contacts" increment={preview.rowCount} className="mt-3" />
               {ignored.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Ignored columns: {ignored.join(", ")}</p>}
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <Button type="button" variant="outline" touch onClick={() => void runImport(true)} disabled={busy !== null}>

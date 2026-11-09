@@ -15,6 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:golden": "vitest run src/lib/evals/__tests__/golden.test.ts",
+    "bundle:report": "node scripts/bundle-report.mjs build.txt",
+    "lint:dsql": "node scripts/dsql-lint.mjs",
     "test:integration": "DB_INTEGRATION=1 vitest run src/__integration__",
     "build:standalone": "NEXT_OUTPUT=standalone next build",
     "check-env": "node scripts/check-env.mjs",

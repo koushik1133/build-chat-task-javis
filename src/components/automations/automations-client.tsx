@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { UpgradePrompt } from "@/components/plans/upgrade-prompt";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Clock, Download, Pencil, Plus, Trash2, Zap } from "lucide-react";
@@ -139,6 +140,7 @@ export function AutomationsClient() {
     >
       {notice && <Banner tone="success" onDismiss={() => setNotice(null)}>{notice}</Banner>}
       {err && <Banner tone="error" onDismiss={() => setErr(null)}>{err}</Banner>}
+      <UpgradePrompt feature="automations_v2" className="mb-4" />
 
       <div className="mb-4 grid grid-cols-3 gap-2 sm:max-w-md">
         <Stat label="Enabled" value={counts.enabled} />

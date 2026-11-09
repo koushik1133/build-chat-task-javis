@@ -20,6 +20,7 @@ import {
   type ProjectTaskInput,
   type ProjectTaskPatch,
 } from "./pure";
+import { updateInBatches } from "@/lib/db/batch";
 
 /**
  * Projects data layer: projects, milestones, members and the project view of
@@ -326,7 +327,7 @@ export async function updateMilestone(dataId: string, id: string, patch: Milesto
 
 export async function deleteMilestone(dataId: string, id: string): Promise<boolean> {
   const rows = await query<{ id: string }>(`DELETE FROM project_milestones WHERE id = $1 AND user_id = $2 RETURNING id`, [id, dataId]);
-  if (rows.length > 0) await query(`UPDATE tasks SET milestone_id = NULL WHERE user_id = $1 AND milestone_id = $2`, [dataId, id]);
+  if (rows.length > 0) await updateInBatches("tasks", "milestone_id = NULL", "user_id = $1 AND milestone_id = $2", [dataId, id]);
   return rows.length > 0;
 }
 

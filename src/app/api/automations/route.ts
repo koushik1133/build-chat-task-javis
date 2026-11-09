@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { rateLimitAsync } from "@/lib/request-limits";
 import { AutomationDefinitionSchema } from "@/lib/automations/schema";
@@ -30,6 +31,8 @@ export async function POST(req: Request) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const gate = await planGate(scope, { feature: "automations_v2" });
+  if (gate) return gate;
   const rl = await rateLimitAsync(`automations:create:${scope.dataId}`, 60, 60_000);
   if (!rl.allowed) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   const raw = await req.json().catch(() => null);

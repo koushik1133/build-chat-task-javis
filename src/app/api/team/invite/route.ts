@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { ROLES, canManageRole } from "@/lib/auth/roles";
@@ -18,6 +19,9 @@ export async function POST(req: Request) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  const gate = await planGate(scope, { metric: "seats" });
+  if (gate) return gate;
 
   const limit = await rateLimitAsync(`team-invite:${scope.userId}`, 20, 60 * 60 * 1000);
   if (!limit.allowed) return NextResponse.json({ error: "rate limited" }, { status: 429 });

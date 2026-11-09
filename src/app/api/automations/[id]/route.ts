@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { AutomationDefinitionSchema, AutomationPatchSchema } from "@/lib/automations/schema";
 import { definitionOf, deleteAutomation, getAutomation, redactAutomationSecrets, restoreRedactedSecrets, saveAutomation, toAutomationDTO } from "@/lib/automations/store";
@@ -41,6 +42,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
   const patch = AutomationPatchSchema.safeParse(body);
   if (!patch.success) return NextResponse.json({ error: "Invalid patch", details: patch.error.flatten() }, { status: 400 });
+  if (patch.data.enabled === true) {
+    const gate = await planGate(scope, { feature: "automations_v2" });
+    if (gate) return gate;
+  }
   const row = await getAutomation(scope.dataId, id).catch(() => null);
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
   const current = definitionOf(row);

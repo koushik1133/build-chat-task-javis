@@ -28,6 +28,7 @@ import "./credits";
 import "./optimize";
 import "./accounting";
 import "./privacy";
+import "./plans";
 import "./voice";
 import "./inventory";
 import "./agency";

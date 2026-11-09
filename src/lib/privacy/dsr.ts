@@ -6,6 +6,7 @@ import { enqueueNotification } from "@/lib/notifications/outbox";
 import { likeContains } from "@/lib/like";
 import { revokeShareTokens } from "@/lib/share-tokens";
 import { tableExists } from "@/lib/table-exists";
+import { runBatchedStatement } from "@/lib/db/batch";
 import { anonymizeRow, ERASED_CUSTOMER_LABEL, ERASED_NAME, REDACTED, stripInternalKeys, tombstonesFor } from "./anonymize";
 import { computeDueAt, DSR_REMINDER_DAYS, type DsrKind, type DsrStatus, type DsrSubjectKind } from "./constants";
 import { listForSubject, writeTombstones } from "./consent";
@@ -394,6 +395,9 @@ export interface EraseResult {
  */
 async function run(table: string, sql: string, params: unknown[]): Promise<number> {
   if (!(await tableExists(table))) return 0;
+  // DSQL caps a transaction at 3,000 rows: simple row-removal/UPDATE statements run in <= 1000-row batches.
+  const batched = await runBatchedStatement(sql, params);
+  if (batched !== null) return batched;
   const rows = await query<{ id: string }>(`${sql} RETURNING id`, params);
   return rows.length;
 }

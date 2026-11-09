@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "crypto";
+import { recordErrorCapture } from "@/lib/metrics/registry";
 
 /**
  * Deduplicated error capture into `app_errors`.
@@ -48,6 +49,7 @@ export function normaliseError(err: unknown): NormalisedError {
 
 /** Record an error. Returns the row id (existing or new) or null when storage failed. Never throws. */
 export async function captureError(err: unknown, ctx: CaptureContext): Promise<string | null> {
+  recordErrorCapture();
   try {
     const { message, stack } = normaliseError(err);
     const route = ctx.route.slice(0, 300);

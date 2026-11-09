@@ -115,6 +115,27 @@ const applied = new Set(
   (await client.query("SELECT hash FROM schema_migrations")).rows.map((r) => r.hash)
 );
 
+
+/** Poll sys.jobs until an async index build finishes (best effort: polling problems only warn). */
+async function awaitIndexJob(jobId, timeoutMs = 5 * 60_000) {
+  if (!jobId) return;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let row;
+    try {
+      row = (await client.query("SELECT status, details FROM sys.jobs WHERE job_id = $1", [jobId])).rows[0];
+    } catch (e) {
+      console.warn(`     (could not poll sys.jobs: ${e?.message ?? e}; continuing)`);
+      return;
+    }
+    const status = String(row?.status ?? "").toLowerCase();
+    if (status === "completed") return;
+    if (status === "failed") throw new Error(`index job ${jobId} failed: ${row?.details ?? "no details"}`);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error(`index job ${jobId} did not finish within ${timeoutMs / 1000}s`);
+}
+
 let ok = 0, skip = 0, fail = 0;
 
 for (const rawStmt of statements) {
@@ -128,7 +149,12 @@ for (const rawStmt of statements) {
     continue;
   }
   try {
-    await client.query(stmt);
+    const res = await client.query(stmt);
+    // DSQL runs CREATE INDEX ASYNC as a background job and returns its job_id immediately. Wait for it so
+    // a failed build (e.g. duplicate data under a UNIQUE index) is not recorded as applied.
+    if (!isLocal && /CREATE\s+(UNIQUE\s+)?INDEX\s+ASYNC/i.test(rawStmt)) {
+      await awaitIndexJob(res?.rows?.[0]?.job_id);
+    }
     await client.query("INSERT INTO schema_migrations (hash) VALUES ($1)", [hash]);
     console.log(`  ✓  ${preview}`);
     ok++;

@@ -12,6 +12,7 @@ vi.mock("@/lib/dsql", () => ({
   query: (...args: unknown[]) => query(...args),
   queryOne: (...args: unknown[]) => queryOne(...args),
   withRetry: (fn: () => unknown) => fn(),
+  isUndefinedColumn: () => false,
 }));
 vi.mock("@/lib/inventory/stock", () => ({ consumeForInvoice: vi.fn(async () => []) }));
 vi.mock("@/lib/docs/numbering", () => ({ nextDocNumber: vi.fn() }));

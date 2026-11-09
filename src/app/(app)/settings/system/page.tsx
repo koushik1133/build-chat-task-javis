@@ -7,6 +7,9 @@ import { Banner, Empty, ErrorState, SkeletonList } from "@/components/ui/feedbac
 import { Pill, type Tone } from "@/components/ui/pill";
 import { TableScroller } from "@/components/ui/table-scroller";
 import { isAbortError, useAbortable } from "@/components/ui/hooks";
+import { Tabs, TabPanel } from "@/components/ui/tabs";
+import { AlertsTab } from "@/components/system/alerts-tab";
+import { DiagnosticsTab, type DiagnosticsData } from "@/components/system/diagnostics-tab";
 import { PageContainer } from "@/components/page-container";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +32,7 @@ interface Status {
   errors: AppErrorRow[];
   errorsAvailable: boolean;
   vitals: VitalsSummary | null;
+  diagnostics?: DiagnosticsData;
 }
 interface VitalsRow { path: string; name: "LCP" | "CLS" | "INP" | "TTFB" | "FCP"; p75: number; samples: number; good_share: number }
 interface VitalsSummary { global: true; windowHours: number; rows: VitalsRow[] }
@@ -92,6 +96,7 @@ export default function SystemHealthPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [tab, setTab] = useState<"overview" | "alerts" | "diagnostics">("overview");
   const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
@@ -134,9 +139,15 @@ export default function SystemHealthPage() {
         </Button>
       }
     >
-      {error && status && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
+      <Tabs id="sys" label="System health sections" value={tab} onChange={setTab} className="mb-6"
+        tabs={[{ id: "overview", label: "Overview" }, { id: "alerts", label: "Alerts" }, { id: "diagnostics", label: "Diagnostics" }]} />
+      {tab === "alerts" && <TabPanel id="sys" value="alerts"><AlertsTab /></TabPanel>}
+      {tab === "diagnostics" && status && (
+        <TabPanel id="sys" value="diagnostics"><DiagnosticsTab diagnostics={status.diagnostics ?? null} queue={status.queue} errors={status.errors} /></TabPanel>
+      )}
+      {tab === "overview" && error && status && <Banner tone="error" onDismiss={() => setError(null)}>{error}</Banner>}
 
-      {loading && !status ? (
+      {tab !== "overview" ? null : loading && !status ? (
         <SkeletonList count={4} itemClassName="h-24" label="Loading system status…" />
       ) : !status ? (
         <ErrorState message={error ?? "Could not load system status."} onRetry={() => void load()} />

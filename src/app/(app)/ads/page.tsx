@@ -158,7 +158,7 @@ export default function AdsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-lg border border-border p-0.5" role="group" aria-label="Date range">
             {RANGES.map((d) => (
-              <button
+              <button type="button"
                 key={d}
                 onClick={() => setDays(d)}
                 aria-pressed={days === d}
@@ -373,7 +373,7 @@ function Banner({
     <div role={tone === "error" ? "alert" : "status"} className={cn("mb-4 flex items-start gap-2 rounded-lg border px-4 py-3 text-sm", styles)}>
       <span className="min-w-0 flex-1 break-words">{children}</span>
       {onDismiss && (
-        <button onClick={onDismiss} aria-label="Dismiss" className="shrink-0 opacity-70 hover:opacity-100">
+        <button type="button" onClick={onDismiss} aria-label="Dismiss" className="shrink-0 opacity-70 hover:opacity-100">
           <X className="h-4 w-4" aria-hidden />
         </button>
       )}

@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { z } from "zod";
 import { requireScope } from "@/lib/auth/scope";
 import { publishListing } from "@/lib/marketplace/catalog";
 import { listPublishable } from "@/lib/marketplace/export";
 import { CATEGORIES, LISTING_KINDS, VISIBILITIES } from "@/lib/marketplace/types";
 import { errorResponse, parseBody } from "@/lib/money/http";
+import { recordAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,9 +39,12 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const scope = await requireScope({ area: "agents", edit: true });
+    const gate = await planGate(scope, { feature: "marketplace_publish" });
+    if (gate) return gate;
     const body = await parseBody(req, Body, 64_000);
     if (!body.ok) return body.res;
     const out = await publishListing(scope.dataId, body.data);
+    await recordAudit(scope, { action: out.updated ? "update" : "create", entity: "marketplace_listing", entityId: (out.listing as { id?: string } | null)?.id ?? null, req });
     return NextResponse.json({ listing: out.listing, scrubbed: out.scrubbed, updated: out.updated }, { status: out.updated ? 200 : 201 });
   } catch (err) {
     return errorResponse(err, "marketplace.publish.POST");

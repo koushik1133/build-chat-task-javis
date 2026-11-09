@@ -501,7 +501,7 @@ export default function SocialPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={fetchAll} disabled={loadingPosts}>
+                  <Button aria-label="Refresh" variant="outline" size="sm" onClick={fetchAll} disabled={loadingPosts}>
                     <RefreshCw className={`h-3.5 w-3.5 ${loadingPosts ? "animate-spin" : ""}`} />
                   </Button>
                   <Button size="sm" onClick={() => setShowGenerate(true)}>
@@ -644,7 +644,7 @@ export default function SocialPage() {
                         <span className="text-[10px] bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400 rounded-full px-2 py-0.5">
                           Connected
                         </span>
-                        <button onClick={() => handleDisconnect(acc.id)} className="p-1.5 rounded hover:bg-secondary text-muted-foreground hover:text-destructive transition-colors">
+                        <button aria-label="Delete" onClick={() => handleDisconnect(acc.id)} className="p-1.5 rounded hover:bg-secondary text-muted-foreground hover:text-destructive transition-colors">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -749,11 +749,11 @@ export default function SocialPage() {
 
       {/* ════════════════════════════════════════ GENERATE MODAL */}
       {showGenerate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowGenerate(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowGenerate(false)}>
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg shadow-2xl space-y-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h2 className="font-semibold flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Generate AI Content</h2>
-              <button onClick={() => setShowGenerate(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setShowGenerate(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             {/* Platform selection */}
@@ -805,7 +805,7 @@ export default function SocialPage() {
             {/* Count */}
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Number of posts: {genCount}</label>
-              <input
+              <input aria-label="Number of posts"
                 type="range" min={3} max={14} value={genCount}
                 onChange={e => setGenCount(Number(e.target.value))}
                 className="w-full accent-primary"
@@ -820,7 +820,7 @@ export default function SocialPage() {
               <label className="text-xs font-medium text-muted-foreground mb-1 block">
                 Focus topics <span className="text-muted-foreground/60">(optional — comma separated)</span>
               </label>
-              <input
+              <input aria-label="Topics"
                 value={genTopics}
                 onChange={e => setGenTopics(e.target.value)}
                 placeholder="e.g. product launch, industry tips, behind the scenes"
@@ -841,11 +841,11 @@ export default function SocialPage() {
 
       {/* ════════════════════════════════════════ ADD ACCOUNT MODAL */}
       {showAddAccount && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAddAccount(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAddAccount(false)}>
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-sm shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Connect Account</h2>
-              <button onClick={() => setShowAddAccount(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setShowAddAccount(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             <div>
@@ -890,11 +890,11 @@ export default function SocialPage() {
 
       {/* ════════════════════════════════════════ EDIT POST MODAL */}
       {editPost && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setEditPost(null)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setEditPost(null)}>
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-xl shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Edit Post</h2>
-              <button onClick={() => setEditPost(null)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setEditPost(null)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             <div className="flex items-center gap-2">
@@ -904,7 +904,7 @@ export default function SocialPage() {
 
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Caption</label>
-              <textarea
+              <textarea aria-label="Caption"
                 value={editCaption}
                 onChange={e => setEditCaption(e.target.value)}
                 rows={6}
@@ -914,7 +914,7 @@ export default function SocialPage() {
 
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Hashtags</label>
-              <input
+              <input aria-label="Hashtags"
                 value={editHashtags}
                 onChange={e => setEditHashtags(e.target.value)}
                 placeholder="#hashtag1 #hashtag2"
@@ -924,7 +924,7 @@ export default function SocialPage() {
 
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Schedule Date & Time</label>
-              <input
+              <input aria-label="Schedule time"
                 type="datetime-local"
                 value={editSchedule}
                 onChange={e => setEditSchedule(e.target.value)}

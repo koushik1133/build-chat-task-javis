@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { RUN_LIMITS } from "@/lib/agents/types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 export const runtime = "nodejs";
 
@@ -73,7 +74,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   try { scope = await requireScope({ area: "agents", edit: true }); }
   catch (err) { return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
   const { id } = await ctx.params;
-  await query("DELETE FROM agent_triggers WHERE agent_id = $1 AND user_id = $2", [id, scope.dataId]).catch(() => {});
+  await deleteInBatches("agent_triggers", "agent_id = $1 AND user_id = $2", [id, scope.dataId]).catch(() => {});
   await query("DELETE FROM agents WHERE id = $1 AND user_id = $2", [id, scope.dataId]);
   return NextResponse.json({ ok: true });
 }

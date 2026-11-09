@@ -116,6 +116,7 @@ export function FeatureRequestButton({ domain = "general", className }: FeatureR
       {/* Modal */}
       {open && (
         <div
+          role="presentation"
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4"
           onClick={() => setOpen(false)}
         >
@@ -149,7 +150,7 @@ export function FeatureRequestButton({ domain = "general", className }: FeatureR
                     View All
                   </button>
                 </div>
-                <button onClick={() => setOpen(false)}>
+                <button aria-label="Close" onClick={() => setOpen(false)}>
                   <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />
                 </button>
               </div>
@@ -192,7 +193,7 @@ export function FeatureRequestButton({ domain = "general", className }: FeatureR
                     {/* Title */}
                     <div>
                       <label className="text-xs font-medium text-muted-foreground block mb-1">Feature Title *</label>
-                      <input
+                      <input aria-label="Title"
                         value={title}
                         onChange={e => setTitle(e.target.value)}
                         placeholder="e.g. Add Slack notification integration"
@@ -204,7 +205,7 @@ export function FeatureRequestButton({ domain = "general", className }: FeatureR
                     {/* Description */}
                     <div>
                       <label className="text-xs font-medium text-muted-foreground block mb-1">Description *</label>
-                      <textarea
+                      <textarea aria-label="Description"
                         value={description}
                         onChange={e => setDescription(e.target.value)}
                         placeholder="Describe what you need and why it would be valuable..."

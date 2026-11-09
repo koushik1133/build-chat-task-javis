@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { tableExists } from "@/lib/table-exists";
 import { addTargets, createCampaign, listCampaigns, setCampaignStatus } from "@/lib/voice/campaigns";
@@ -33,6 +34,8 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const gate = await planGate(scope, { feature: "voice_campaigns" });
+  if (gate) return gate;
   const parsed = createCampaignSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid body", detail: parsed.error.flatten() }, { status: 400 });

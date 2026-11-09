@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { query, queryOne } from "@/lib/dsql";
+import { updateInBatches } from "@/lib/db/batch";
 
 export async function GET() {
   let user;
@@ -31,7 +32,7 @@ export async function PATCH(req: Request) {
   const { ids, all } = rawBody;
 
   if (all) {
-    await query(`UPDATE notifications SET read = true WHERE user_id = $1`, [user.id]);
+    await updateInBatches("notifications", "read = true", "user_id = $1 AND read IS NOT TRUE", [user.id]);
   } else if (Array.isArray(ids) && ids.length > 0) {
     const idList = ids.slice(0, 200).map(String);
     await query(`UPDATE notifications SET read = true WHERE id = ANY($1) AND user_id = $2`, [idList, user.id]);

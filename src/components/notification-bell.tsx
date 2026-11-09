@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, X } from "lucide-react";
 import { cn, timeAgo } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { CategoryIcon } from "@/components/category-icon";
 
 type Notification = {
   id: string;
@@ -13,6 +15,7 @@ type Notification = {
   created_at: string;
   /** "outbox" rows come from notification_outbox (in_app channel). */
   source?: "outbox";
+  data?: Record<string, unknown> | null;
 };
 
 export const NOTIFICATIONS_REFRESH = "javis:notifications-refresh";
@@ -166,7 +169,8 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
     if (!n.read) {
       markRead(n.id, n.source);
     }
-    const path = inferNotificationPath(n.title, n.body);
+    const link = typeof n.data?.href === "string" && n.data.href.startsWith("/") && !n.data.href.startsWith("//") ? n.data.href : null;
+    const path = link ?? inferNotificationPath(n.title, n.body);
     router.push(path);
     setShowNotifs(false);
   };
@@ -177,6 +181,7 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
     <>
       {showNotifs && (
         <div
+          role="presentation"
           className="fixed inset-0 z-40 bg-transparent"
           onClick={() => setShowNotifs(false)}
         />
@@ -278,7 +283,10 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
                       !n.read && "bg-primary/5 font-medium"
                     )}
                   >
-                    <p className="text-xs font-medium text-foreground">{n.title}</p>
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                      <CategoryIcon category={typeof n.data?.category === "string" ? n.data.category : null} className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate">{n.title}</span>
+                    </p>
                     {n.body && (
                       <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
                     )}
@@ -287,6 +295,13 @@ export function NotificationBell({ variant = "inline" }: NotificationBellProps) 
                 ))
               )}
             </div>
+            <Link
+              href="/inbox"
+              onClick={() => setShowNotifs(false)}
+              className="shrink-0 border-t border-border px-3 py-2 text-center text-xs font-medium text-primary hover:bg-secondary/40"
+            >
+              View all
+            </Link>
           </div>
         )}
       </div>

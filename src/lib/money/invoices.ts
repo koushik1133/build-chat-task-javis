@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { query, queryOne, withRetry } from "@/lib/dsql";
+import { query, queryOne, withRetry, isUndefinedColumn } from "@/lib/dsql";
 import { nextDocNumber } from "@/lib/docs/numbering";
 import { issueShareToken } from "@/lib/share-tokens";
 import { enqueueNotification } from "@/lib/notifications/outbox";
@@ -359,6 +359,32 @@ export async function voidInvoice(dataId: string, id: string): Promise<InvoiceDT
 }
 
 /**
+ * Insert one invoice_payments row. `ref_key` makes the (invoice, provider, ref) uniqueness total —
+ * provider_ref when present, else the row id — because DSQL has no partial unique indexes.
+ * Falls back to the pre-Phase-10 column list when ref_key has not been migrated yet.
+ */
+export async function insertPaymentRow(p: {
+  invoiceId: string; provider: string; providerRef: string | null;
+  amountMinor: number; currency: string; status: string;
+}): Promise<void> {
+  const id = randomUUID();
+  try {
+    await query(
+      `INSERT INTO invoice_payments (id, invoice_id, provider, provider_ref, ref_key, amount_minor, currency, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, p.invoiceId, p.provider, p.providerRef, p.providerRef ?? id, p.amountMinor, p.currency, p.status]
+    );
+  } catch (err) {
+    if (!isUndefinedColumn(err)) throw err;
+    await query(
+      `INSERT INTO invoice_payments (id, invoice_id, provider, provider_ref, amount_minor, currency, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, p.invoiceId, p.provider, p.providerRef, p.amountMinor, p.currency, p.status]
+    );
+  }
+}
+
+/**
  * Record a payment against an invoice and recompute status. Idempotent on
  * (provider, provider_ref) for succeeded payments so replays cannot double-count.
  */
@@ -379,7 +405,7 @@ export async function recordPayment(input: {
     throw new Error(`Currency mismatch: invoice ${inv.currency}, payment ${input.currency}`);
   }
   if (input.providerRef) {
-    // One row per (invoice, provider, provider_ref) — enforced by uq_invoice_payments_provider_ref.
+    // One row per (invoice, provider, provider_ref) — enforced by uq_invoice_payments_ref_key.
     // A `pending` row written by createPayLink (or an earlier `failed` attempt) is promoted in
     // place; a provider object that already succeeded is never downgraded or double-counted.
     const existing = await queryOne<{ id: string; status: string }>(
@@ -401,11 +427,10 @@ export async function recordPayment(input: {
     }
   }
   try {
-    await query(
-      `INSERT INTO invoice_payments (id, invoice_id, provider, provider_ref, amount_minor, currency, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [randomUUID(), input.invoiceId, input.provider, input.providerRef, input.amountMinor, input.currency.toUpperCase(), st]
-    );
+    await insertPaymentRow({
+      invoiceId: input.invoiceId, provider: input.provider, providerRef: input.providerRef,
+      amountMinor: input.amountMinor, currency: input.currency.toUpperCase(), status: st,
+    });
   } catch (err) {
     // Concurrent first write for the same provider_ref won the unique index: treat as the duplicate it is.
     const code = err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
@@ -477,11 +502,10 @@ export async function createPayLink(dataId: string, id: string): Promise<{ url: 
     token: share.token,
   });
   // Pending row: links provider_ref → invoice for webhook lookup; excluded from paid sums (status 'pending').
-  await query(
-    `INSERT INTO invoice_payments (id, invoice_id, provider, provider_ref, amount_minor, currency, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending')`,
-    [randomUUID(), inv.id, provider.id, checkout.providerRef, outstanding, inv.currency]
-  );
+  await insertPaymentRow({
+    invoiceId: inv.id, provider: provider.id, providerRef: checkout.providerRef,
+    amountMinor: outstanding, currency: inv.currency, status: "pending",
+  });
   if (inv.status === "draft") {
     await query(`UPDATE invoices SET status = 'sent', sent_at = COALESCE(sent_at, NOW()), updated_at = NOW() WHERE id = $1`, [inv.id]);
   }

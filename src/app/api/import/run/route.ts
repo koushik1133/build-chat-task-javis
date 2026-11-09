@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { recordAudit } from "@/lib/audit";
 import { parseBody } from "@/lib/money/http";
+import { planGate } from "@/lib/plans/http";
 import { parseCsv } from "@/lib/import/parse";
 import { getImportTarget, IMPORT_TARGET_KEYS } from "@/lib/import/targets";
 import { MAX_IMPORT_ROWS, runImport } from "@/lib/import/run";
@@ -38,6 +39,11 @@ export async function POST(req: NextRequest) {
 
   const csv = parseCsv(parsed.data.csv, { maxRows: MAX_IMPORT_ROWS + 1 });
   if (csv.headers.length === 0) return NextResponse.json({ error: "empty_csv", detail: "No header row found." }, { status: 400 });
+
+  if (target.table === "crm_contacts" && !(parsed.data.dryRun ?? false)) {
+    const gate = await planGate(scope, { metric: "contacts", increment: csv.rows.length });
+    if (gate) return gate;
+  }
 
   // Only keep mapping entries for real fields; unknown keys are ignored.
   const fieldKeys = new Set(target.fields.map((f) => f.key));

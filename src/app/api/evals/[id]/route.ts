@@ -4,6 +4,7 @@ import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { query, queryOne } from "@/lib/dsql";
 import { getEval, listEvalRuns, toEvalRunDTO, type EvalRow } from "@/lib/evals/run";
 import { MAX_CASES, parseCases } from "@/lib/evals/score";
+import { deleteInBatches } from "@/lib/db/batch";
 
 export const runtime = "nodejs";
 
@@ -76,7 +77,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   try {
     const ev = await getEval(scope.dataId, id);
     if (!ev) return NextResponse.json({ error: "not found" }, { status: 404 });
-    await query(`DELETE FROM agent_eval_runs WHERE eval_id = $1 AND user_id = $2`, [id, scope.dataId]);
+    await deleteInBatches("agent_eval_runs", "eval_id = $1 AND user_id = $2", [id, scope.dataId]);
     await query(`DELETE FROM agent_evals WHERE id = $1 AND user_id = $2`, [id, scope.dataId]);
     return new NextResponse(null, { status: 204 });
   } catch (err) {

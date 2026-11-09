@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { planGate } from "@/lib/plans/http";
 import { query, queryOne } from "@/lib/dsql";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { emitEvent } from "@/lib/events/bus";
@@ -84,6 +85,9 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       return scopeErrorResponse(err) ?? NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
+
+    const gate = await planGate(scope, { metric: "contacts" });
+    if (gate) return gate;
 
     const body = await req.json();
     const {

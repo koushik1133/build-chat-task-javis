@@ -4,6 +4,7 @@ import { query, queryOne } from "@/lib/dsql";
 import { complete } from "@/lib/llm";
 import { deleteFile, upsertChunks } from "@/lib/pinecone";
 import { excerptFromMarkdown, isValidSlug, slugify, uniqueSlug } from "./slug";
+import { updateInBatches } from "@/lib/db/batch";
 
 /**
  * Knowledge base articles. Rows are keyed by `user_id` = the org's dataId.
@@ -131,7 +132,7 @@ export async function upsertCategory(dataId: string, input: { name: string; slug
 export async function deleteCategory(dataId: string, id: string): Promise<void> {
   const row = await queryOne<KbCategoryRow>(`SELECT ${CATEGORY_COLS} FROM kb_categories WHERE user_id = $1 AND id = $2`, [dataId, id]);
   if (!row) return;
-  await query(`UPDATE kb_articles SET category = NULL WHERE user_id = $1 AND category = $2`, [dataId, row.slug]);
+  await updateInBatches("kb_articles", "category = NULL", "user_id = $1 AND category = $2", [dataId, row.slug]);
   await query(`DELETE FROM kb_categories WHERE user_id = $1 AND id = $2`, [dataId, id]);
 }
 

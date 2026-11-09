@@ -9,7 +9,7 @@ import { Field } from "@/components/ui/field";
 import { Banner, Skeleton } from "@/components/ui/feedback";
 import { Pill } from "@/components/ui/pill";
 import { MarkdownView } from "@/components/documents/markdown-view";
-import { CONSENT_TEXT } from "@/lib/pdf/quote-document";
+import { CONSENT_TEXT } from "@/lib/pdf/consent-text";
 import type { PublicDocument } from "@/lib/documents/types";
 
 /*

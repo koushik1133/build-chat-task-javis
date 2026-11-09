@@ -5,6 +5,8 @@ import { IDEMPOTENCY_HEADER, isValidIdempotencyKey, requestHash, withIdempotency
 import { parseListParams, type ListParams } from "./pagination";
 import type { RouteDef } from "./registry";
 import { captureError } from "@/lib/errors/capture";
+import { recordApiCallSampled } from "@/lib/plans/usage";
+import { withRequestContext } from "@/lib/log/context";
 
 /**
  * Builds a Next.js route handler from a registry entry.
@@ -45,7 +47,7 @@ export function op<Q extends ZodTypeAny, P extends ZodTypeAny, B extends ZodType
   def: RouteDef<Q, P, B>,
   impl: (ctx: OpContext<Infer<Q>, Infer<P>, Infer<B>>) => Promise<OpResult>
 ): (req: Request, context: RouteContext) => Promise<Response> {
-  return async function handler(req: Request, context: RouteContext): Promise<Response> {
+  return withRequestContext(async function handler(req: Request, context: RouteContext): Promise<Response> {
     let rlHeaders: Record<string, string> = {};
     let ownerDataId: string | null = null;
     try {
@@ -54,6 +56,7 @@ export function op<Q extends ZodTypeAny, P extends ZodTypeAny, B extends ZodType
       if (def.scope !== null) {
         rlHeaders = rateLimitHeaders(principal.rate);
         ownerDataId = principal.dataId;
+        recordApiCallSampled(principal.dataId);
       }
 
       const rawParams = (await context?.params) ?? {};
@@ -114,7 +117,7 @@ export function op<Q extends ZodTypeAny, P extends ZodTypeAny, B extends ZodType
       }
       return res;
     }
-  };
+  }, { route: `/api/v1${def.path}` });
 }
 
 const PUBLIC_PRINCIPAL: ApiPrincipal = { userId: "", dataId: "", keyId: "", scopes: [], rate: { limit: 0, remaining: 0, resetAt: 0 } };

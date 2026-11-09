@@ -1,4 +1,5 @@
 import { query } from "@/lib/dsql";
+import { tableExistsVia } from "@/lib/db/catalog";
 
 /**
  * Cheap, memoised "does this table exist" probe. Several Phase 3 lanes ship
@@ -12,16 +13,7 @@ export async function tableExists(name: string): Promise<boolean> {
   if (!/^[a-z_][a-z0-9_]*$/.test(name)) return false;
   const hit = cache.get(name);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.ok;
-  let ok = false;
-  try {
-    const rows = await query<{ n: string }>(
-      `SELECT table_name AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1 LIMIT 1`,
-      [name]
-    );
-    ok = rows.length > 0;
-  } catch {
-    ok = false;
-  }
+  const ok = await tableExistsVia((sql, params) => query(sql, params ?? []), name);
   cache.set(name, { ok, at: Date.now() });
   return ok;
 }

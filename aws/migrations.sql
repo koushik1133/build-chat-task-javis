@@ -3355,3 +3355,176 @@ ALTER TABLE ai_budgets ADD COLUMN IF NOT EXISTS daily_cap_micros BIGINT;
 ALTER TABLE ai_budgets ADD COLUMN IF NOT EXISTS max_tokens_per_call INTEGER;
 ALTER TABLE ai_budgets ADD COLUMN IF NOT EXISTS fallback_model TEXT;
 
+
+-- ==== PHASE 10 LANE A ====
+-- Phase 10 / Lane A: Aurora DSQL compatibility corrections.
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+-- Already-applied statements are hash-tracked and never edited in place; the corrections below supersede them.
+
+-- ── invoice_payments: replace the partial unique index with a total one ──────
+-- ref_key = provider_ref when present, otherwise the row id (so NULL provider_refs never collide).
+-- Written by recordPayment / createPayLink in src/lib/money/invoices.ts. Legacy rows keep ref_key NULL
+-- (NULLs are distinct in a unique index) and remain protected by the application-level lookup.
+ALTER TABLE invoice_payments ADD COLUMN IF NOT EXISTS ref_key TEXT;
+
+DROP INDEX IF EXISTS uq_invoice_payments_provider_ref;
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_invoice_payments_ref_key ON invoice_payments (invoice_id, provider, ref_key);
+
+-- ── agency indexes created without ASYNC in the original migration ───────────
+CREATE INDEX ASYNC IF NOT EXISTS agency_clients_user_id ON agency_clients(user_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS agency_employees_user_id ON agency_employees(user_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS agency_projects_user_id ON agency_projects(user_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS agency_projects_status ON agency_projects(status);
+
+CREATE INDEX ASYNC IF NOT EXISTS agency_standups_user_id ON agency_daily_standups(user_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS agency_standups_risk ON agency_daily_standups(risk_level);
+
+CREATE INDEX ASYNC IF NOT EXISTS agency_proposals_user_id ON agency_proposals(user_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS agency_client_audits_user_id ON agency_client_audits(user_id);
+
+
+-- ==== PHASE 10 LANE B ====
+-- Phase 10 lane B: KernelHub subscription plans, entitlements, seats, usage.
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  user_id                   TEXT PRIMARY KEY,                 -- org data id
+  plan_key                  TEXT NOT NULL,                    -- free|starter|growth|scale|enterprise
+  status                    TEXT NOT NULL DEFAULT 'trialing', -- trialing|active|past_due|cancelled|paused
+  billing_interval          TEXT NOT NULL DEFAULT 'month',    -- month|year
+  currency                  TEXT NOT NULL DEFAULT 'USD',
+  seats_purchased           INTEGER NOT NULL DEFAULT 1,
+  trial_ends_at             TIMESTAMPTZ,
+  current_period_start      TIMESTAMPTZ,
+  current_period_end        TIMESTAMPTZ,
+  cancel_at_period_end      BOOLEAN NOT NULL DEFAULT FALSE,
+  provider                  TEXT,
+  provider_customer_ref     TEXT,
+  provider_subscription_ref TEXT,
+  pending_plan_key          TEXT,                             -- scheduled downgrade, applied at renewal
+  pending_interval          TEXT,
+  pending_seats             INTEGER,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_subscriptions_due ON subscriptions (status, current_period_end);
+
+CREATE TABLE IF NOT EXISTS plan_invoices (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  subscription_id  TEXT NOT NULL,                             -- = subscriptions.user_id
+  kind             TEXT NOT NULL DEFAULT 'subscribe',         -- subscribe|upgrade|seats|renewal
+  plan_key         TEXT NOT NULL,
+  billing_interval TEXT NOT NULL DEFAULT 'month',
+  seats            INTEGER NOT NULL DEFAULT 1,
+  period_start     TIMESTAMPTZ,
+  period_end       TIMESTAMPTZ,
+  amount_minor     BIGINT NOT NULL DEFAULT 0,
+  currency         TEXT NOT NULL DEFAULT 'USD',
+  status           TEXT NOT NULL DEFAULT 'open',              -- open|paid|void|failed
+  provider         TEXT,
+  provider_ref     TEXT,
+  token_hash       TEXT,
+  paid_at          TIMESTAMPTZ,
+  pdf_hash         TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_plan_invoices_user ON plan_invoices (user_id, created_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_plan_invoices_token ON plan_invoices (token_hash);
+
+CREATE TABLE IF NOT EXISTS usage_counters (
+  user_id      TEXT NOT NULL,
+  metric       TEXT NOT NULL,
+  period_start DATE NOT NULL,
+  value        BIGINT NOT NULL DEFAULT 0,
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, metric, period_start)
+);
+
+CREATE TABLE IF NOT EXISTS plan_overrides (
+  user_id      TEXT PRIMARY KEY,
+  entitlements TEXT NOT NULL DEFAULT '{}',                    -- JSON {plan_key?, limits?, features?}
+  reason       TEXT,
+  created_by   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ==== PHASE 10 LANE C ====
+-- Phase 10 lane C: alerting (rules + events)
+
+CREATE TABLE IF NOT EXISTS alert_rules (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT,                                  -- org data id; NULL = platform rule (operator)
+  key           TEXT NOT NULL,                         -- stable rule key, e.g. outbox_failed
+  name          TEXT NOT NULL,
+  condition     TEXT NOT NULL,                         -- JSON {metric, op, threshold, window_min}
+  channel_ids   TEXT NOT NULL DEFAULT '[]',            -- JSON array: chat_integrations ids or "email:<address>"
+  enabled       BOOLEAN NOT NULL DEFAULT FALSE,
+  last_fired_at TIMESTAMPTZ,
+  last_eval_at  TIMESTAMPTZ,
+  cooldown_min  INTEGER NOT NULL DEFAULT 60,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_alert_rules_user ON alert_rules (user_id, key);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_alert_rules_enabled ON alert_rules (enabled, last_eval_at);
+
+CREATE TABLE IF NOT EXISTS alert_events (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT,
+  rule_id     TEXT NOT NULL,
+  fired_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at TIMESTAMPTZ,
+  value       DOUBLE PRECISION,
+  message     TEXT
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_alert_events_user ON alert_events (user_id, fired_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_alert_events_rule ON alert_events (rule_id, resolved_at);
+
+
+-- ==== PHASE 10 LANE E ====
+-- Phase 10 lane E: power-user UX (recent items, favourites, inbox snooze)
+
+CREATE TABLE IF NOT EXISTS recent_items (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,            -- org data id
+  member_user_id  TEXT NOT NULL,            -- the member who opened it
+  kind            TEXT NOT NULL,
+  entity_id       TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  href            TEXT NOT NULL,
+  opened_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_recent_items_member_entity ON recent_items (member_user_id, kind, entity_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_recent_items_member_opened ON recent_items (user_id, member_user_id, opened_at);
+
+CREATE TABLE IF NOT EXISTS favorites (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,            -- org data id
+  member_user_id  TEXT NOT NULL,
+  kind            TEXT NOT NULL,            -- page | contact | order | ...
+  entity_id       TEXT,                     -- NULL for pinned pages
+  label           TEXT NOT NULL,
+  href            TEXT NOT NULL,
+  sort            INTEGER NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_favorites_member ON favorites (user_id, member_user_id, sort);
+
+ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMPTZ;
+

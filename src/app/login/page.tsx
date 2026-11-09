@@ -315,7 +315,7 @@ function LoginForm() {
                 aria-pressed={tab === t.id}
                 onClick={() => { setTab(t.id); resetForm(); }}
                 className={cn(
-                  "flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-md px-1 py-1.5 text-xs font-medium transition-all",
+                  "flex min-h-11 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-md px-1 py-1.5 text-xs font-medium transition-all",
                   tab === t.id
                     ? "bg-background shadow-sm text-foreground"
                     : "text-muted-foreground hover:text-foreground"
@@ -370,10 +370,10 @@ function LoginForm() {
               <p className="text-center text-[11px] text-muted-foreground">
                 No account?{" "}
                 <button type="button" onClick={() => { setTab("signup"); resetForm(); }}
-                  className="underline underline-offset-2 hover:text-foreground">Create one</button>
+                  className="-my-3 inline-block py-3 underline underline-offset-2 hover:text-foreground">Create one</button>
                 {" · "}
                 <button type="button" onClick={() => { setTab("reset"); resetForm(); }}
-                  className="underline underline-offset-2 hover:text-foreground">Forgot password?</button>
+                  className="-my-3 inline-block py-3 underline underline-offset-2 hover:text-foreground">Forgot password?</button>
               </p>
             </form>
 
@@ -387,7 +387,7 @@ function LoginForm() {
               </Button>
               <p className="text-center text-[11px] text-muted-foreground">
                 <button type="button" onClick={() => { setTab("signin"); resetForm(); }}
-                  className="underline underline-offset-2 hover:text-foreground">Back to sign in</button>
+                  className="-my-3 inline-block py-3 underline underline-offset-2 hover:text-foreground">Back to sign in</button>
               </p>
             </form>
 
@@ -429,7 +429,7 @@ function LoginForm() {
               <p className="text-center text-[11px] text-muted-foreground">
                 Have an account?{" "}
                 <button type="button" onClick={() => { setTab("signin"); resetForm(); }}
-                  className="underline underline-offset-2 hover:text-foreground">Sign in</button>
+                  className="-my-3 inline-block py-3 underline underline-offset-2 hover:text-foreground">Sign in</button>
               </p>
             </form>
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { UpgradePrompt } from "@/components/plans/upgrade-prompt";
 import { Check, Globe2, ImageIcon, Loader2, Palette, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -303,10 +304,10 @@ export default function BrandingSettingsPage() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t("settings.branding.logo")} hint="PNG, SVG, JPEG or WebP, up to 2 MB">
-                  <input ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(e) => onLogoPicked(e.target.files?.[0] ?? null)} className={FILE_INPUT} />
+                  <input aria-label="Logo file" ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(e) => onLogoPicked(e.target.files?.[0] ?? null)} className={FILE_INPUT} />
                 </Field>
                 <Field label={t("settings.branding.favicon")} hint="ICO, PNG or SVG, 32×32 works best">
-                  <input
+                  <input aria-label="Favicon file"
                     ref={faviconRef}
                     type="file"
                     accept="image/png,image/svg+xml,image/x-icon,image/vnd.microsoft.icon"
@@ -331,6 +332,7 @@ export default function BrandingSettingsPage() {
                 <Field label={t("settings.branding.customDomain")} hint="Point a CNAME at this app, then enter the hostname.">
                   <Input value={form.custom_domain} onChange={(e) => update("custom_domain", e.target.value)} placeholder="portal.yourbrand.com" spellCheck={false} autoComplete="off" inputMode="url" />
                 </Field>
+                <UpgradePrompt feature="custom_domain" className="sm:col-span-2" />
               </div>
 
               <Field label={t("settings.branding.emailFooter")} hint={t("common.optional")}>

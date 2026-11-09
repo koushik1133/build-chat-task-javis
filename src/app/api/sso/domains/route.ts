@@ -7,6 +7,7 @@ import { query, queryOne } from "@/lib/dsql";
 import { parseBody } from "@/lib/money/http";
 import { canClaimSsoDomain } from "@/lib/sso/domains";
 import { issueVerificationToken, verificationRecord } from "@/lib/sso/verify";
+import { recordAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +79,7 @@ export async function POST(req: NextRequest) {
     const created = await queryOne<{ id: string }>(`SELECT id FROM sso_domains WHERE domain = $1`, [parsed.data.domain]);
     if (created) await issueVerificationToken(created.id);
     const row = await queryOne<DomainRow>(`SELECT ${COLS} FROM sso_domains WHERE domain = $1`, [parsed.data.domain]);
+    await recordAudit(scope, { action: taken ? "update" : "create", entity: "sso_domain", entityId: created?.id ?? null, after: { domain: parsed.data.domain }, req });
     return NextResponse.json({ domain: row ? view(row) : null }, { status: taken ? 200 : 201 });
   } catch (err) {
     return dbUnavailableResponse(err, "sso/domains");
@@ -97,6 +99,7 @@ export async function DELETE(req: NextRequest) {
   try {
     const rows = await query<{ id: string }>(`DELETE FROM sso_domains WHERE id = $1 AND user_id = $2 RETURNING id`, [id, scope.dataId]);
     if (rows.length === 0) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    await recordAudit(scope, { action: "delete", entity: "sso_domain", entityId: id, req });
     return NextResponse.json({ ok: true, id });
   } catch (err) {
     return dbUnavailableResponse(err, "sso/domains");

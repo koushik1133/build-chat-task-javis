@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireScope, scopeErrorResponse } from "@/lib/auth/scope";
 import { createSubscription, listSubscriptions, KNOWN_EVENT_TYPES, WebhookValidationError } from "@/lib/webhooks/subscriptions";
+import { recordAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
     const parsed = CreateSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid body" }, { status: 400 });
     const { subscription, secret } = await createSubscription(scope.dataId, { ...parsed.data, created_by: scope.userId });
+    await recordAudit(scope, { action: "create", entity: "webhook", entityId: (subscription as { id?: string }).id ?? null, after: { url_host: new URL(parsed.data.url).host }, req });
     return NextResponse.json({ subscription, secret }, { status: 201 });
   } catch (err) {
     if (err instanceof WebhookValidationError) return NextResponse.json({ error: err.message }, { status: 422 });

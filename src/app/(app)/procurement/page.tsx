@@ -87,7 +87,7 @@ function ProcurementInner() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [poStatus, setPoStatus] = useState("");
   const [billFilter, setBillFilter] = useState<"" | "open" | "overdue" | "paid">("");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(search.get("q") ?? "");
   const query = useDebouncedValue(q.trim(), 250);
   const nextSignal = useAbortable();
 
@@ -129,6 +129,11 @@ function ProcurementInner() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Deep link: /procurement?new=po opens the purchase-order dialog once.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "po") setEditingPo("new");
+  }, []);
 
   const loadMoreOrders = useCallback(async () => {
     if (!ordersCursor || loadingMore) return;

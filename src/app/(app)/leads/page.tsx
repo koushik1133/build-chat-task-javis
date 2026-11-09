@@ -254,7 +254,7 @@ export default function LeadsPage() {
             <div className="space-y-4">
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-foreground">Select Site to Link</label>
-                <select 
+                <select aria-label="Site" 
                   className="rounded-md border border-input bg-background px-3 py-2 text-sm max-w-sm"
                   value={selectedSiteId}
                   onChange={(e) => setSelectedSiteId(e.target.value)}
@@ -299,7 +299,7 @@ export default function LeadsPage() {
           <div className="w-full sm:w-[420px] sm:shrink-0 border-l border-border bg-card shadow-2xl flex flex-col h-full animate-in slide-in-from-right-8 duration-200">
             <div className="flex items-center justify-between border-b border-border p-4">
               <h2 className="font-semibold text-sm">Lead Details</h2>
-              <button 
+              <button aria-label="Close" 
                 onClick={() => setSelectedLead(null)}
                 className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
               >
@@ -383,7 +383,7 @@ export default function LeadsPage() {
                             <>
                               <div>
                                 <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">Subject</label>
-                                <input 
+                                <input aria-label="Email subject" 
                                   value={editSubject}
                                   onChange={e => setEditSubject(e.target.value)}
                                   className="w-full text-sm font-medium bg-background border border-input rounded-md px-2 py-1.5"
@@ -391,7 +391,7 @@ export default function LeadsPage() {
                               </div>
                               <div>
                                 <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">Body</label>
-                                <textarea 
+                                <textarea aria-label="Email body" 
                                   value={editBody}
                                   onChange={e => setEditBody(e.target.value)}
                                   className="w-full text-sm text-muted-foreground bg-background border border-input rounded-md px-2 py-1.5 h-40 resize-y"

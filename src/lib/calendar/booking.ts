@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "crypto";
-import { query, queryOne, transaction } from "@/lib/dsql";
+import { query, queryOne, transaction, withRetry } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { recordConsent, type ConsentSubject } from "@/lib/privacy/consent";
 import { enqueueNotification } from "@/lib/notifications/outbox";
@@ -167,7 +167,7 @@ export async function replaceRules(
       throw new BookingValidationError("rule minutes must satisfy 0 <= start < end <= 1440");
     }
   }
-  await transaction(async (client) => {
+  await withRetry(() => transaction(async (client) => {
     await client.query(`DELETE FROM availability_rules WHERE calendar_id = $1`, [calendarId]);
     for (const r of rules) {
       await client.query(
@@ -175,7 +175,7 @@ export async function replaceRules(
         [randomUUID(), calendarId, r.weekday, r.start_minute, r.end_minute]
       );
     }
-  });
+  }));
   return listRules(calendarId);
 }
 
@@ -371,7 +371,7 @@ export async function createBooking(dataId: string, input: CreateBookingInput): 
   const id = randomUUID();
   const cancelToken = randomBytes(24).toString("base64url");
 
-  await transaction(async (client) => {
+  await withRetry(() => transaction(async (client) => {
     const lo = new Date(start.getTime() - 24 * 60 * MS_PER_MIN).toISOString();
     const hi = new Date(end.getTime() + 24 * 60 * MS_PER_MIN).toISOString();
     const rows = await client.query<{ starts_at: string; ends_at: string }>(
@@ -403,7 +403,7 @@ export async function createBooking(dataId: string, input: CreateBookingInput): 
         hashCancelToken(cancelToken),
       ]
     );
-  });
+  }));
 
   const booking = await queryOne<BookingRow>(`SELECT ${BOOKING_COLS} FROM bookings WHERE id = $1`, [id]);
   if (!booking) throw new Error("booking insert failed");
@@ -630,11 +630,11 @@ export async function rescheduleBooking(
     if (!slots.includes(start.toISOString())) throw new BookingConflictError();
   }
 
-  await transaction(async (client) => {
+  await withRetry(() => transaction(async (client) => {
     const busy = await loadBusy(async (s, p) => (await client.query<{ starts_at: string; ends_at: string }>(s, p)).rows);
     if (wouldClash({ start, end }, [...busy, ...external], buffers)) throw new BookingConflictError();
     await client.query(`UPDATE bookings SET starts_at = $3, ends_at = $4, updated_at = NOW() WHERE user_id = $1 AND id = $2`, [dataId, existing.id, start.toISOString(), end.toISOString()]);
-  });
+  }));
 
   const updated = (await getBooking(dataId, existing.id)) ?? { ...existing, starts_at: start.toISOString(), ends_at: end.toISOString() };
   const when = fmtWhen(updated.starts_at, cal.timezone);

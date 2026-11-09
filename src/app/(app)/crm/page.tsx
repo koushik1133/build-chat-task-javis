@@ -269,7 +269,7 @@ export default function CrmPage() {
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <input
+            <input aria-label="Search"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search by name, email, or company..."
@@ -277,16 +277,16 @@ export default function CrmPage() {
             />
           </div>
           <div className="flex gap-2">
-            <select value={filterDomain} onChange={e => setFilterDomain(e.target.value)}
+            <select aria-label="Filter by domain" value={filterDomain} onChange={e => setFilterDomain(e.target.value)}
               className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none">
               {DOMAIN_OPTIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
             </select>
-            <select value={filterLifecycle} onChange={e => setFilterLifecycle(e.target.value)}
+            <select aria-label="Filter by lifecycle" value={filterLifecycle} onChange={e => setFilterLifecycle(e.target.value)}
               className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none">
               <option value="">All Stages</option>
               {LIFECYCLE_OPTIONS.map(l => <option key={l} value={l}>{l.charAt(0).toUpperCase() + l.slice(1)}</option>)}
             </select>
-            <Button variant="outline" size="sm" onClick={fetchContacts}>
+            <Button aria-label="Refresh" variant="outline" size="sm" onClick={fetchContacts}>
               <Filter className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -402,11 +402,11 @@ export default function CrmPage() {
 
       {/* ── Add / Edit Contact Modal ── */}
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAdd(false)}>
+        <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAdd(false)}>
           <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border/40 pb-3">
               <h2 className="font-semibold text-base">{editingId ? "Edit Contact" : "New Contact"}</h2>
-              <button onClick={() => setShowAdd(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
+              <button aria-label="Close" onClick={() => setShowAdd(false)}><X className="h-4 w-4 text-muted-foreground" /></button>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

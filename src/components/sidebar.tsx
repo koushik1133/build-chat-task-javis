@@ -21,6 +21,7 @@ import { createClient } from "@/lib/supabase/client";
 import { APP_NAV_TOP, NAV_GROUPS, type AppNavItem } from "@/lib/app-nav";
 import { channelHref, iconFor } from "@/lib/channels/registry";
 import type { ChannelNavItem } from "@/lib/nav/channel-nav";
+import { PinnedNav } from "@/components/pinned-nav";
 import { useNavRefreshSignal } from "@/lib/nav/nav-refresh";
 import { KERNELHUB_NAME, KERNELHUB_TAGLINE } from "@/lib/brand";
 import { NavGroupLabel, NavLabel } from "@/components/i18n/nav-label";
@@ -268,6 +269,7 @@ export function Sidebar({
 
       <div className="scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden py-2">
         <NavLinks items={APP_NAV_TOP} />
+        <PinnedNav onNavigate={onNavigate} />
 
         {/* Channels — built from the user's connected accounts */}
         <NavGroupHeading title="Channels" />

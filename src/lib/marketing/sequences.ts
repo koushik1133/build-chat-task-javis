@@ -8,6 +8,7 @@ import { getAudience, resolveAudienceIds } from "./audiences";
 import { loadContact, sendMarketingMessage, type MarketingContact } from "./send";
 import { getTemplate } from "./templates";
 import { parseAudienceDefinition, parseSteps, parseTriggerConfig, type EnrollmentStatus, type SequenceStep, type SequenceStatus, type SequenceTrigger, type SequenceTriggerConfig } from "./types";
+import { deleteInBatches } from "@/lib/db/batch";
 
 /**
  * Drip sequences. An enrollment walks `steps` one at a time: `next_at` is
@@ -127,7 +128,7 @@ export async function updateSequence(dataId: string, id: string, patch: Partial<
 }
 
 export async function deleteSequence(dataId: string, id: string): Promise<boolean> {
-  await query(`DELETE FROM sequence_enrollments WHERE user_id = $1 AND sequence_id = $2`, [dataId, id]);
+  await deleteInBatches("sequence_enrollments", "user_id = $1 AND sequence_id = $2", [dataId, id]);
   const row = await queryOne<{ id: string }>(`DELETE FROM sequences WHERE user_id = $1 AND id = $2 RETURNING id`, [dataId, id]);
   return Boolean(row);
 }
