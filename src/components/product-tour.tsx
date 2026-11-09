@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, MessageSquare, FileText, Play, Mail, Compass, HelpCircle, Bot, Target } from "lucide-react";
+import { X, HelpCircle, LayoutDashboard, Boxes, LifeBuoy, Receipt, Bot, Command } from "lucide-react";
 
 type TourStep = {
   title: string;
@@ -11,81 +11,107 @@ type TourStep = {
   actionDescription: string;
 };
 
+/** Bump the key when steps change so returning users see the new tour once. */
+const TOUR_STORAGE_KEY = "completed_product_tour_v2";
+
 const TOUR_STEPS: TourStep[] = [
   {
-    title: "Welcome to KernelHub!",
-    description: "Your autonomous, multi-agent AI assistant space. Let's take a quick 1-minute tour to help you get started.",
-    icon: Compass,
-    badge: "Introduction",
-    actionDescription: "You will learn how to navigate and make the most of Javis.",
+    title: "Home is your day at a glance",
+    description: "KPIs, what needs you, today's bookings and due work, and the agents working in the background — all on one screen, tailored to your role.",
+    icon: LayoutDashboard,
+    badge: "Home",
+    actionDescription: "Start here each morning. The setup checklist stays until your workspace is fully configured.",
   },
   {
-    title: "Copilot Chat",
-    description: "Brainstorm business strategies, generate complete websites, audit codebase security, or write files in real-time. Just talk to the AI Copilot to get started.",
-    icon: MessageSquare,
-    badge: "AI Studio",
-    actionDescription: "Use this to program agents, generate code, and edit tasks dynamically.",
+    title: "Records fit your business",
+    description: "Install a pack for your industry — patients, matters, properties, jobs — and track every item through stages with custom fields and views.",
+    icon: Boxes,
+    badge: "Records",
+    actionDescription: "Open Records to add types, import a CSV, or drag items across a pipeline.",
   },
   {
-    title: "Knowledge Base (Files)",
-    description: "Upload PDFs, slides, text documents, or connect GitHub repos. The AI reads them instantly to give context-aware responses tailored specifically to your data.",
-    icon: FileText,
-    badge: "Context & RAG",
-    actionDescription: "Upload source documents here to enrich your agent's knowledge.",
+    title: "Helpdesk with SLAs",
+    description: "Tickets from email, chat and the customer portal land in one queue. SLA timers, breaches and auto-resolve playbooks keep response times honest.",
+    icon: LifeBuoy,
+    badge: "Helpdesk",
+    actionDescription: "Set a default SLA policy once; every ticket inherits it.",
   },
   {
-    title: "AI Agents",
-    description: "Create, configure, and template specialized background AI agents. Provision autonomous roles like Market Researchers, Recruiters, or Code Auditors to work on your tasks in the background.",
+    title: "Quotes, invoices and payments",
+    description: "Send a quote, let the customer accept and e-sign online, and it becomes an invoice with a pay link. Expenses and time roll into job costing.",
+    icon: Receipt,
+    badge: "Billing",
+    actionDescription: "Watch the cash-flow forecast on Home update as invoices are paid.",
+  },
+  {
+    title: "Agents and playbooks",
+    description: "Starter agents handle research, drafting and follow-ups. Playbooks detect stalled deals, unanswered messages and overdue work, then queue actions for your approval.",
     icon: Bot,
-    badge: "Autonomous Agents",
-    actionDescription: "Define system instructions and run automated multi-agent tasks.",
+    badge: "Agents",
+    actionDescription: "Choose how much autonomy each agent has: draft, ask first, or act.",
   },
   {
-    title: "Business Strategies",
-    description: "Formulate business plans, product-market alignments, and competitive landscape analyses. Write strategy docs and run templates using target analytics.",
-    icon: Target,
-    badge: "Strategic Planning",
-    actionDescription: "Draft business models and review analytics to track operations.",
-  },
-  {
-    title: "Automations Runner",
-    description: "Set up tasks, trigger HTTP webhooks, schedule recurring cron scripts, or deploy background agents to run automatically on your board columns.",
-    icon: Play,
-    badge: "Workflows",
-    actionDescription: "Automate boring tasks by triggering pipelines on Kanban changes.",
-  },
-  {
-    title: "Settings & Connections",
-    description: "Link your Gmail account (via App Passwords) or configure Slack webhooks to receive real-time alerts whenever agents complete their background tasks.",
-    icon: Mail,
-    badge: "Integrations",
-    actionDescription: "One-time setup so all automations can notify you instantly.",
+    title: "Jump anywhere with Cmd+K",
+    description: "Press ⌘K (Ctrl+K on Windows) to search contacts, pages, quotes and tickets, or to run a quick action without leaving the keyboard.",
+    icon: Command,
+    badge: "Search",
+    actionDescription: "Try it now — type a customer's name or 'new quote'.",
   },
 ];
+
+function readCompleted(): boolean {
+  try {
+    return localStorage.getItem(TOUR_STORAGE_KEY) === "true";
+  } catch {
+    return true; // storage blocked: never nag
+  }
+}
+
+function writeCompleted(): void {
+  try {
+    localStorage.setItem(TOUR_STORAGE_KEY, "true");
+  } catch {
+    // ignore: private mode / blocked storage
+  }
+}
 
 export function ProductTour() {
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
 
   useEffect(() => {
-    // Check if user has already completed the tour
-    const completed = localStorage.getItem("completed_product_tour_v1");
-    if (!completed) {
-      setIsOpen(true);
-    }
+    if (!readCompleted()) setIsOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        writeCompleted();
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isOpen]);
+
+  const handleClose = () => {
+    writeCompleted();
+    setIsOpen(false);
+  };
 
   if (!isOpen) {
     return (
       <button
+        type="button"
         onClick={() => {
           setCurrentStep(0);
           setIsOpen(true);
         }}
-        className="fixed bottom-4 right-4 z-50 flex items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-lg hover:bg-primary/95 transition-all hover:scale-105"
-        title="Start Product Tour"
+        className="fixed bottom-4 right-4 z-50 flex min-h-[44px] items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-lg transition-all hover:scale-105 hover:bg-primary/95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        title="Start product tour"
       >
-        <HelpCircle className="h-4 w-4" />
+        <HelpCircle className="h-4 w-4" aria-hidden />
         <span>Tour</span>
       </button>
     );
@@ -95,100 +121,63 @@ export function ProductTour() {
   const Icon = step.icon;
 
   const handleNext = () => {
-    if (currentStep < TOUR_STEPS.length - 1) {
-      setCurrentStep(currentStep + 1);
-    } else {
-      handleClose();
-    }
+    if (currentStep < TOUR_STEPS.length - 1) setCurrentStep(currentStep + 1);
+    else handleClose();
   };
-
   const handleBack = () => {
-    if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
-    }
-  };
-
-  const handleClose = () => {
-    localStorage.setItem("completed_product_tour_v1", "true");
-    setIsOpen(false);
+    if (currentStep > 0) setCurrentStep(currentStep - 1);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200" role="dialog" aria-modal="true" aria-labelledby="tour-title">
       <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-        
-        {/* Close Button */}
         <button
+          type="button"
           onClick={handleClose}
-          className="absolute top-4 right-4 rounded-lg p-1 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+          aria-label="Close tour"
+          className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <X className="h-4 w-4" />
+          <X className="h-4 w-4" aria-hidden />
         </button>
 
-        {/* Progress Bar */}
-        <div className="flex gap-1.5 mb-6">
+        <div className="mb-6 flex gap-1.5" aria-hidden>
           {TOUR_STEPS.map((_, idx) => (
-            <div
-              key={idx}
-              className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-                idx <= currentStep ? "bg-primary" : "bg-secondary"
-              }`}
-            />
+            <div key={idx} className={`h-1 flex-1 rounded-full transition-all duration-300 ${idx <= currentStep ? "bg-primary" : "bg-secondary"}`} />
           ))}
         </div>
 
-        {/* Card Header / Badge */}
-        <div className="flex items-center justify-between mb-4">
-          <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-primary/10 text-primary">
-            {step.badge}
-          </span>
-          <span className="text-xs text-muted-foreground font-medium">
-            Step {currentStep + 1} of {TOUR_STEPS.length}
-          </span>
+        <div className="mb-4 flex items-center justify-between">
+          <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">{step.badge}</span>
+          <span className="text-xs font-medium text-muted-foreground">Step {currentStep + 1} of {TOUR_STEPS.length}</span>
         </div>
 
-        {/* Step Icon */}
-        <div className="mb-4 inline-flex items-center justify-center rounded-2xl bg-primary/5 p-4 text-primary">
+        <div className="mb-4 inline-flex items-center justify-center rounded-2xl bg-primary/5 p-4 text-primary" aria-hidden>
           <Icon className="h-8 w-8" />
         </div>
 
-        {/* Step Content */}
-        <h3 className="text-lg font-bold text-foreground mb-2">{step.title}</h3>
-        <p className="text-sm text-muted-foreground leading-relaxed mb-4">{step.description}</p>
+        <h3 id="tour-title" className="mb-2 text-lg font-bold text-foreground">{step.title}</h3>
+        <p className="mb-4 text-sm leading-relaxed text-muted-foreground">{step.description}</p>
 
-        {/* Dynamic Action Details Box */}
-        <div className="rounded-xl bg-secondary/40 border border-border/50 p-3 mb-6 text-xs text-muted-foreground flex flex-col gap-1">
-          <span className="font-semibold text-foreground uppercase tracking-wider text-[10px]">What is done here</span>
+        <div className="mb-6 flex flex-col gap-1 rounded-xl border border-border/50 bg-secondary/40 p-3 text-xs text-muted-foreground">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground">Try this</span>
           <span>{step.actionDescription}</span>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center justify-between gap-3 mt-2">
-          <button
-            onClick={handleClose}
-            className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Skip Tour
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <button type="button" onClick={handleClose} className="min-h-[44px] rounded-md px-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            Skip tour
           </button>
-          
           <div className="flex gap-2">
             {currentStep > 0 && (
-              <button
-                onClick={handleBack}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-secondary transition-colors"
-              >
+              <button type="button" onClick={handleBack} className="min-h-[44px] rounded-lg border border-border px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 Back
               </button>
             )}
-            <button
-              onClick={handleNext}
-              className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/95 transition-colors"
-            >
+            <button type="button" onClick={handleNext} className="min-h-[44px] rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {currentStep === TOUR_STEPS.length - 1 ? "Finish" : "Next"}
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );

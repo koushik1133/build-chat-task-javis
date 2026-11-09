@@ -13,14 +13,14 @@ function env(name: string): string {
 }
 
 function safeNext(raw: string | null): string {
-  if (!raw) return "/onboarding";
+  if (!raw) return "/home";
   try {
     const decoded = decodeURIComponent(raw);
     if (decoded.startsWith("/") && !decoded.startsWith("//")) return decoded;
   } catch {
     // ignore
   }
-  return "/onboarding";
+  return "/home";
 }
 
 async function createRouteClient() {

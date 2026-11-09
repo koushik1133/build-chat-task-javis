@@ -87,7 +87,7 @@ export async function updateSession(request: NextRequest) {
       const dest =
         next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login")
           ? next
-          : "/onboarding";
+          : "/home";
       return NextResponse.redirect(publicRedirect(dest, request));
     }
     return response;

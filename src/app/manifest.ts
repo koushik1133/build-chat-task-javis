@@ -8,7 +8,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: KERNELHUB_NAME,
     description: KERNELHUB_TAGLINE,
     id: "/",
-    start_url: "/chat",
+    start_url: "/home",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
@@ -24,6 +24,7 @@ export default function manifest(): MetadataRoute.Manifest {
     shortcuts: [
       { name: "Tasks", url: "/tasks", icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }] },
       { name: "Calendar", url: "/calendar", icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }] },
+      { name: "Home", url: "/home", icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }] },
       { name: "Chat", url: "/chat", icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }] },
     ],
   };

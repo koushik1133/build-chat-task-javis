@@ -10,6 +10,12 @@ import { deliverPending, fanOutNewEvents } from "@/lib/webhooks/dispatch";
 import { expireQuotes } from "@/lib/money/quotes";
 import { syncDueAccounts } from "@/lib/mail/sync";
 import { dialNext } from "@/lib/voice/dialer";
+import { pruneRateLimits } from "@/lib/request-limits";
+import { recordCronTick } from "@/lib/system/state";
+import { captureError } from "@/lib/errors/capture";
+import { processAccountingEvents, pullDue, pushDue } from "@/lib/accounting/sync";
+import { remindDueSoon } from "@/lib/privacy/dsr";
+import { applyRetention } from "@/lib/privacy/retention";
 import type { JobRow } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -81,7 +87,7 @@ async function handleTick(req: Request) {
   const tickStart = Date.now();
   const workerId = `cron-${randomUUID().slice(0, 8)}`;
 
-  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, ms: 0 };
+  const counts = { promoted: 0, claimed: 0, done: 0, failed: 0, dead: 0, outbox: 0, sla: 0, quotes_expired: 0, webhooks_fanout: 0, webhooks: 0, mail: 0, calls: 0, accounting_events: 0, accounting_push: 0, accounting_pull: 0, privacy_reminders: 0, retention: 0, ms: 0 };
 
   try {
     const promoted = await promoteDueTriggers(new Date());
@@ -113,6 +119,7 @@ async function handleTick(req: Request) {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[cron/agents] job ${job.id} (${job.kind}) failed:`, message);
+        void captureError(err, { route: "/api/cron/agents", method: "POST", status: 500 });
         const fate = await failJob(job, message).catch(() => "retry" as const);
         if (fate === "dead") counts.dead++;
         else counts.failed++;
@@ -139,7 +146,15 @@ async function handleTick(req: Request) {
   try { counts.mail = (await syncDueAccounts(20)).claimed; } catch (err) { console.error("[cron/agents] mail sync failed:", err); }
   try { counts.calls = (await dialNext(20)).dialed; } catch (err) { console.error("[cron/agents] dialer failed:", err); }
 
+  try { counts.accounting_events = (await processAccountingEvents(200)).pushed; } catch (err) { console.error("[cron/agents] accounting events failed:", err); }
+  try { counts.accounting_push = (await pushDue(50)).pushed; } catch (err) { console.error("[cron/agents] accounting push failed:", err); }
+  try { counts.accounting_pull = (await pullDue(10)).recorded; } catch (err) { console.error("[cron/agents] accounting pull failed:", err); }
+  try { counts.privacy_reminders = (await remindDueSoon(200)).reminded; } catch (err) { console.error("[cron/agents] privacy reminders failed:", err); }
+  try { const r = await applyRetention(500); counts.retention = Object.values(r.affected).reduce((a, b) => a + b, 0); } catch (err) { console.error("[cron/agents] retention failed:", err); }
+  await pruneRateLimits().catch(() => 0);
+
   counts.ms = Date.now() - tickStart;
+  await recordCronTick(counts).catch(() => undefined);
   return NextResponse.json({ ok: true, worker: workerId, ...counts, server_time: new Date().toISOString() });
 }
 

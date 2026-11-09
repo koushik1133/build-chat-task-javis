@@ -31,7 +31,7 @@ function passwordRules(password: string, email: string) {
 }
 
 function safeNext(raw: string | null): string {
-  if (!raw) return "/onboarding";
+  if (!raw) return "/home";
   try {
     const decoded = decodeURIComponent(raw);
     if (decoded.startsWith("/") && !decoded.startsWith("//") && !decoded.startsWith("/login")) {
@@ -40,7 +40,7 @@ function safeNext(raw: string | null): string {
   } catch {
     // Ignore malformed values and use the default app landing page.
   }
-  return "/onboarding";
+  return "/home";
 }
 
 function LoginForm() {

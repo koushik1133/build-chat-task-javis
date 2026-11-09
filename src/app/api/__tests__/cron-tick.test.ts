@@ -23,6 +23,12 @@ vi.mock("@/lib/webhooks/dispatch", () => ({ fanOutNewEvents: vi.fn(async () => (
 vi.mock("@/lib/money/quotes", () => ({ expireQuotes: vi.fn(async () => ({ scanned: 0, expired: 0, released: 0 })) }));
 vi.mock("@/lib/mail/sync", () => ({ syncDueAccounts: vi.fn(async () => ({ claimed: 0 })) }));
 vi.mock("@/lib/voice/dialer", () => ({ dialNext: vi.fn(async () => ({ dialed: 0 })) }));
+vi.mock("@/lib/request-limits", async (orig) => ({ ...(await orig<Record<string, unknown>>()), pruneRateLimits: vi.fn(async () => 0) }));
+vi.mock("@/lib/system/state", () => ({ recordCronTick: vi.fn(async () => undefined) }));
+vi.mock("@/lib/errors/capture", () => ({ captureError: vi.fn(async () => null) }));
+vi.mock("@/lib/accounting/sync", () => ({ processAccountingEvents: vi.fn(async () => ({ pushed: 0 })), pushDue: vi.fn(async () => ({ pushed: 0 })), pullDue: vi.fn(async () => ({ recorded: 0 })) }));
+vi.mock("@/lib/privacy/dsr", () => ({ remindDueSoon: vi.fn(async () => ({ reminded: 0 })) }));
+vi.mock("@/lib/privacy/retention", () => ({ applyRetention: vi.fn(async () => ({ affected: 0 })) }));
 
 import { GET } from "@/app/api/cron/agents/route";
 

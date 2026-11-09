@@ -8,7 +8,7 @@ type Ctx = { params: Promise<{ org: string; slug: string }> };
 
 /** GET /api/help/[org]/[slug] — one public article; increments views. */
 export async function GET(req: NextRequest, ctx: Ctx) {
-  const limited = publicRateLimit(req, "help", 120);
+  const limited = await publicRateLimit(req, "help", 120);
   if (limited) return limited;
   try {
     const { org: orgSlug, slug } = await ctx.params;

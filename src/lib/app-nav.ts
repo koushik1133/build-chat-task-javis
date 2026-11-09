@@ -48,6 +48,10 @@ import {
   Code2,
   Mail,
   ShieldCheck,
+  Landmark,
+  Fingerprint,
+  Activity,
+  LayoutDashboard,
 } from "lucide-react";
 
 export type AppNavItem = {
@@ -58,6 +62,7 @@ export type AppNavItem = {
 };
 
 export const APP_NAV_TOP: AppNavItem[] = [
+  { href: "/home", label: "Home", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/files", label: "Files", icon: FileText },
   { href: "/github", label: "GitHub", icon: Github },
@@ -136,6 +141,9 @@ export const NAV_GROUPS: AppNavGroup[] = [
       { href: "/settings/developers", label: "Developers", icon: Code2 },
       { href: "/settings/mail", label: "Email Inbox", icon: Mail },
       { href: "/settings/sso", label: "SSO & SCIM", icon: ShieldCheck },
+      { href: "/settings/accounting", label: "Accounting", icon: Landmark },
+      { href: "/settings/privacy", label: "Privacy & data", icon: Fingerprint },
+      { href: "/settings/system", label: "System health", icon: Activity },
       { href: "/settings/branding", label: "Branding", icon: Palette },
       { href: "/settings/import", label: "Import & Export", icon: Upload },
       { href: "/settings/notifications", label: "Notifications", icon: BellRing },

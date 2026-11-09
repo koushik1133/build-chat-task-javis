@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Ban, Copy, FileCheck2, FileDown, Link2, Loader2, Plus, Receipt, RefreshCw, Send, Sparkles, Trash2, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Pill, type Tone } from "@/components/ui/pill";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
@@ -23,6 +24,8 @@ interface Invoice {
   contact_email: string | null; items: LineItem[]; due_at: string | null; created_at: string; quote_id: string | null;
 }
 interface ProviderInfo { id: string; configured: boolean; active: boolean }
+type SyncState = "synced" | "pending" | "error";
+const SYNC_TONE: Record<SyncState, Tone> = { synced: "success", pending: "info", error: "danger" };
 
 type Tab = "quotes" | "invoices";
 type Notice = { tone: "success" | "info" | "error"; text: string };
@@ -46,6 +49,8 @@ export default function BillingPage() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [dialog, setDialog] = useState<null | "quote" | "invoice">(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Accounting sync pills: only when a ledger is connected (one fetch, then the invoice links).
+  const [syncState, setSyncState] = useState<Record<string, SyncState> | null>(null);
   const nextSignal = useAbortable();
 
   const load = useCallback(async () => {
@@ -57,6 +62,18 @@ export default function BillingPage() {
       setQuotes(q.quotes);
       setInvoices(i.invoices);
       setProviders(i.providers);
+      void (async () => {
+        try {
+          const c = await api<{ connections: Array<{ status: string }> }>("/api/accounting/connections", { signal });
+          if (!c.connections.some((x) => x.status !== "disabled")) return setSyncState(null);
+          const l = await api<{ links: Array<{ entity_id: string; state: SyncState }> }>("/api/accounting/links?kind=invoice", { signal });
+          const map: Record<string, SyncState> = {};
+          for (const link of l.links) if (!(link.entity_id in map) || link.state === "error") map[link.entity_id] = link.state;
+          setSyncState(map);
+        } catch {
+          /* pills are decorative; never block billing */
+        }
+      })();
     } catch (e) {
       if (isAbortError(e)) return;
       setError(e instanceof Error ? e.message : "Could not load billing.");
@@ -195,6 +212,7 @@ export default function BillingPage() {
           ) : (
             <InvoiceList
               invoices={invoices}
+              syncState={syncState}
               busyId={busyId}
               onNew={() => setDialog("invoice")}
               onCopy={copy}
@@ -330,8 +348,8 @@ const QuoteRow = memo(function QuoteRow({ q, busy, onSend, onConvert, onDelete, 
   );
 });
 
-function InvoiceList({ invoices, busyId, onNew, onSend, onPayLink, onVoid, onCopy }: {
-  invoices: Invoice[]; busyId: string | null; onNew: () => void;
+function InvoiceList({ invoices, syncState, busyId, onNew, onSend, onPayLink, onVoid, onCopy }: {
+  invoices: Invoice[]; syncState: Record<string, SyncState> | null; busyId: string | null; onNew: () => void;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
 }) {
   if (invoices.length === 0) {
@@ -351,14 +369,14 @@ function InvoiceList({ invoices, busyId, onNew, onSend, onPayLink, onVoid, onCop
   return (
     <ul className="divide-y divide-border rounded-xl border border-border bg-card" aria-label="Invoices">
       {invoices.map((i) => (
-        <InvoiceRow key={i.id} i={i} busy={busyId === i.id} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} />
+        <InvoiceRow key={i.id} i={i} sync={syncState ? (syncState[i.id] ?? (i.status === "draft" || i.status === "void" ? null : "pending")) : null} busy={busyId === i.id} onSend={onSend} onPayLink={onPayLink} onVoid={onVoid} onCopy={onCopy} />
       ))}
     </ul>
   );
 }
 
-const InvoiceRow = memo(function InvoiceRow({ i, busy, onSend, onPayLink, onVoid, onCopy }: {
-  i: Invoice; busy: boolean;
+const InvoiceRow = memo(function InvoiceRow({ i, sync, busy, onSend, onPayLink, onVoid, onCopy }: {
+  i: Invoice; sync: SyncState | null; busy: boolean;
   onSend: (i: Invoice) => void; onPayLink: (i: Invoice) => void; onVoid: (i: Invoice) => void; onCopy: (t: string) => void;
 }) {
   const open = !["paid", "void"].includes(i.status);
@@ -369,6 +387,7 @@ const InvoiceRow = memo(function InvoiceRow({ i, busy, onSend, onPayLink, onVoid
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm">{i.number}</span>
             <StatusPill status={i.status} />
+            {sync && <Pill tone={SYNC_TONE[sync]} title="Accounting sync">{sync === "synced" ? "Synced" : sync === "error" ? "Sync error" : "Pending"}</Pill>}
           </div>
           <p className="mt-0.5 truncate text-sm text-muted-foreground">
             {i.contact_name ?? "No contact"}

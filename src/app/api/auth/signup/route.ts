@@ -16,7 +16,7 @@ const GENERIC = "If that email can be registered, a confirmation link has been s
 
 function safeNext(raw?: string): string {
   if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
-  return "/onboarding";
+  return "/home";
 }
 
 /**

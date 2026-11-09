@@ -1852,3 +1852,264 @@ CREATE TABLE IF NOT EXISTS sso_domains (
 CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_sso_domains_domain ON sso_domains (domain);
 CREATE INDEX ASYNC IF NOT EXISTS idx_sso_domains_user ON sso_domains (user_id);
 
+
+-- ==== PHASE 5 LANE A ====
+-- Phase 5 / Lane A: platform hardening
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- Shared fixed-window rate limiter (RATE_LIMIT_STORE=db). Pruned by pruneRateLimits().
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key          TEXT PRIMARY KEY,
+  count        INTEGER NOT NULL DEFAULT 0,
+  window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_rate_limits_updated ON rate_limits (updated_at);
+
+-- Quote OTP challenges now carry a purpose (accept | decline) so codes are not interchangeable.
+ALTER TABLE quote_acceptances ADD COLUMN IF NOT EXISTS purpose TEXT;
+
+-- SSO domain DNS verification (TXT record _kernelhub-verification.<domain> or apex).
+ALTER TABLE sso_domains ADD COLUMN IF NOT EXISTS verification_token TEXT;
+
+ALTER TABLE sso_domains ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+
+ALTER TABLE sso_domains ADD COLUMN IF NOT EXISTS last_verify_error TEXT;
+
+-- Deduplicated application errors (fingerprint = sha1(route + first line of message)).
+CREATE TABLE IF NOT EXISTS app_errors (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT,
+  route       TEXT NOT NULL,
+  method      TEXT,
+  status      INTEGER,
+  message     TEXT NOT NULL,
+  stack       TEXT,
+  fingerprint TEXT NOT NULL,
+  count       INTEGER NOT NULL DEFAULT 1,
+  first_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_app_errors_fingerprint ON app_errors (fingerprint);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_app_errors_last_seen ON app_errors (last_seen);
+
+-- Small key/value state for the system health page (cron last tick etc.). `value` is JSON TEXT.
+CREATE TABLE IF NOT EXISTS system_state (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ==== PHASE 5 LANE B ====
+-- Phase 5 / Lane B: accounting live sync (QuickBooks Online, Xero, simulated).
+-- Aurora DSQL: no FKs, no triggers, no sequences; JSON as TEXT; one statement per block.
+
+CREATE TABLE IF NOT EXISTS accounting_connections (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id       TEXT NOT NULL,                    -- org data id
+  provider      TEXT NOT NULL,                    -- quickbooks | xero | simulated
+  auth          TEXT,                             -- encrypted JSON {access_token, refresh_token, expires_at}
+  realm_id      TEXT,                             -- QBO company (realmId)
+  tenant_id     TEXT,                             -- Xero tenant id
+  company_name  TEXT,
+  status        TEXT NOT NULL DEFAULT 'connected', -- connected | error | disabled
+  sync_cursor   TEXT,                             -- pull watermark (ISO timestamp)
+  last_sync_at  TIMESTAMPTZ,
+  last_error    TEXT,
+  settings      TEXT NOT NULL DEFAULT '{}',       -- JSON account mappings
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_accounting_connections_user ON accounting_connections (user_id);
+
+CREATE TABLE IF NOT EXISTS accounting_links (
+  id                TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id           TEXT NOT NULL,
+  connection_id     TEXT NOT NULL,
+  entity_kind       TEXT NOT NULL,                -- contact | invoice | payment | expense | product
+  entity_id         TEXT NOT NULL,
+  remote_id         TEXT,
+  remote_updated_at TIMESTAMPTZ,
+  remote_meta       TEXT,                         -- JSON: {syncToken} (QBO) etc.
+  last_pushed_at    TIMESTAMPTZ,
+  last_pulled_at    TIMESTAMPTZ,
+  hash              TEXT,                         -- sha256 of the last pushed payload
+  error             TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS uq_accounting_links_entity ON accounting_links (connection_id, entity_kind, entity_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_accounting_links_remote ON accounting_links (connection_id, entity_kind, remote_id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_accounting_links_user_kind ON accounting_links (user_id, entity_kind);
+
+CREATE TABLE IF NOT EXISTS accounting_sync_log (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id       TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  direction     TEXT NOT NULL,                    -- push | pull
+  entity_kind   TEXT,
+  entity_id     TEXT,
+  remote_id     TEXT,
+  status        TEXT NOT NULL,                    -- ok | error | skipped
+  message       TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_accounting_sync_log_conn ON accounting_sync_log (connection_id, created_at);
+
+CREATE TABLE IF NOT EXISTS accounting_cursors (
+  name          TEXT PRIMARY KEY,                 -- 'events'
+  last_event_at TIMESTAMPTZ,
+  last_event_id TEXT,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS accounting_sim_objects (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id       TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  kind          TEXT NOT NULL,                    -- Customer | Invoice | Payment | Purchase | Item
+  remote_id     TEXT NOT NULL,
+  source        TEXT NOT NULL DEFAULT 'push',     -- push (we sent it) | remote (created in the "accounting system")
+  payload       TEXT NOT NULL,                    -- JSON exactly as it would be sent
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_accounting_sim_conn ON accounting_sim_objects (connection_id, kind, created_at);
+
+
+-- ==== PHASE 5 LANE C ====
+-- Phase 5 / Lane C: home dashboard, onboarding, demo data
+-- DSQL rules: no FKs, no triggers, JSON as TEXT, CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- Registry of rows created by the demo seeder so "Clear sample data" removes only those rows.
+-- entity = contact|quote|invoice|booking|ticket|task|record|product|expense|time_entry|outbox|booking_type
+CREATE TABLE IF NOT EXISTS demo_seed_rows (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  entity     TEXT NOT NULL,
+  entity_id  TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_demo_seed_rows_user ON demo_seed_rows (user_id, entity);
+
+
+-- ==== PHASE 5 LANE D ====
+-- Phase 5 / Lane D: privacy, compliance, data lifecycle (DPDP / GDPR controls)
+-- DSQL rules: no FKs, no triggers, no sequences, JSON as TEXT, ids TEXT PK,
+-- CREATE INDEX ASYNC, one statement per block, no DEFAULT on ADD COLUMN.
+
+-- Consent ledger: append-only, one row per grant/withdrawal per purpose.
+-- Current state is derived (latest row wins), never stored as a boolean.
+-- subject_kind 'tombstone' rows carry sha256(email|phone) in subject_id so an
+-- erased subject's opt-out stays effective after their PII is gone.
+CREATE TABLE IF NOT EXISTS consent_records (
+  id            TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id       TEXT        NOT NULL,            -- org data id (owner_user_id)
+  subject_kind  TEXT        NOT NULL,            -- contact|lead|member|tombstone
+  subject_id    TEXT        NOT NULL,
+  purpose       TEXT        NOT NULL,            -- marketing_email|marketing_sms|marketing_voice|transactional|analytics|portal
+  status        TEXT        NOT NULL,            -- granted|withdrawn
+  source        TEXT        NOT NULL DEFAULT 'manual', -- form|portal|import|manual|api
+  evidence      TEXT,                            -- JSON {ip, ua, text_version, notice_version, text}
+  occurred_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS consent_records_subject ON consent_records(user_id, subject_kind, subject_id, purpose, occurred_at);
+
+-- Versioned privacy notices. Rows are never updated: publishing creates a new version.
+CREATE TABLE IF NOT EXISTS privacy_notices (
+  id            TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id       TEXT        NOT NULL,
+  version       INTEGER     NOT NULL,
+  locale        TEXT        NOT NULL DEFAULT 'en',
+  body_md       TEXT        NOT NULL,
+  published_at  TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS privacy_notices_user_version ON privacy_notices(user_id, locale, version);
+
+-- Data subject requests (access / erasure / correction / portability / nomination).
+CREATE TABLE IF NOT EXISTS dsr_requests (
+  id                 TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id            TEXT        NOT NULL,
+  subject_kind       TEXT        NOT NULL,       -- contact|lead
+  subject_id         TEXT        NOT NULL,
+  subject_email      TEXT,
+  kind               TEXT        NOT NULL,       -- access|erasure|correction|portability|nomination
+  status             TEXT        NOT NULL DEFAULT 'received', -- received|verifying|in_progress|completed|rejected
+  source             TEXT        NOT NULL DEFAULT 'staff',    -- staff|portal|api|agent
+  requested_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  due_at             TIMESTAMPTZ NOT NULL,
+  verified_at        TIMESTAMPTZ,
+  completed_at       TIMESTAMPTZ,
+  handled_by         TEXT,
+  notes              TEXT,
+  export_token_hash  TEXT,                       -- sha256 of the verification OTP (same pattern as quote acceptance)
+  otp_expires_at     TIMESTAMPTZ,
+  otp_attempts       INTEGER     NOT NULL DEFAULT 0,
+  reminded_at        TIMESTAMPTZ,                -- due-soon reminder sent
+  result             TEXT,                       -- JSON summary of erasure / export fulfilment
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS dsr_requests_user_status ON dsr_requests(user_id, status, due_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS dsr_requests_subject ON dsr_requests(user_id, subject_kind, subject_id);
+
+-- Retention policies: one row per (org, entity_kind).
+CREATE TABLE IF NOT EXISTS retention_policies (
+  id            TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id       TEXT        NOT NULL,
+  entity_kind   TEXT        NOT NULL,            -- tickets_closed|mail_bodies|leads_resolved|voice_recordings|outbox|audit_log
+  keep_days     INTEGER     NOT NULL,
+  action        TEXT        NOT NULL DEFAULT 'anonymize', -- anonymize|delete|archive
+  enabled       BOOLEAN     NOT NULL DEFAULT FALSE,
+  last_run_at   TIMESTAMPTZ,
+  last_affected INTEGER,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS retention_policies_user_kind ON retention_policies(user_id, entity_kind);
+
+-- Breach / security incident log with the 72-hour authority-notification clock.
+CREATE TABLE IF NOT EXISTS security_incidents (
+  id                     TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+  user_id                TEXT        NOT NULL,
+  title                  TEXT        NOT NULL,
+  description            TEXT,
+  severity               TEXT        NOT NULL DEFAULT 'medium', -- low|medium|high|critical
+  status                 TEXT        NOT NULL DEFAULT 'open',   -- open|contained|notified|closed
+  detected_at            TIMESTAMPTZ NOT NULL,
+  contained_at           TIMESTAMPTZ,
+  notified_authority_at  TIMESTAMPTZ,
+  notified_subjects_at   TIMESTAMPTZ,
+  affected_count         INTEGER,
+  created_by             TEXT,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS security_incidents_user ON security_incidents(user_id, status, detected_at);
+
+-- Consent checkbox text shown on the site's lead widget / booking forms.
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS consent_text TEXT;
+
+-- Voice campaigns skip contacts without marketing_voice consent unless FALSE (NULL = TRUE).
+ALTER TABLE voice_campaigns ADD COLUMN IF NOT EXISTS require_consent BOOLEAN;
+

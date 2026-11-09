@@ -4,6 +4,10 @@ import type { AccountingProvider } from "./types";
 export type { AccountingProvider, AccountingEntity, DateRange, ExportFile } from "./types";
 export { ACCOUNTING_ENTITIES, AccountingNotConfiguredError } from "./types";
 export { toCsv, parseCsv, csvField } from "./csv";
+export type { LiveAccountingProvider, LiveAccountingProviderId, AccountingConnectionView, AccountingSettings, AccountingEntityKind, AccountingSyncLogRow, AccountOption } from "./types";
+export { LIVE_ACCOUNTING_PROVIDERS, ACCOUNTING_ENTITY_KINDS, isLiveAccountingProviderId, isAccountingEntityKind } from "./types";
+export { getLiveProvider, describeLiveProviders, listConnections, getConnection, deleteConnection, updateConnectionSettings, listLinks, listSyncLog } from "./connections";
+export { pushEntity, pushToAll, pushDue, pullDue, syncConnection, processAccountingEvents, onAccountingRelevantEvent } from "./sync";
 
 export const ACCOUNTING_PROVIDER_IDS = ["csv", "quickbooks", "xero"] as const;
 export type AccountingProviderId = (typeof ACCOUNTING_PROVIDER_IDS)[number];

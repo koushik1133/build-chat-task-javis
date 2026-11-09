@@ -83,6 +83,9 @@ export const EVENT_TYPES = [
   "invoice.sent",
   "product.created",
   "product.stock_changed",
+  "expense.created",
+  "accounting.synced",
+  "accounting.sync_failed",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

@@ -16,7 +16,7 @@ function ssoEnabled(): boolean {
 
 function safeNext(raw?: string): string {
   if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
-  return "/onboarding";
+  return "/home";
 }
 
 /** GET /api/auth/sso — readiness flag + provider name for the login page (button hidden unless SSO_ENABLED=1). */

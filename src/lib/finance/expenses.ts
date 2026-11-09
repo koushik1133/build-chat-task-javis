@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/dsql";
 import { CurrencySchema } from "@/lib/money/items";
+import { emitEvent } from "@/lib/events/bus";
 
 /** Expenses: cash out, optionally tied to a job (ref_kind/ref_id) and billable to a client. */
 
@@ -148,6 +149,7 @@ export async function createExpense(dataId: string, input: ExpenseInput, actorId
   );
   const e = await getExpense(dataId, id);
   if (!e) throw new Error("Expense vanished after insert");
+  void emitEvent(dataId, { type: "expense.created", entity: "expense", entityId: id, data: { category: e.category, vendor: e.vendor, total_minor: e.total_minor, currency: e.currency, billable: e.billable } });
   return e;
 }
 
