@@ -81,14 +81,14 @@ export function DiscountFields({ org, email, pickup, onChange }: { org: string; 
   const problem = (field: "voucher" | "points" | "gift_card") => preview?.problems.find((p) => p.field === field)?.message ?? null;
 
   return (
-    <section className="rounded-xl border border-border bg-card p-4 sm:p-5" aria-labelledby="co-discounts">
+    <section className="scroll-mb-28 rounded-xl border border-border bg-card p-4 sm:p-5" aria-labelledby="co-discounts">
       <h2 id="co-discounts" className="mb-3 flex items-center gap-2 text-sm font-semibold"><Tag className="h-4 w-4" aria-hidden /> Discounts and gift cards</h2>
       <div className="space-y-3">
         <div>
           <Field label="Discount code" error={problem("voucher")}>
             <div className="flex gap-2">
-              <Input value={codeInput} onChange={(e) => setCodeInput(e.target.value.toUpperCase())} maxLength={40} autoComplete="off" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (codeInput.trim()) { const next = [...new Set([...codes, codeInput.trim()])]; setCodeInput(""); void run({ codes: next, gift: giftApplied, points: Number(points) || 0 }); } } }} />
-              <Button type="button" variant="outline" disabled={busy || !codeInput.trim()} onClick={() => { const next = [...new Set([...codes, codeInput.trim()])]; setCodeInput(""); void run({ codes: next, gift: giftApplied, points: Number(points) || 0 }); }}>Apply</Button>
+              <Input aria-label="Discount code" value={codeInput} onChange={(e) => setCodeInput(e.target.value.toUpperCase())} maxLength={40} autoComplete="off" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (codeInput.trim()) { const next = [...new Set([...codes, codeInput.trim()])]; setCodeInput(""); void run({ codes: next, gift: giftApplied, points: Number(points) || 0 }); } } }} />
+              <Button type="button" variant="outline" touch disabled={busy || !codeInput.trim()} onClick={() => { const next = [...new Set([...codes, codeInput.trim()])]; setCodeInput(""); void run({ codes: next, gift: giftApplied, points: Number(points) || 0 }); }}>Apply</Button>
             </div>
           </Field>
           {codes.length > 0 && (
@@ -96,7 +96,7 @@ export function DiscountFields({ org, email, pickup, onChange }: { org: string; 
               {codes.map((c) => (
                 <li key={c} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium">
                   {c}
-                  <button type="button" aria-label={`Remove code ${c}`} className="rounded px-1 hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => void run({ codes: codes.filter((x) => x !== c), gift: giftApplied, points: Number(points) || 0 })}>×</button>
+                  <button type="button" aria-label={`Remove code ${c}`} className="inline-flex h-11 w-8 items-center justify-center rounded hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => void run({ codes: codes.filter((x) => x !== c), gift: giftApplied, points: Number(points) || 0 })}>×</button>
                 </li>
               ))}
             </ul>
@@ -104,19 +104,19 @@ export function DiscountFields({ org, email, pickup, onChange }: { org: string; 
         </div>
         <Field label="Gift card" error={problem("gift_card")} hint={giftApplied && preview?.gift_card ? `Card ending ${preview.gift_card.last4} applied: ${money(preview.gift_card.applied_minor, preview.currency)}` : undefined}>
           <div className="flex gap-2">
-            <Input value={gift} onChange={(e) => setGift(e.target.value.toUpperCase())} maxLength={40} autoComplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" className="font-mono" />
-            <Button type="button" variant="outline" disabled={busy || !gift.trim()} onClick={() => void run({ codes, gift: gift.trim(), points: Number(points) || 0 })}>Apply</Button>
+            <Input aria-label="Gift card number" value={gift} onChange={(e) => setGift(e.target.value.toUpperCase())} maxLength={40} autoComplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" className="font-mono" />
+            <Button type="button" variant="outline" touch disabled={busy || !gift.trim()} onClick={() => void run({ codes, gift: gift.trim(), points: Number(points) || 0 })}>Apply</Button>
           </div>
         </Field>
         {portalToken && (
           <Field label="Use reward points" error={problem("points")} hint="Points from your rewards account.">
             <div className="flex gap-2">
-              <Input type="number" min={0} inputMode="numeric" value={points} onChange={(e) => setPoints(e.target.value)} />
-              <Button type="button" variant="outline" disabled={busy} onClick={() => void run({ codes, gift: giftApplied, points: Number(points) || 0 })}>Apply</Button>
+              <Input aria-label="Points to use" type="number" min={0} inputMode="numeric" value={points} onChange={(e) => setPoints(e.target.value)} />
+              <Button type="button" variant="outline" touch disabled={busy} onClick={() => void run({ codes, gift: giftApplied, points: Number(points) || 0 })}>Apply</Button>
             </div>
           </Field>
         )}
-        {failure && <p role="alert" className="text-xs text-destructive">{failure}</p>}
+        {failure && <p role="alert" className="text-sm text-destructive">{failure}</p>}
         <div aria-live="polite" className="text-sm">
           {preview && preview.discount_minor > 0 && <p className="text-emerald-700 dark:text-emerald-400">Discount applied: {money(preview.discount_minor, preview.currency)}</p>}
           {preview?.free_shipping && <p className="text-emerald-700 dark:text-emerald-400">Free shipping applied.</p>}

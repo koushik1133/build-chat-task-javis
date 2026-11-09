@@ -407,6 +407,22 @@ export async function cancelOrder(dataId: string, id: string, opts: { reason?: s
     const moved = await setStatus(dataId, id, "pending_payment", "cancelled", { cancelled_at: new Date().toISOString() });
     if (!moved) throw new Error("Order changed while cancelling; reload and try again");
     released = (await releaseForOrder(dataId, id, "Order cancelled")).length;
+    // Voucher uses and redeemed points go back, so abandoned checkouts cannot exhaust a capped code or strand a member's points.
+    await import("@/lib/engagement/discounts").then((m) => m.releaseOrderDiscounts(dataId, id, order.contact_id)).catch(() => undefined);
+    if (order.invoice_id) {
+      // A partially gift-card-paid checkout leaves the card debited: put each applied amount back (idempotent per ledger entry).
+      const invId = order.invoice_id;
+      await (async () => {
+        const gc = await query<{ provider_ref: string | null; amount_minor: string | number }>(`SELECT provider_ref, amount_minor FROM invoice_payments WHERE invoice_id = $1 AND provider = 'gift_card' AND status = 'succeeded'`, [invId]).catch(() => []);
+        if (gc.length === 0) return;
+        const { refundToGiftCard } = await import("@/lib/engagement/giftcards");
+        for (const p of gc) {
+          if (!p.provider_ref) continue;
+          const led = await queryOne<{ gift_card_id: string }>(`SELECT gift_card_id FROM gift_card_ledger WHERE id = $1 AND user_id = $2`, [p.provider_ref, dataId]);
+          if (led) await refundToGiftCard(dataId, led.gift_card_id, Number(p.amount_minor), { refKind: "order_cancel", refId: `${invId}:${p.provider_ref}` }).catch((err) => console.error(`[orders] gift card restore failed for ${id}:`, err));
+        }
+      })();
+    }
     if (order.invoice_id) await voidInvoice(dataId, order.invoice_id).catch((err) => console.error(`[orders] void invoice failed for ${id}:`, err));
   } else {
     if (!canTransition(order.status, "refunded")) throw new Error(`Order is ${order.status_label.toLowerCase()} and cannot be cancelled`);

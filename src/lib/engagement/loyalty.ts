@@ -201,7 +201,14 @@ export async function expirePoints(limit = 200, now: Date = new Date()): Promise
     if (accounts >= limit) break;
     const cutoff = new Date(now);
     cutoff.setUTCMonth(cutoff.getUTCMonth() - Number(p.expiry_months));
-    const rows = await query<AccountRow>(`SELECT ${ACCOUNT_COLS} FROM loyalty_accounts WHERE user_id = $1 AND balance > 0 ORDER BY updated_at ASC LIMIT $2`, [p.user_id, limit - accounts]);
+    // Keyset cursor per program so accounts with nothing expirable cannot starve the rest.
+    const curName = `pexp:${p.user_id}`;
+    const cur = await queryOne<{ last_event_id: string }>(`SELECT last_event_id FROM engagement_cursors WHERE name = $1`, [curName]).catch(() => null);
+    const after = cur?.last_event_id ?? "";
+    const room = limit - accounts;
+    const rows = await query<AccountRow>(`SELECT ${ACCOUNT_COLS} FROM loyalty_accounts WHERE user_id = $1 AND balance > 0 AND id > $2 ORDER BY id ASC LIMIT $3`, [p.user_id, after, room]);
+    const nextCursor = rows.length < room ? "" : String(rows[rows.length - 1].id);
+    await query(`INSERT INTO engagement_cursors (name, last_event_at, last_event_id, updated_at) VALUES ($1, NOW(), $2, NOW()) ON CONFLICT (name) DO UPDATE SET last_event_id = EXCLUDED.last_event_id, updated_at = NOW()`, [curName, nextCursor]).catch(() => undefined);
     for (const a of rows) {
       accounts++;
       const entries = await query<{ kind: LoyaltyKind; points: string | number; created_at: string | Date }>(`SELECT kind, points, created_at FROM loyalty_ledger WHERE user_id = $1 AND account_id = $2`, [p.user_id, a.id]);

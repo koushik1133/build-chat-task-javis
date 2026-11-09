@@ -17,7 +17,8 @@ export const PEPPOL_CUSTOMIZATION = "urn:cen.eu:en16931:2017#compliant#urn:fdc:p
 export const PEPPOL_PROFILE = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0";
 
 export function xmlEscape(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  // Drop characters that are illegal in XML 1.0 (control chars, lone surrogates) so user text can never make the document ill-formed.
+  return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
 /** Minor units -> decimal string with two places (system-wide convention: 1 unit = 100 minor). */
@@ -50,6 +51,7 @@ export function validateForPeppol(d: EDoc): { errors: string[]; warnings: string
   const warnings: string[] = [];
   if (!d.number) errors.push("Invoice number is missing (BT-1)");
   if (!d.issue_date) errors.push("Issue date is missing (BT-2)");
+  else if (!/^\d{4}-\d{2}-\d{2}$/.test(d.issue_date) || (d.due_date && !/^\d{4}-\d{2}-\d{2}$/.test(d.due_date))) errors.push("Dates must be YYYY-MM-DD");
   if (!/^[A-Z]{3}$/.test(d.currency)) errors.push("Document currency must be an ISO 4217 code (BT-5)");
   if (!d.seller.name) errors.push("Seller name is missing (BT-27)");
   if (!d.seller.country) errors.push("Seller country is missing (BT-40)");

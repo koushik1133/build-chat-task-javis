@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Input, Select } from "@/components/ui/input";
 import { api, Banner, Field } from "@/components/finance/shared";
@@ -62,9 +62,15 @@ export function SetupTab({ profile, onSaved }: { profile: TaxProfile | null; onS
         <Field label={regime === "india_gst" ? "State code" : "State / province"} hint={regime === "india_gst" ? "2 digits, derived from the GSTIN if blank" : undefined}>
           <Input maxLength={60} value={state} onChange={(e) => setState(e.target.value)} autoComplete="off" />
         </Field>
-        <Field label={info.tax_id_label} error={check && !check.valid ? check.reason : null} hint={check?.valid ? "Format and checksum look valid (not proof of registration)" : undefined}>
-          <Input value={reg} onChange={(e) => setReg(e.target.value)} spellCheck={false} autoComplete="off" maxLength={40} />
-        </Field>
+        <div>
+          <Field label={info.tax_id_label} error={check && !check.valid ? check.reason : null}>
+            <Input value={reg} onChange={(e) => setReg(e.target.value)} spellCheck={false} autoComplete="off" maxLength={40} />
+          </Field>
+          <p role="status" aria-live="polite" className="mt-1 min-h-5 text-xs">
+            {check?.valid && <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden /> Valid format and checksum (not proof of registration)</span>}
+            {check && !check.valid && <span className="inline-flex items-center gap-1 text-red-700 dark:text-red-300"><XCircle className="h-3.5 w-3.5" aria-hidden /> Invalid format</span>}
+          </p>
+        </div>
         <Field label="Registration type">
           <Select value={regType} onChange={(e) => setRegType(e.target.value as typeof regType)}>
             {REGISTRATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}

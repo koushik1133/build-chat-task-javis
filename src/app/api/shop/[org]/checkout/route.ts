@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { giftCardAttemptAllowed } from "@/lib/engagement/giftcards";
 import { readCappedText } from "@/lib/request-limits";
 import { getCartByToken } from "@/lib/storefront/cart";
 import { CheckoutSchema, createOrderFromCart } from "@/lib/storefront/checkout";
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     const parsed = CheckoutSchema.safeParse(json);
     if (!parsed.success) return NextResponse.json({ error: "invalid_body", detail: parsed.error.flatten() }, { status: 400 });
+    if (parsed.data.discounts?.gift_card && !(await giftCardAttemptAllowed(clientIp(req)))) return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: NO_STORE });
     const out = await createOrderFromCart(pub, cart, parsed.data, { ip: clientIp(req), ua: req.headers.get("user-agent") });
     const res = NextResponse.json({ order: toPublicOrder(out.order), status_url: out.status_url, status_token: out.status_token, pay_url: out.pay_url }, { status: 201, headers: NO_STORE });
     // The cart is spent: drop the cookie so the next visit starts clean.

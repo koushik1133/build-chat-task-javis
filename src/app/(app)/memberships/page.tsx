@@ -553,11 +553,16 @@ function RevenueTab() {
             return (
               <g key={x.month}>
                 <rect x={i * 50 + 8} y={64 - h} width={34} height={h} rx={3} className="fill-primary" />
-                <text x={i * 50 + 25} y={77} textAnchor="middle" className="fill-muted-foreground text-[8px]">{x.month.slice(5)}</text>
+                <text x={i * 50 + 25} y={64 - h - 3} textAnchor="middle" className="fill-foreground text-[10px] font-semibold">{x.count}</text>
+                <text x={i * 50 + 25} y={77} textAnchor="middle" className="fill-muted-foreground text-[10px]">{x.month.slice(5)}</text>
               </g>
             );
           })}
         </svg>
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="min-h-11 cursor-pointer py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Show as table</summary>
+          <table className="mt-1"><caption className="sr-only">New members per month</caption><thead><tr><th scope="col" className="pr-4 text-left font-medium">Month</th><th scope="col" className="text-right font-medium">New members</th></tr></thead><tbody>{m.new_by_month.map((x) => <tr key={x.month}><th scope="row" className="pr-4 text-left font-normal">{x.month}</th><td className="text-right tabular-nums">{x.count}</td></tr>)}</tbody></table>
+        </details>
       </section>
     </div>
   );

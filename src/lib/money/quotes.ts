@@ -7,6 +7,7 @@ import { releaseForQuote } from "@/lib/inventory/stock";
 import { emitEvent } from "@/lib/events/bus";
 import { formatMoney, parseItems, type LineItem } from "./items";
 import { resolveDocumentTotals } from "./tax-rates";
+import { assertNonNegativeTotal } from "./totals-guard";
 import { saveComplianceMeta } from "./compliance-meta";
 import { getBillingSettings } from "./settings";
 import { parseBreakdown, type TaxBreakdownRow } from "./tax";
@@ -150,6 +151,7 @@ export async function createQuote(dataId: string, input: CreateQuoteInput): Prom
   }
   const id = randomUUID();
   const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, input.items, { contactId: input.contact_id ?? null })]);
+  assertNonNegativeTotal(totals);
   const number = await nextDocNumber(dataId, "quote", settings.quote_prefix);
   const currency = (input.currency ?? "USD").toUpperCase();
   await query(
@@ -217,6 +219,7 @@ export async function updateQuote(dataId: string, id: string, input: UpdateQuote
 export async function updateQuoteItems(dataId: string, id: string, items: LineItem[]): Promise<number> {
   const owner = await queryOne<{ contact_id: string | null }>(`SELECT contact_id FROM quotes WHERE id = $1 AND user_id = $2`, [id, dataId]);
   const totals = await resolveDocumentTotals(dataId, items, { contactId: owner?.contact_id ?? null });
+  assertNonNegativeTotal(totals);
   await saveComplianceMeta("quotes", dataId, id, totals);
   return withRetry(async () => {
     const cur = await queryOne<{ current_version: number }>(

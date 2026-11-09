@@ -38,7 +38,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ org: strin
     const parsed = Body.safeParse(json);
     if (!parsed.success) return NextResponse.json({ error: "invalid_body" }, { status: 400, headers: NO_STORE });
     const b = parsed.data;
-    if (b.gift_card && !(await giftCardAttemptAllowed(clientIp(req), b.gift_card))) return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: NO_STORE });
+    if (b.gift_card && !(await giftCardAttemptAllowed(clientIp(req)))) return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: NO_STORE });
     const cart = await getCartByToken(pub.dataId, readCartToken(req, pub.storefront.slug));
     const items = cart ? parseCartItems(cart.items) : [];
     if (!cart || items.length === 0) return NextResponse.json({ error: "empty_cart", detail: "Your cart is empty" }, { status: 400, headers: NO_STORE });
@@ -49,8 +49,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ org: strin
       const share = await resolveShareToken("portal", b.portal_token);
       if (share && share.user_id === pub.dataId) contactId = share.entity_id;
     }
+    // Points/balances are only previewed for an authenticated portal contact; an email alone must never reveal a rewards balance.
+    const pointsRequested = (b.points ?? 0) > 0;
+    const portalContact = contactId;
     if (!contactId && b.email) contactId = (await queryOne<{ id: string }>(`SELECT id FROM crm_contacts WHERE user_id = $1 AND lower(email) = $2 AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 1`, [pub.dataId, b.email]))?.id ?? null;
-    const r = await applyDiscounts(pub.dataId, { currency: pub.storefront.currency, items: lines, contactId, voucherCodes: b.voucher_codes, loyaltyPoints: b.points, giftCardCode: b.gift_card });
+    const r = await applyDiscounts(pub.dataId, { currency: pub.storefront.currency, items: lines, contactId, voucherCodes: b.voucher_codes, loyaltyPoints: portalContact ? b.points : undefined, giftCardCode: b.gift_card });
+    if (pointsRequested && !portalContact) r.problems.push({ field: "points", code: "no_account", message: "Sign in to your rewards account to use points." });
     const goods = await resolveDocumentTotals(pub.dataId, [...lines, ...r.lines]);
     const shipping = r.freeShipping ? 0 : shippingCharge(pub.storefront, b.pickup === true);
     const total = goods.total_minor + shipping;

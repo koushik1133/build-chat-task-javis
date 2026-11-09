@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       await recordAudit(scope, { action: "invoice.discount", entity: "invoice", entityId: inv.id, after: { voucher: b.data.voucher_code ?? null, points: b.data.points ?? null, discount_minor: applied } });
     }
     if (b.data.gift_card) {
-      if (!(await giftCardAttemptAllowed(clientIp(req), b.data.gift_card))) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+      if (!(await giftCardAttemptAllowed(clientIp(req)))) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
       const card = await findUsableCard(scope.dataId, b.data.gift_card);
       if (!card) return NextResponse.json({ error: "invalid_request", detail: "That gift card could not be used." }, { status: 400 });
       const res = await applyGiftCardToInvoice(scope.dataId, inv.id, card);

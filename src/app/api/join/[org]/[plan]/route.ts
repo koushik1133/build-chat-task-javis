@@ -4,6 +4,7 @@ import { withRequestContext } from "@/lib/log/context";
 import { getTaxRate } from "@/lib/money/tax-rates";
 import { MembershipError, getPlanBySlug, resolveOrgBySlug, seatsUsed } from "@/lib/memberships/plans";
 import { SubscribeSchema, subscribe } from "@/lib/memberships/subscriptions";
+import { planGate } from "@/lib/plans/http";
 import { getBranding } from "@/lib/branding";
 import { logger } from "@/lib/log/logger";
 
@@ -78,6 +79,8 @@ async function postHandler(req: NextRequest, ctx: Ctx) {
     if (!(await rateLimitAsync(`join:email:${parsed.data.contact.email}`, 5, 3_600_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: NO_STORE });
     const org = await resolveOrgBySlug(orgSlug);
     if (!org) return notFound();
+    // A workspace whose plan no longer includes memberships stops selling them publicly.
+    if (await planGate({ dataId: org.dataId }, { feature: "memberships" })) return notFound();
     const out = await subscribe(org.dataId, planSlug.toLowerCase(), parsed.data, { ip, ua: req.headers.get("user-agent") });
     return NextResponse.json({ status: out.status, pay_url: out.pay_url, trial_ends_at: out.trial_ends_at }, { status: 201, headers: NO_STORE });
   } catch (err) {

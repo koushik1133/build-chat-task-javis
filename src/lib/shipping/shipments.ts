@@ -390,6 +390,19 @@ export async function createShipmentForOrder(dataId: string, orderId: string, in
       await setup.provider.void({ tracking_number: label.tracking_number, provider_ref: label.provider_ref }, setup.creds).catch(() => undefined);
       throw err;
     }
+    if (!input.additional) {
+      // The guard above is read-then-write: if a concurrent request also bought a label for this order,
+      // the later inserter backs out (void the label, void the row) so exactly one live shipment survives.
+      const earlier = await query<{ id: string }>(
+        `SELECT o.id FROM shipments o, shipments m WHERE m.id = $1 AND o.user_id = $2 AND m.user_id = $2 AND o.order_id = $3 AND o.id <> m.id AND o.status <> 'void' AND o.return_id IS NULL AND (o.created_at < m.created_at OR (o.created_at = m.created_at AND o.id < m.id)) LIMIT 1`,
+        [id, dataId, orderId]
+      );
+      if (earlier.length > 0) {
+        await setup.provider.void({ tracking_number: label.tracking_number, provider_ref: label.provider_ref }, setup.creds).catch(() => undefined);
+        await query(`UPDATE shipments SET status = 'void', updated_at = NOW() WHERE id = $1 AND user_id = $2`, [id, dataId]);
+        throw new ShippingError("conflict", "This order already has a shipment (created concurrently); the duplicate label was voided.", 409);
+      }
+    }
     if (!label.label_url) {
       const pdf = renderShippingLabelPdf({ carrier: label.carrier, service: label.service, tracking_number: label.tracking_number, from, to, weight_grams: weight, order_number: order.number, simulated: setup.provider.id === "simulated" });
       const attId = await storeLabelPdf(dataId, id, pdf, `label-${label.tracking_number}.pdf`, ctx.actorId ?? null);

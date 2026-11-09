@@ -50,7 +50,14 @@ const MAX_CODES = 5;
 
 export async function applyDiscounts(dataId: string, input: ApplyInput): Promise<ApplyResult> {
   const out: ApplyResult = { discountMinor: 0, lines: [], freeShipping: false, vouchers: [], points: null, giftCard: null, problems: [] };
-  const goods = input.items.filter((i) => i.unit_minor > 0);
+  // Gift-card products are never discountable: a voucher or points on a card would mint money below face value.
+  const productIds = [...new Set(input.items.map((i) => i.product_id).filter((x): x is string => Boolean(x)))];
+  const giftIds = new Set<string>();
+  if (productIds.length > 0) {
+    const flagged = await query<{ id: string }>(`SELECT id FROM products WHERE user_id = $1 AND id = ANY($2) AND is_gift_card = TRUE`, [dataId, productIds]).catch(() => []);
+    for (const f of flagged) giftIds.add(f.id);
+  }
+  const goods = input.items.filter((i) => i.unit_minor > 0 && !(i.product_id && giftIds.has(i.product_id)));
   const subtotal = goods.reduce((s, i) => s + Math.floor(i.qty * i.unit_minor + 0.5), 0);
 
   const codes = [...new Set((input.voucherCodes ?? []).map((c) => c.trim().toUpperCase()).filter(Boolean))].slice(0, MAX_CODES);
@@ -138,6 +145,15 @@ export async function commitDiscounts(dataId: string, result: ApplyResult, entit
 export async function rollbackDiscounts(dataId: string, entity: { kind: string; id: string }, contactId: string | null, points: number): Promise<void> {
   await releaseRedemptions(dataId, entity).catch(() => undefined);
   if (contactId && points > 0) await refundRedeemed(dataId, contactId, points, { refKind: entity.kind, refId: entity.id }).catch(() => undefined);
+}
+
+/** Give back everything an unpaid, cancelled order consumed: voucher uses and redeemed loyalty points. Idempotent. */
+export async function releaseOrderDiscounts(dataId: string, orderId: string, contactId: string | null): Promise<void> {
+  const redeemed = contactId
+    ? await query<{ points: string | number }>(`SELECT points FROM loyalty_ledger WHERE user_id = $1 AND kind = 'redeem' AND ref_kind = 'order' AND ref_id = $2`, [dataId, orderId]).catch(() => [])
+    : [];
+  const points = redeemed.reduce((sum, r) => sum + Math.abs(Number(r.points)), 0);
+  await rollbackDiscounts(dataId, { kind: "order", id: orderId }, contactId, points);
 }
 
 /**

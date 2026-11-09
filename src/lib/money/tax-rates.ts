@@ -151,3 +151,4 @@ export async function resolveDocumentTotals(dataId: string, items: readonly Line
   }
   return computeTaxTotals(items, rates, base);
 }
+

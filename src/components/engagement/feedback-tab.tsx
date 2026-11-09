@@ -30,14 +30,19 @@ function Trend({ points, label }: { points: Array<{ week: string; value: number 
   const max = Math.max(...vals, 1);
   const w = 240;
   const h = 56;
+  const real = points.filter((p) => p.value !== null);
+  const last = real[real.length - 1];
+  const summary = `${label}: ${real.length} weeks, from ${real[0].value} to ${last.value}, low ${Math.min(...vals)}, high ${Math.max(...vals)}`;
   const xy = points.filter((p) => p.value !== null).map((p, i, a) => `${(i / (a.length - 1)) * w},${h - (((p.value as number) - min) / (max - min || 1)) * (h - 6) - 3}`);
   return (
     <div>
-      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={label} className="h-14 w-full max-w-xs text-primary">
+      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={summary} className="h-14 w-full max-w-xs text-primary">
         <polyline points={xy.join(" ")} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={xy[xy.length - 1].split(",")[0]} cy={xy[xy.length - 1].split(",")[1]} r="3.5" fill="currentColor" stroke="hsl(var(--card))" strokeWidth="2" />
       </svg>
+      <p className="text-xs text-muted-foreground">Latest <strong className="font-semibold text-foreground tabular-nums">{last.value}</strong> · low <span className="tabular-nums">{Math.min(...vals)}</span> · high <span className="tabular-nums">{Math.max(...vals)}</span></p>
       <details className="text-xs text-muted-foreground">
-        <summary className="cursor-pointer">Show as table</summary>
+        <summary className="min-h-11 cursor-pointer py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Show as table</summary>
         <table className="mt-1"><caption className="sr-only">{label}</caption><tbody>{points.map((p) => <tr key={p.week}><th scope="row" className="pr-3 text-left font-normal">{p.week}</th><td>{p.value ?? "-"}</td></tr>)}</tbody></table>
       </details>
     </div>
@@ -68,7 +73,25 @@ function Results({ id }: { id: string }) {
         <div className="rounded-lg border border-border bg-card p-3"><p className="text-xs text-muted-foreground">Responses</p><p className="text-3xl font-semibold tabular-nums">{r.responses}</p></div>
         <div className="rounded-lg border border-border bg-card p-3"><p className="text-xs text-muted-foreground">Response rate</p><p className="text-3xl font-semibold tabular-nums">{r.response_rate === null ? "-" : `${r.response_rate}%`}</p></div>
       </div>
-      {r.nps && <p className="text-sm text-muted-foreground">{r.nps.promoters} promoters, {r.nps.passives} passives, {r.nps.detractors} detractors.</p>}
+      {r.nps && (() => {
+        const n = r.nps;
+        const tot = Math.max(1, n.promoters + n.passives + n.detractors);
+        const seg = [
+          { k: "Detractors", v: n.detractors, cls: "bg-red-600", mark: "▼" },
+          { k: "Passives", v: n.passives, cls: "bg-slate-400", mark: "●" },
+          { k: "Promoters", v: n.promoters, cls: "bg-emerald-600", mark: "▲" },
+        ];
+        return (
+          <div>
+            <div role="img" aria-label={`Score breakdown: ${seg.map((s) => `${s.v} ${s.k.toLowerCase()}`).join(", ")}`} className="flex h-3 overflow-hidden rounded-full bg-secondary">
+              {seg.map((s) => s.v > 0 && <span key={s.k} className={s.cls} style={{ width: `${(s.v / tot) * 100}%`, marginInlineEnd: 2 }} />)}
+            </div>
+            <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              {seg.map((s) => <li key={s.k}><span aria-hidden>{s.mark}</span> {s.k}: <span className="tabular-nums font-medium text-foreground">{s.v}</span> ({Math.round((s.v / tot) * 100)}%)</li>)}
+            </ul>
+          </div>
+        );
+      })()}
       <div className="grid gap-4 lg:grid-cols-2">
         <section aria-label="Score distribution">
           <h3 className="mb-1 text-sm font-semibold">Distribution</h3>

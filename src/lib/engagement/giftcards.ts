@@ -136,13 +136,16 @@ export async function findUsableCard(dataId: string, code: string, now: Date = n
 }
 
 /**
- * Anti brute-force for the public balance/validate endpoints: 5 attempts per
- * minute and 20 per day per IP + code prefix (first 4 chars). Returns false when blocked.
+ * Anti brute-force for the public balance/validate/checkout paths. Buckets are
+ * independent of the code text (rotating prefixes buys nothing): 10/min and 60/day
+ * per IP, plus a global ceiling of 600/min across all callers. Returns false when blocked.
  */
-export async function giftCardAttemptAllowed(ip: string, code: string): Promise<boolean> {
-  const prefix = normalizeGiftCode(code).slice(0, 4) || "none";
-  const [m, d] = await Promise.all([rateLimitAsync(`gcard:m:${ip}:${prefix}`, 5, 60_000), rateLimitAsync(`gcard:d:${ip}:${prefix}`, 20, 86_400_000)]);
-  return m.allowed && d.allowed;
+export async function giftCardAttemptAllowed(ip: string): Promise<boolean> {
+  // Per-IP buckets first; the global bucket is only consumed by attempts that passed them,
+  // so a single blocked client cannot exhaust the platform-wide ceiling.
+  const [m, d] = await Promise.all([rateLimitAsync(`gcard:m:${ip}`, 10, 60_000), rateLimitAsync(`gcard:d:${ip}`, 60, 86_400_000)]);
+  if (!m.allowed || !d.allowed) return false;
+  return (await rateLimitAsync(`gcard:g`, 600, 60_000)).allowed;
 }
 
 /** Debit up to `amountMinor` from the card for an entity. Idempotent per (entity). Returns the amount actually applied. */

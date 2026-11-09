@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
+import { Check, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Textarea } from "@/components/ui/input";
 import { Banner, Empty, Loading } from "@/components/ui/feedback";
@@ -27,18 +27,18 @@ function Scale({ q, min, max, value, onChange, lowLabel, highLabel }: { q: Quest
         {q.label}
         {q.required && <span className="text-destructive"> *</span>}
       </legend>
-      <div role="radiogroup" aria-label={q.label} className={cn("grid gap-1.5", max > 5 ? "grid-cols-6 sm:grid-cols-11" : "grid-cols-5")}>
+      <div role="radiogroup" aria-label={`${q.label} (${lowLabel} to ${highLabel})`} className={cn("grid gap-1.5", max > 5 ? "grid-cols-6 sm:grid-cols-11" : "grid-cols-5")}>
         {options.map((n) => (
           <label
             key={n}
             className={cn(
-              "flex min-h-11 cursor-pointer touch-manipulation items-center justify-center rounded-md border text-sm font-medium tabular-nums transition-colors motion-reduce:transition-none",
+              "flex min-h-12 cursor-pointer touch-manipulation items-center justify-center rounded-md border text-sm font-medium tabular-nums transition-colors motion-reduce:transition-none",
               "focus-within:ring-2 focus-within:ring-ring",
-              value === n ? "border-primary bg-primary text-primary-foreground" : "border-border bg-secondary/40 hover:bg-secondary"
+              value === n ? "border-primary bg-primary font-semibold text-primary-foreground ring-2 ring-primary/40" : "border-border bg-secondary/40 hover:bg-secondary"
             )}
           >
             <input type="radio" name={q.id} value={n} checked={value === n} onChange={() => onChange(n)} className="sr-only" />
-            <span aria-hidden>{n}</span>
+            <span aria-hidden className="inline-flex items-center gap-0.5">{value === n && <Check className="h-3.5 w-3.5" />}{n}</span>
             <span className="sr-only">{n} out of {max}</span>
           </label>
         ))}
@@ -118,7 +118,7 @@ export default function SurveyPage() {
   }
 
   return (
-    <form onSubmit={submit} noValidate className="space-y-6">
+    <form onSubmit={submit} noValidate className="space-y-6" aria-describedby={error ? "survey-error" : undefined}>
       <div>
         <h1 className="text-xl font-semibold tracking-tight">{survey.name}</h1>
         <p className="mt-1 text-sm text-muted-foreground">Your feedback helps {survey.org_name} improve. It takes about a minute.</p>
@@ -146,7 +146,7 @@ export default function SurveyPage() {
         );
       })}
       <Checkbox checked={publicOk} onChange={(e) => setPublicOk(e.target.checked)} label="OK to display my feedback publicly (first name and last initial only)." />
-      {error && <Banner tone="error">{error}</Banner>}
+      <div id="survey-error" aria-live="assertive">{error && <Banner tone="error">{error}</Banner>}</div>
       <Button type="submit" size="lg" className="w-full" disabled={submitting} aria-busy={submitting || undefined}>
         {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}
         Send feedback

@@ -6,6 +6,7 @@ import { businessName } from "@/lib/money/quotes";
 import { getBillingSettings } from "@/lib/money/settings";
 import { computeLineTax } from "@/lib/money/tax";
 import { emitEvent } from "@/lib/events/bus";
+import { keysetClause, keysetOrder, type Cursor } from "@/lib/public-api/pagination";
 import { addressFromRaw, normalizeCountry, type Regime } from "../regimes";
 import { resolveTax, type VatCategory } from "../resolver";
 import { loadContactTax } from "../document";
@@ -111,10 +112,13 @@ const toDTO = (r: Row & { number?: string | null }): EInvoiceDTO => ({
   payload_hash: r.payload_hash, provider_ref: r.provider_ref, error: r.error, created_at: iso(r.created_at), updated_at: iso(r.updated_at),
 });
 
-export async function listEInvoices(dataId: string, limit = 100): Promise<EInvoiceDTO[]> {
+export async function listEInvoices(dataId: string, limit = 100, cursor?: Cursor | null): Promise<EInvoiceDTO[]> {
+  const params: unknown[] = [dataId];
+  const where = `e.user_id = $1${keysetClause(cursor, params, { alias: "e." })}`;
+  params.push(Math.min(limit, 500));
   const rows = await query<Row & { number: string | null }>(
-    `SELECT e.*, i.number FROM e_invoices e LEFT JOIN invoices i ON i.id = e.invoice_id AND i.user_id = e.user_id WHERE e.user_id = $1 ORDER BY e.created_at DESC LIMIT $2`,
-    [dataId, Math.min(limit, 500)]
+    `SELECT e.*, i.number FROM e_invoices e LEFT JOIN invoices i ON i.id = e.invoice_id AND i.user_id = e.user_id WHERE ${where} ORDER BY ${keysetOrder("e.")} LIMIT $${params.length}`,
+    params
   );
   return rows.map(toDTO);
 }

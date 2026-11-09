@@ -133,7 +133,8 @@ export async function createOrderFromCart(pub: PublicStorefront, cart: CartRow, 
   const shipTaxBp = option && shipping > 0 ? (sf.settings.shipping_tax_bp ?? 0) : 0;
   const shipTax = Math.round((shipping * shipTaxBp) / 10_000);
   const invoiceLines: LineItem[] = shipping > 0 ? [...orderLines, { description: "Shipping", qty: 1, unit_minor: shipping, tax_rate_bp: shipTaxBp }] : orderLines;
-  const goods = await resolveDocumentTotals(pub.dataId, orderLines);
+  const shipToAddr = input.shipping ? { country: input.shipping.country, state: input.shipping.region ?? null, postal_code: input.shipping.postal_code ?? null } : null;
+  const goods = await resolveDocumentTotals(pub.dataId, orderLines, shipToAddr ? { shipTo: shipToAddr } : undefined);
   const baseTotals = combineOrderTotals({ goods, shipping_minor: shipping });
   const totals = shipTax > 0 ? { ...baseTotals, tax_minor: baseTotals.tax_minor + shipTax, total_minor: baseTotals.total_minor + shipTax } : baseTotals;
   if (discount && totals.total_minor <= 0) throw new CheckoutError("discount_invalid", "Discounts cannot reduce an order to zero. Please remove a code or contact the shop.");
@@ -175,10 +176,12 @@ export async function createOrderFromCart(pub: PublicStorefront, cart: CartRow, 
 
   let invoiceId: string;
   try {
-    const inv = await createInvoice(pub.dataId, { contact_id: contact?.id ?? null, currency: sf.currency, items: invoiceLines, due_at: new Date().toISOString(), terms_days: 0, notes: `Storefront order ${order.number}` });
+    const inv = await createInvoice(pub.dataId, { contact_id: contact?.id ?? null, currency: sf.currency, items: invoiceLines, ship_to: shipToAddr, due_at: new Date().toISOString(), terms_days: 0, notes: `Storefront order ${order.number}` });
     // Sent and due now: it shows up in receivables/statements immediately and the pay link can be issued.
     await query(`UPDATE invoices SET status = 'sent', sent_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2 AND status = 'draft'`, [inv.id, pub.dataId]);
     invoiceId = inv.id;
+    // The invoice is what the customer pays: if tax rounding / inclusive pricing made it differ from the order's own arithmetic, the order follows the invoice.
+    if (inv.total_minor !== totals.total_minor) await query(`UPDATE orders SET total_minor = $3, tax_minor = $4, updated_at = NOW() WHERE id = $1 AND user_id = $2 AND status = 'pending_payment'`, [order.id, pub.dataId, inv.total_minor, inv.tax_minor]);
   } catch (err) {
     await releaseForOrder(pub.dataId, order.id, "Rolled back: invoice failed").catch(() => undefined);
     await releaseCartClaim(cart.id, order.id).catch(() => undefined);

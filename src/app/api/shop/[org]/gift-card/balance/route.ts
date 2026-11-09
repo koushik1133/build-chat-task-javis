@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ org: strin
   try { json = JSON.parse(text || "null"); } catch { /* handled below */ }
   const parsed = Body.safeParse(json);
   if (!parsed.success) return NextResponse.json({ error: "invalid_body" }, { status: 400, headers: NO_STORE });
-  if (!(await giftCardAttemptAllowed(clientIp(req), parsed.data.code))) return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: NO_STORE });
+  if (!(await giftCardAttemptAllowed(clientIp(req)))) return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: NO_STORE });
   const card = await findUsableCard(pub.dataId, parsed.data.code).catch(() => null);
   if (!card) return NextResponse.json({ error: "invalid_code", detail: "That gift card could not be found." }, { status: 404, headers: NO_STORE });
   return NextResponse.json({ balance_minor: card.balance_minor, currency: card.currency, last4: card.code_last4 }, { headers: NO_STORE });

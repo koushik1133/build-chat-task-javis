@@ -242,14 +242,19 @@ export async function receiveTransfer(dataId: string, id: string, input: Transfe
   const fresh = await requireTransfer(dataId, id);
   let close = isFullyReceived(fresh.lines);
   if (!close && input.close_short) {
-    for (const l of fresh.lines) {
+    // Claim the transfer BEFORE writing off so concurrent close-short calls cannot both deduct.
+    if (!(await claim(dataId, id, "in_transit", "received", "received_at"))) throw new TransferError("bad_state", "This transfer was closed concurrently; reload and retry");
+    const settled = await requireTransfer(dataId, id);
+    for (const l of settled.lines) {
       if (l.remaining <= 0) continue;
-      await withRetry(() => moveProductOnly(dataId, l.product_id, -l.remaining));
+      const ok = await withRetry(() => moveProductOnly(dataId, l.product_id, -l.remaining));
+      if (!ok) throw new TransferError("invalid", `Cannot write off ${l.remaining} of ${l.product_name ?? l.product_id}: not enough stock on hand`);
       await logMovement(dataId, { product_id: l.product_id, kind: "adjust", qty: -l.remaining, ref_kind: "transfer", ref_id: id, note: `Shortage written off on ${t.number}`, created_by: actorId ?? null, location_id: t.to_location_id, transfer_id: id });
     }
     close = true;
+  } else if (close) {
+    await claim(dataId, id, "in_transit", "received", "received_at");
   }
-  if (close) await claim(dataId, id, "in_transit", "received", "received_at");
   void emitEvent(dataId, { type: "stock.transfer_received", entity: "stock_transfer", entityId: id, data: { number: t.number, complete: close, lines: [...requested].map(([product_id, qty]) => ({ product_id, qty })) } });
   return requireTransfer(dataId, id);
 }

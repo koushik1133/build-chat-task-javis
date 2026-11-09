@@ -128,7 +128,7 @@ export default function JoinPage() {
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-8 px-4 py-8 sm:px-6 md:grid-cols-[1fr_320px]">
       <section aria-labelledby="plan-name" className="min-w-0">
-        {orgName && <p className="text-xs uppercase tracking-wide text-muted-foreground">{orgName}</p>}
+        {orgName && <p className="text-sm text-muted-foreground">{orgName}</p>}
         <h1 id="plan-name" className="mt-1 text-2xl font-semibold">{plan.name}</h1>
         <p className="mt-2 text-3xl font-semibold tabular-nums">
           {fmtMoney(plan.amount_minor, plan.currency)} <span className="text-base font-normal text-muted-foreground">/ {every(plan.interval, plan.interval_count)}</span>
@@ -166,6 +166,7 @@ export default function JoinPage() {
         </div>
         <Checkbox checked={terms} onChange={(e) => setTerms(e.target.checked)} label="I agree to be billed on a recurring basis and can cancel at any time." required />
         <Checkbox checked={marketing} onChange={(e) => setMarketing(e.target.checked)} label="Send me news and offers (optional)." />
+        {!terms && <p className="text-xs text-muted-foreground">Tick the agreement above to continue.</p>}
         <Button type="submit" className="w-full" disabled={busy || plan.full || !terms || !name.trim() || !email.trim()} touch>
           {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
           {plan.trial_days > 0 ? "Start free trial" : "Start membership"}

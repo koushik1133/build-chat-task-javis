@@ -92,7 +92,9 @@ export async function subscribe(dataId: string, planSlug: string, input: Subscri
   }
 
   const id = randomUUID();
-  const trial = plan.trial_days > 0;
+  // One trial per (contact, plan): a repeat sign-up with the same email starts billing immediately instead of restarting the trial.
+  const priorTrial = plan.trial_days > 0 ? await queryOne(`SELECT id FROM customer_subscriptions WHERE user_id = $1 AND plan_id = $2 AND contact_id = $3 AND trial_ends_at IS NOT NULL LIMIT 1`, [dataId, plan.id, contact.id]) : null;
+  const trial = plan.trial_days > 0 && !priorTrial;
   const trialEnd = trial ? new Date(now.getTime() + plan.trial_days * DAY_MS) : null;
   const periodEnd = trialEnd ?? advancePeriod(now, plan.interval, plan.interval_count, now.getUTCDate());
   const provider = activeProviderId();

@@ -59,11 +59,11 @@ export default async function TrackPage({ params }: { params: Promise<{ token: s
           <section key={s.id} className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5" aria-label={`Shipment ${s.tracking_number ?? ""}`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="flex items-center gap-2 text-lg font-semibold">
-                  {s.is_return ? <RotateCcw className="h-5 w-5 text-primary" aria-hidden /> : s.status === "delivered" ? <PackageCheck className="h-5 w-5 text-primary" aria-hidden /> : <Truck className="h-5 w-5 text-primary" aria-hidden />}
+                <p className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 py-1 text-sm font-semibold" role="status">
+                  {s.is_return ? <RotateCcw className="h-4 w-4 text-primary" aria-hidden /> : s.status === "delivered" ? <PackageCheck className="h-4 w-4 text-primary" aria-hidden /> : <Truck className="h-4 w-4 text-primary" aria-hidden />}
                   {s.is_return ? `Return: ${s.status_label}` : s.status_label}
                 </p>
-                <p className="mt-1 break-words text-sm text-muted-foreground">
+                <p className="mt-2 break-words text-sm text-muted-foreground">
                   {[s.carrier, s.service].filter(Boolean).join(" ")}
                   {s.tracking_number ? ` · ${s.tracking_number}` : ""}
                   {s.destination ? ` · to ${s.destination}` : ""}
@@ -86,16 +86,16 @@ export default async function TrackPage({ params }: { params: Promise<{ token: s
                 {s.items.map((i) => `${i.qty} × ${i.description}`).join(", ")}
               </p>
             )}
-            <h2 className="mb-2 mt-5 text-sm font-semibold">History</h2>
+            <h2 className="mb-3 mt-6 text-base font-semibold">History</h2>
             {s.events.length === 0 ? (
               <p className="text-sm text-muted-foreground">No scans yet.</p>
             ) : (
               <ol className="space-y-3 border-l border-border pl-4">
                 {[...s.events].reverse().map((e, i) => (
-                  <li key={`${e.occurred_at}-${i}`} className="relative text-sm">
+                  <li key={`${e.occurred_at}-${i}`} className="relative text-sm leading-relaxed">
                     <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-primary" aria-hidden />
                     <p className="font-medium">{e.description ?? e.status.replace(/_/g, " ")}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-sm text-muted-foreground">
                       {when(e.occurred_at)}
                       {e.location ? ` · ${e.location}` : ""}
                     </p>

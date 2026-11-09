@@ -8,6 +8,7 @@ import { getProvider } from "@/lib/payments";
 import type { PaymentEvent } from "@/lib/payments/types";
 import { formatMoney, parseItems, type LineItem } from "./items";
 import { resolveDocumentTotals } from "./tax-rates";
+import { assertNonNegativeTotal } from "./totals-guard";
 import { saveComplianceMeta } from "./compliance-meta";
 import { getBillingSettings } from "./settings";
 import { parseBreakdown, type TaxBreakdownRow } from "./tax";
@@ -177,6 +178,7 @@ export async function createInvoice(dataId: string, input: CreateInvoiceInput): 
   }
   const id = randomUUID();
   const [settings, totals] = await Promise.all([getBillingSettings(dataId), resolveDocumentTotals(dataId, input.items, { contactId: input.contact_id ?? null, shipTo: input.ship_to ?? null, reverseCharge: input.reverse_charge })]);
+  assertNonNegativeTotal(totals);
   const number = await nextDocNumber(dataId, "invoice", settings.invoice_prefix);
   const terms = input.terms_days ?? (input.due_at ? null : settings.default_terms_days);
   await query(
@@ -247,7 +249,11 @@ export async function updateInvoice(dataId: string, id: string, input: UpdateInv
   if (input.terms_days !== undefined) push("terms_days", input.terms_days);
   if (input.notes !== undefined) push("notes", input.notes);
   if (input.items) {
-    const t = await resolveDocumentTotals(dataId, input.items, { contactId: input.contact_id !== undefined ? input.contact_id : inv.contact_id });
+    // Keep the document's original regime inputs: reverse-charge and (for 2-letter US state / EU country) the place of supply.
+    const saved = await queryOne<{ place_of_supply: string | null; reverse_charge: boolean | null }>(`SELECT place_of_supply, reverse_charge FROM invoices WHERE id = $1 AND user_id = $2`, [id, dataId]).catch(() => null);
+    const pos = saved?.place_of_supply && /^[A-Z]{2}$/.test(saved.place_of_supply) ? saved.place_of_supply : null;
+    const t = await resolveDocumentTotals(dataId, input.items, { contactId: input.contact_id !== undefined ? input.contact_id : inv.contact_id, shipTo: pos ? { state: pos, country: pos } : null, reverseCharge: saved?.reverse_charge === true });
+    assertNonNegativeTotal(t);
     complianceTotals = t;
     push("items", JSON.stringify(input.items));
     push("subtotal_minor", t.subtotal_minor);

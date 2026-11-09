@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
     const body = await parseBody(req, Body, 2_000);
     if (!body.ok) return body.res;
     const { regime, id, lookup } = body.data;
+    if (lookup && !(await rateLimitAsync(`tax-vies:${scope.dataId}`, 20, 60_000)).allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
     const result = regime === "pan" ? validatePan(id) : validateTaxId(regime, id);
     const vies = lookup && regime === "eu_vat" && result.valid ? await lookupVies(id) : null;
     return NextResponse.json({ result, vies });

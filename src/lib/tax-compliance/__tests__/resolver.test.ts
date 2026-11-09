@@ -165,6 +165,14 @@ describe("US sales tax", () => {
     expect(inTx.r.meta.legends[0]).toMatch(/no nexus/i);
   });
 
+  it("the seller's home state is always nexus, even with an empty nexus list", async () => {
+    const home = { ...us, state_province: "CA", settings: {} };
+    const inCa = await run({ profile: home, rates: [], items, shipTo: { state: "CA" }, jurisdictionRates: [SALES] });
+    expect(inCa.totals.tax_minor).toBe(1450);
+    const inTx = await run({ profile: home, rates: [], items, shipTo: { state: "TX" }, jurisdictionRates: [SALES] });
+    expect(inTx.totals.tax_minor).toBe(0);
+  });
+
   it("exemption certificates zero the tax until they expire", async () => {
     const ex = [{ jurisdiction: "CA", certificate_ref: "CERT-1", expires_at: "2030-01-01T00:00:00Z" }];
     const a = await run({ profile: us, rates: [], items, shipTo: { state: "CA" }, jurisdictionRates: [SALES], exemptions: ex, docDate: new Date("2026-06-01") });

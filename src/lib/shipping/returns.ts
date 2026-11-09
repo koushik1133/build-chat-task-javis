@@ -141,7 +141,7 @@ export async function normalizeReturnLines(dataId: string, order: OrderDTO, line
   const used = await alreadyReturned(dataId, order.id);
   const out: ReturnLine[] = [];
   for (const l of lines) {
-    const match = order.items.find((o) => (l.product_id ? o.product_id === l.product_id : o.description === l.description));
+    const match = order.items.find((o) => o.unit_minor > 0 && (l.product_id ? o.product_id === l.product_id : o.description === l.description));
     if (!match) throw new ShippingError("invalid", "One of the items is not on this order");
     const key = match.product_id ?? match.description;
     const room = Math.floor(match.qty) - (used.get(key) ?? 0) - out.filter((x) => (x.product_id ?? x.description) === key).reduce((s, x) => s + x.qty, 0);
@@ -261,7 +261,11 @@ export async function refundableMinor(order: OrderDTO, dataId: string): Promise<
 
 /** Suggested refund: returned lines at paid prices plus their share of tax. */
 export function suggestedRefund(order: OrderDTO, lines: ReturnLine[]): number {
-  const goods = returnLinesValue(order.items, lines);
+  const listGoods = returnLinesValue(order.items, lines);
+  // Voucher / points lines are negative: refund the returned goods at their discounted share, never at list price.
+  const positive = order.items.reduce((s, i) => (i.unit_minor > 0 ? s + Math.round(i.qty * i.unit_minor) : s), 0);
+  const discounts = order.items.reduce((s, i) => (i.unit_minor < 0 ? s + Math.round(i.qty * i.unit_minor) : s), 0);
+  const goods = positive > 0 && discounts < 0 ? Math.round((listGoods * Math.max(0, positive + discounts)) / positive) : listGoods;
   const share = order.subtotal_minor > 0 ? order.tax_minor / order.subtotal_minor : 0;
   return Math.round(goods * (1 + share));
 }
@@ -286,14 +290,23 @@ export async function refundReturn(dataId: string, id: string, opts: { amount_mi
       throw err;
     }
   } else if (resolution === "store_credit") {
-    if (!(await move(dataId, id, ["received"], "refunded", { refund_minor: amount, resolution, notes: appendNote(ret.notes, `Store credit of ${formatMoney(amount, order.currency)} to be issued`) }))) throw new ShippingError("conflict", "Return changed; reload and try again", 409);
+    if (!(await move(dataId, id, ["received"], "refunded", { refund_minor: amount, resolution, notes: appendNote(ret.notes, `Store credit of ${formatMoney(amount, order.currency)} issued as a gift card`) }))) throw new ShippingError("conflict", "Return changed; reload and try again", 409);
+    try {
+      const { issueGiftCard } = await import("@/lib/engagement/giftcards");
+      if (amount <= 0) throw new ShippingError("invalid", "Nothing left to credit on this order", 409);
+      // refId per return: replays return the existing card instead of minting another.
+      await issueGiftCard(dataId, { amountMinor: amount, currency: order.currency, purchaserContactId: order.contact_id ?? null, recipientEmail: order.customer_email ?? null, message: `Store credit for return of ${order.number}`, issuedVia: "manual", orderId: order.id, refId: `credit:return:${id}` });
+    } catch (err) {
+      await move(dataId, id, ["refunded"], "received", { refund_minor: 0 }).catch(() => undefined);
+      throw err;
+    }
   } else if (!(await move(dataId, id, ["received"], "closed", { resolution, notes: appendNote(ret.notes, "Exchange: replacement to be sent") }))) {
     throw new ShippingError("conflict", "Return changed; reload and try again", 409);
   }
   const fresh = (await getReturn(dataId, id)) as ReturnDTO;
   if (resolution !== "exchange") {
     void emitEvent(dataId, { type: "return.refunded", entity: "return", entityId: id, data: { order_id: order.id, number: order.number, resolution, refund_minor: fresh.refund_minor, currency: order.currency, customer_email: order.customer_email, contact_id: order.contact_id } });
-    await mail(dataId, order, `Your return for ${order.number} is complete`, resolution === "refund" ? `We have refunded ${formatMoney(fresh.refund_minor, order.currency)} to your original payment method.` : `We will issue store credit of ${formatMoney(fresh.refund_minor, order.currency)}.`, "return_refunded", { return_id: id });
+    await mail(dataId, order, `Your return for ${order.number} is complete`, resolution === "refund" ? `We have refunded ${formatMoney(fresh.refund_minor, order.currency)} to your original payment method.` : `We have issued store credit of ${formatMoney(fresh.refund_minor, order.currency)} as a gift card; the code is in a separate email.`, "return_refunded", { return_id: id });
   }
   void recordAudit({ dataId, userId: opts.actorId ?? null }, { action: "return.refunded", entity: "return", entityId: id, after: { resolution, refund_minor: fresh.refund_minor } });
   return { ret: fresh, refunded_minor: fresh.refund_minor };
@@ -332,6 +345,7 @@ export interface PublicReturnInfo {
 export async function publicReturnInfo(dataId: string, order: OrderDTO): Promise<PublicReturnInfo> {
   const [el, used, existing] = await Promise.all([returnEligibility(dataId, order), alreadyReturned(dataId, order.id), publicReturnsForOrder(dataId, order.id)]);
   const lines = order.items
+    .filter((i) => i.unit_minor > 0)
     .map((i) => ({ product_id: i.product_id ?? null, description: i.description, qty_available: Math.max(0, Math.floor(i.qty) - (used.get(i.product_id ?? i.description) ?? 0)) }))
     .filter((l) => l.qty_available > 0);
   return { eligible: el.eligible && lines.length > 0, reason: el.eligible && lines.length === 0 ? "Everything on this order is already in a return" : el.reason, window_days: el.window_days, deadline: el.deadline, lines, existing };

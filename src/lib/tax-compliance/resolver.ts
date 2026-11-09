@@ -154,7 +154,10 @@ function resolveIndia<L extends TaxableLine>(i: ResolveInput<L>): ResolvedTax<L>
   if (pos.warning) meta.warnings.push(pos.warning);
   if (c.tax_registration_type === "b2b" && !(c.tax_number && validateGstin(c.tax_number).valid)) meta.warnings.push("B2B buyer is missing a valid GSTIN.");
 
-  const rc = i.reverseCharge ?? profile.settings.reverse_charge_default ?? false;
+  // A caller-supplied reverse-charge flag only zero-rates a sale to a buyer with a valid GSTIN; otherwise it is ignored.
+  const buyerGstinOk = Boolean(c.tax_number && validateGstin(c.tax_number).valid);
+  if (i.reverseCharge === true && !buyerGstinOk) meta.warnings.push("Reverse charge requested but the buyer has no valid GSTIN: not applied.");
+  const rc = i.reverseCharge === true ? buyerGstinOk : (i.reverseCharge ?? profile.settings.reverse_charge_default ?? false);
   if (rc) {
     meta.reverse_charge = true;
     meta.legends.push(LEGENDS.in_reverse_charge);
@@ -297,6 +300,9 @@ async function resolveUs<L extends TaxableLine>(i: ResolveInput<L>): Promise<Res
   }
   meta.place_of_supply = state;
   const nexus = (profile.settings.nexus_states ?? []).map((s) => s.toUpperCase());
+  // The seller's home state is always a nexus state (physical presence), even when the list is empty.
+  const home = (profile.state_province ?? "").trim().toUpperCase().replace(/^US-/, "");
+  if (US_STATES[home] && !nexus.includes(home)) nexus.push(home);
   if (!nexus.includes(state)) {
     meta.legends.push(LEGENDS.us_no_nexus);
     meta.vat_category = "O";

@@ -84,3 +84,15 @@ describe("VIES", () => {
     expect((await lookupVies("DE1", {})).valid).toBe(false);
   });
 });
+
+describe("review fixes (phase 11 cr)", () => {
+  it("accepts algorithmically valid GSTINs from independent computation", () => {
+    for (const g of ["29AAACR5055K1Z3", "07AAACG1234F1Z6", "24AAACC1206D1ZM", "19AABCU9603R1ZK"]) expect(validateGstin(g).valid).toBe(true);
+  });
+  it("limits UK GD/HA ranges", () => {
+    expect(validateUkVat("GBGD499").valid).toBe(true);
+    expect(validateUkVat("GBGD500").valid).toBe(false);
+    expect(validateUkVat("GBHA500").valid).toBe(true);
+    expect(validateUkVat("GBHA499").valid).toBe(false);
+  });
+});

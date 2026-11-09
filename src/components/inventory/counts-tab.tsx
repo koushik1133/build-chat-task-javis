@@ -221,11 +221,11 @@ function CountDialog({ id, onClose, onApplied }: { id: string; onClose: () => vo
               {lines.map((l) => {
                 const v = varianceOf(l);
                 return (
-                  <li key={l.id} className="flex items-center justify-between gap-3 px-3 py-2">
-                    <span className="min-w-0 truncate text-sm">
+                  <li key={l.id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:py-2">
+                    <span className="min-w-0 break-words text-sm">
                       {l.product_name ?? l.product_id} <span className="text-xs text-muted-foreground">expected {l.expected_qty}</span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-2">
+                    <span className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
                       {v !== null && v !== 0 && (
                         <span className={cn("text-xs font-semibold tabular-nums", v < 0 ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300")}>
                           {v > 0 ? `+${v}` : v}
@@ -240,7 +240,7 @@ function CountDialog({ id, onClose, onApplied }: { id: string; onClose: () => vo
                         value={entry[l.product_id] ?? ""}
                         disabled={locked}
                         onChange={(e) => setEntry((prev) => ({ ...prev, [l.product_id]: e.target.value }))}
-                        className={cn("w-24", v !== null && v !== 0 && "border-amber-500")}
+                        className={cn("h-11 w-28 text-base", v !== null && v !== 0 && "border-amber-500")}
                       />
                     </span>
                   </li>

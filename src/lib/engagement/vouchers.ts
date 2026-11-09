@@ -112,6 +112,15 @@ export async function recordRedemption(dataId: string, voucher: VoucherDTO, enti
     if (c === "23505") return false;
     throw err;
   }
+  if (voucher.per_contact_limit !== null && contactId) {
+    // Enforce per-contact limit atomically-enough: insert first, then count. Concurrent checkouts both see the overshoot and both back out.
+    const used = await contactUses(dataId, voucher.id, contactId);
+    if (used > voucher.per_contact_limit) {
+      await query(`DELETE FROM voucher_redemptions WHERE user_id = $1 AND voucher_id = $2 AND entity_kind = $3 AND entity_id = $4`, [dataId, voucher.id, entity.kind, entity.id]);
+      await query(`UPDATE vouchers SET used_count = CASE WHEN used_count > 0 THEN used_count - 1 ELSE 0 END WHERE id = $1 AND user_id = $2`, [voucher.id, dataId]);
+      throw new Error("You have already used this code the maximum number of times.");
+    }
+  }
   void emitEvent(dataId, { type: "voucher.redeemed", entity: "voucher", entityId: voucher.id, data: { code: voucher.code_upper, entity_kind: entity.kind, entity_id: entity.id, amount_minor: amountMinor } });
   return true;
 }

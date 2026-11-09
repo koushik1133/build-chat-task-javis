@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Loader2, Lock, Store, Truck } from "lucide-react";
+import { Check, Loader2, Lock, Store, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Input, Textarea } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
@@ -171,17 +171,6 @@ export default function CheckoutPage() {
                     })}
                   </fieldset>
                 )}
-                {effective === "ship" && options && (
-                  <fieldset className="mb-4 space-y-2">
-                    <legend className="mb-1 text-sm font-medium">Shipping method</legend>
-                    {options.length === 0 ? <p className="text-sm text-muted-foreground">We do not ship to this address.</p> : options.map((o) => (
-                      <label key={o.id} className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-lg border border-border p-3 text-sm focus-within:ring-2 focus-within:ring-ring has-[:checked]:border-primary">
-                        <span className="flex min-w-0 items-center gap-2"><input type="radio" name="ship-option" aria-label={`${o.label}, ${o.price_minor === 0 ? "free" : money(o.price_minor, shop.currency)}`} checked={optionId === o.id} onChange={() => setOptionId(o.id)} className="h-4 w-4 accent-primary" /><span className="break-words font-medium">{o.label}</span>{o.days_min !== null && <span className="text-xs text-muted-foreground">{o.days_min === o.days_max ? `${o.days_min} days` : `${o.days_min}-${o.days_max} days`}</span>}</span>
-                        <span className="shrink-0 tabular-nums">{o.price_minor === 0 ? "Free" : money(o.price_minor, shop.currency)}</span>
-                      </label>
-                    ))}
-                  </fieldset>
-                )}
                 {effective === "ship" && (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="Address line 1" required className="sm:col-span-2">
@@ -203,6 +192,17 @@ export default function CheckoutPage() {
                       <Input value={form.country} onChange={set("country")} autoComplete="shipping country-name" required maxLength={64} />
                     </Field>
                   </div>
+                )}
+                {effective === "ship" && options && (
+                  <fieldset className="mt-4 space-y-2" aria-live="polite">
+                    <legend className="mb-1 text-sm font-medium">Shipping option</legend>
+                    {options.length === 0 ? <p className="text-sm text-muted-foreground">We do not ship to this address.</p> : options.map((o) => (
+                      <label key={o.id} className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-lg border border-border p-3 text-sm touch-manipulation focus-within:ring-2 focus-within:ring-ring has-[:checked]:border-primary">
+                        <span className="flex min-w-0 items-center gap-2"><input type="radio" name="ship-option" aria-label={`${o.label}, ${o.price_minor === 0 ? "free" : money(o.price_minor, shop.currency)}`} checked={optionId === o.id} onChange={() => setOptionId(o.id)} className="h-4 w-4 accent-primary" /><span className="break-words font-medium">{o.label}</span>{o.days_min !== null && <span className="text-xs text-muted-foreground">{o.days_min === o.days_max ? `${o.days_min} days` : `${o.days_min}-${o.days_max} days`}</span>}</span>
+                        <span className="flex shrink-0 items-center gap-2 tabular-nums">{o.price_minor === 0 ? "Free" : money(o.price_minor, shop.currency)}{optionId === o.id && <Check className="h-4 w-4 text-primary" aria-hidden />}</span>
+                      </label>
+                    ))}
+                  </fieldset>
                 )}
               </section>
             )}

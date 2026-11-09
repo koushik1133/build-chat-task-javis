@@ -104,7 +104,12 @@ export function validateUkVat(input: string): ValidationResult {
   let v = clean(input);
   if (v.startsWith("GB")) v = v.slice(2);
   else return bad("UK VAT numbers start with GB", v);
-  if (/^(GD\d{3}|HA\d{3})$/.test(v)) return ok(`GB${v}`);
+  // Government departments GD000-499, health authorities HA500-999.
+  const gh = /^(GD|HA)(\d{3})$/.exec(v);
+  if (gh) {
+    const n = Number(gh[2]);
+    return (gh[1] === "GD" ? n <= 499 : n >= 500) ? ok(`GB${v}`) : bad("UK VAT government/health number out of range", `GB${v}`);
+  }
   if (!/^(\d{9}|\d{12})$/.test(v)) return bad("UK VAT must be GB + 9 or 12 digits", `GB${v}`);
   const d = v.slice(0, 9).split("").map(Number);
   const weights = [8, 7, 6, 5, 4, 3, 2];
@@ -167,7 +172,7 @@ export async function lookupVies(vatId: string, env: Record<string, string | und
   const prefix = fmt.normalized.slice(0, 2);
   const num = fmt.normalized.slice(2);
   try {
-    const res = await fetch(`${VIES_HOST}/${encodeURIComponent(prefix)}/vat/${encodeURIComponent(num)}`, { signal: AbortSignal.timeout(8000), headers: { accept: "application/json" } });
+    const res = await fetch(`${VIES_HOST}/${encodeURIComponent(prefix)}/vat/${encodeURIComponent(num)}`, { signal: AbortSignal.timeout(8000), redirect: "error", headers: { accept: "application/json" } });
     if (!res.ok) return { valid: false, checked: "live", reason: `VIES returned ${res.status}` };
     const j = (await res.json().catch(() => null)) as { isValid?: boolean; valid?: boolean; name?: string } | null;
     const valid = Boolean(j?.isValid ?? j?.valid);

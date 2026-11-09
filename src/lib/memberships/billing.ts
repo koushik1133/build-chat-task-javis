@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { query, queryOne } from "@/lib/dsql";
 import { emitEvent } from "@/lib/events/bus";
 import { createInvoice, getInvoice, recordPayment, type InvoiceDTO } from "@/lib/money/invoices";
-import { getProvider } from "@/lib/payments";
+import { getProvider, simulatedPaymentsAllowed } from "@/lib/payments";
 import { logger } from "@/lib/log/logger";
 import { formatMoney } from "@/lib/money/items";
 import { expireSubscription, recordFailure } from "./dunning";
@@ -126,6 +126,8 @@ async function attemptPayment(dataId: string, sub: SubRow, plan: PlanRowLite, ch
   if (sub.payment_ref) {
     try {
       const provider = getProvider(sub.provider);
+      // A simulated test card never settles real money: refuse it where simulated payments are not allowed (production).
+      if (provider.id === "simulated" && !simulatedPaymentsAllowed()) return { outcome: "failed", error: "simulated_payments_disabled" };
       const res = await provider.chargeSaved({
         paymentRef: sub.payment_ref,
         amountMinor: outstanding,

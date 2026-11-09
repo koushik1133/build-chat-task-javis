@@ -139,14 +139,26 @@ export async function applyCount(dataId: string, id: string, actorId?: string | 
   if (!c) throw new CountError("not_found", "Count not found");
   if (c.status === "applied") return c;
   if (c.status !== "counted") throw new CountError("bad_state", "Enter counted quantities before applying");
-  for (const l of c.lines) {
-    if (l.variance === null || l.variance === 0) continue;
-    const done = await queryOne<{ id: string }>(
-      `SELECT id FROM stock_movements WHERE user_id = $1 AND ref_kind = 'stock_count' AND ref_id = $2 AND product_id = $3 LIMIT 1`,
-      [dataId, id, l.product_id]
-    );
-    if (done) continue;
-    await adjustStock(dataId, l.product_id, { kind: "adjust", qty: l.variance, ref_kind: "stock_count", ref_id: id, location_id: c.location_id, note: `Count variance (expected ${l.expected_qty}, counted ${l.counted_qty})` }, actorId ?? null);
+  // Claim the apply (applied_at doubles as the lease) so two concurrent requests can never both post the variances.
+  const claimed = await query<{ id: string }>(`UPDATE stock_counts SET applied_at = NOW() WHERE id = $1 AND user_id = $2 AND status = 'counted' AND applied_at IS NULL RETURNING id`, [id, dataId]);
+  if (claimed.length === 0) {
+    const again = await getCount(dataId, id);
+    if (again?.status === "applied") return again;
+    throw new CountError("bad_state", "This count is already being applied");
+  }
+  try {
+    for (const l of c.lines) {
+      if (l.variance === null || l.variance === 0) continue;
+      const done = await queryOne<{ id: string }>(
+        `SELECT id FROM stock_movements WHERE user_id = $1 AND ref_kind = 'stock_count' AND ref_id = $2 AND product_id = $3 LIMIT 1`,
+        [dataId, id, l.product_id]
+      );
+      if (done) continue;
+      await adjustStock(dataId, l.product_id, { kind: "adjust", qty: l.variance, ref_kind: "stock_count", ref_id: id, location_id: c.location_id, note: `Count variance (expected ${l.expected_qty}, counted ${l.counted_qty})` }, actorId ?? null);
+    }
+  } catch (err) {
+    await query(`UPDATE stock_counts SET applied_at = NULL WHERE id = $1 AND user_id = $2 AND status = 'counted'`, [id, dataId]).catch(() => undefined);
+    throw err;
   }
   await query(`UPDATE stock_counts SET status = 'applied', applied_at = NOW() WHERE id = $1 AND user_id = $2 AND status = 'counted'`, [id, dataId]);
   const out = await getCount(dataId, id);
